@@ -60,14 +60,11 @@ begin
     where id = p_id and status = 'pending';
 end $$;
 
-drop policy q_ins on public.quotes;
-drop policy q_upd on public.quotes;
-drop policy q_del on public.quotes;
-create policy q_ins on public.quotes for insert to authenticated
+alter policy q_ins on public.quotes
   with check ((select public.my_role()) in ('procurement','admin') and exists (select 1 from public.material_requests r where r.id = request_id and r.stage = 'procurement'));
-create policy q_upd on public.quotes for update to authenticated
+alter policy q_upd on public.quotes
   using ((select public.my_role()) in ('procurement','admin') and exists (select 1 from public.material_requests r where r.id = request_id and r.stage = 'procurement'));
-create policy q_del on public.quotes for delete to authenticated
+alter policy q_del on public.quotes
   using ((select public.my_role()) in ('procurement','admin') and exists (select 1 from public.material_requests r where r.id = request_id and r.stage = 'procurement'));
 
 -- Admin can correct or delete any record.
