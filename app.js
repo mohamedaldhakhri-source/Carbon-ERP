@@ -84,13 +84,14 @@ function stageInfo(r) {
 }
 function canActOn(r) {
   const s = STAGES.find(x => x.k === r.stage); if (!s || !s.role || !me) return false;
+  if (me.role === 'admin') return true;
   if (s.role !== me.role) return false;
   if (s.role === 'head' && me.dept && me.dept !== r.dept) return false;
   return true;
 }
 function myQueue() {
   const reqs = S.requests.filter(canActOn);
-  const pc = me && me.role === 'gm' ? S.petty.filter(c => c.status === 'pending') : [];
+  const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
   return { reqs, pc, n: reqs.length + pc.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
@@ -153,16 +154,13 @@ async function refresh() { try { await loadAll(); render(); } catch (e) { toast(
 
 /* ---------- auth ---------- */
 function vAuth() {
-  const signup = ui.authMode === 'signup';
   return '<div class="auth"><div class="box">' + LOGO + '<div class="inner">' +
-    '<h1>' + (signup ? 'حساب جديد' : 'تسجيل الدخول') + '</h1>' + (ui.authErr ? '<div class="err">' + esc(ui.authErr) + '</div>' : '') +
-    '<form class="f" data-form="' + (signup ? 'signup' : 'login') + '">' +
-    (signup ? '<label class="fld"><span>الاسم الكامل</span><input id="a-name" required autocomplete="name"></label>' : '') +
+    '<h1>تسجيل الدخول</h1>' + (ui.authErr ? '<div class="err">' + esc(ui.authErr) + '</div>' : '') +
+    '<form class="f" data-form="login">' +
     '<label class="fld"><span>البريد الإلكتروني</span><input id="a-email" type="email" required autocomplete="email" dir="ltr"></label>' +
-    '<label class="fld"><span>كلمة المرور</span><input id="a-pass" type="password" required minlength="6" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" dir="ltr"></label>' +
-    '<button class="btn pri" type="submit">' + (signup ? 'إنشاء الحساب' : 'دخول') + '</button></form>' +
-    '<span class="small muted">' + (signup ? 'عندك حساب؟ ' : 'موظف جديد؟ ') + '<button class="linkbtn" data-act="authMode">' + (signup ? 'سجّل دخول' : 'أنشئ حساب') + '</button></span>' +
-    (signup ? '<span class="hint">بعد إنشاء الحساب، يفعّله مدير النظام ويحدد دورك.</span>' : '') + '</div></div></div>';
+    '<label class="fld"><span>كلمة المرور</span><input id="a-pass" type="password" required minlength="6" autocomplete="current-password" dir="ltr"></label>' +
+    '<button class="btn pri" type="submit">دخول</button></form>' +
+    '<span class="hint">ما عندك حساب أو نسيت كلمة المرور؟ تواصل مع مدير النظام.</span></div></div></div>';
 }
 function vPending() {
   return '<div class="auth"><div class="box">' + LOGO + '<div class="inner"><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div></div>';
@@ -275,7 +273,7 @@ function reqTable(list, showProj) {
 }
 function pettyTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
-  const gm = me.role === 'gm';
+  const gm = me.role === 'gm' || me.role === 'admin';
   return '<div class="tbl"><table><thead><tr><th>الرقم</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التفاصيل</th><th class="n">المبلغ</th><th>مقدم الطلب</th><th>الحالة</th></tr></thead><tbody>' +
     list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(P(c.pid) ? P(c.pid).short : '') + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'الفاتورة') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
       (c.status === 'pending' ? (gm ? '<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="' + c.id + '">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="' + c.id + '">رفض</button></div>' : '<span class="pill p-warn">بانتظار المدير العام</span>') : c.status === 'approved' ? '<span class="pill p-ok">معتمد</span>' : '<span class="pill p-bad">مرفوض</span>') + '</td></tr>').join('') + '</tbody></table></div>';
@@ -366,10 +364,18 @@ function vInbox() {
 }
 function vUsers() {
   if (!isAdmin()) return '<div class="empty">هذه الصفحة لمدير النظام وصاحب الشركة والمدير العام.</div>';
-  const pend = S.profiles.filter(u => u.role === 'pending').length;
-  return '<div class="head"><div class="t"><h1>المستخدمين</h1><span class="muted">' + S.profiles.length + ' مستخدم' + (pend ? '، ' + pend + ' بانتظار التفعيل' : '') + '</span></div></div>' +
-    '<div class="card"><p class="muted small" style="margin-top:0">كل موظف ينشئ حسابه من صفحة الدخول، وبعدها تحدد هنا دوره. رئيس القسم يعتمد طلبات قسمه فقط؛ اتركه بدون قسم إذا يعتمد كل الأقسام.</p><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>القسم</th><th></th></tr></thead><tbody>' +
-    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-warn">جديد</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور">' + Object.entries(ROLES).map(([k, l]) => '<option value="' + k + '"' + (u.role === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td><td><select id="ud-' + u.id + '" aria-label="القسم"><option value="">—</option>' + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (u.dept === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></td><td><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button></td></tr>').join('') + '</tbody></table></div></div>';
+  const sysAdmin = me.role === 'admin';
+  const roleOpts = sel => Object.entries(ROLES).filter(([k]) => k !== 'pending' || sel === 'pending').map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + (k === 'pending' ? 'موقوف' : l) + '</option>').join('');
+  const deptOpts = sel => '<option value="">—</option>' + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + l + '</option>').join('');
+  let h = '<div class="head"><div class="t"><h1>المستخدمين</h1><span class="muted">' + S.profiles.length + ' مستخدم</span></div></div>';
+  if (sysAdmin) h += '<div class="card"><h2>إضافة موظف</h2><form class="f" data-form="newUser"><div class="fr"><label class="fld"><span>الاسم الكامل</span><input id="nu-name" required></label><label class="fld"><span>البريد الإلكتروني (للدخول)</span><input id="nu-email" type="email" required dir="ltr"></label></div>' +
+    '<div class="fr"><label class="fld"><span>كلمة المرور</span><input id="nu-pass" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><label class="fld"><span>الدور</span><select id="nu-role" required>' + roleOpts('site') + '</select></label></div>' +
+    '<div class="fr"><label class="fld"><span>القسم</span><select id="nu-dept">' + deptOpts('') + '</select></label><div class="fld" style="justify-content:flex-end"><button class="btn pri" type="submit">إضافة الموظف</button></div></div>' +
+    '<span class="hint">أعطِ الموظف بريده وكلمة المرور، ويقدر يدخل مباشرة. رئيس القسم يعتمد طلبات قسمه فقط، واتركه بدون قسم إذا يعتمد كل الأقسام.</span></form></div>';
+  h += '<div class="card"><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>القسم</th><th></th></tr></thead><tbody>' +
+    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-idle">موقوف</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور"' + (u.id === me.id ? ' disabled' : '') + '>' + roleOpts(u.role) + '</select></td><td><select id="ud-' + u.id + '" aria-label="القسم">' + deptOpts(u.dept) + '</select></td><td><div class="actions"><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button>' +
+      (sysAdmin ? '<button class="btn sm" data-act="resetPass" data-v="' + u.id + '">كلمة مرور جديدة</button>' + (u.id !== me.id ? '<button class="btn sm bad" data-act="delUser" data-v="' + u.id + '">حذف</button>' : '') : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
+  return h;
 }
 function vNewProject() {
   if (!isAdmin()) return '<div class="empty">إضافة المشاريع لصاحب الشركة والمدير العام.</div>';
@@ -406,6 +412,15 @@ function parseDate(s) {
   if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
   if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/))) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
   return null;
+}
+
+async function callFn(body, okMsg) {
+  const { data, error } = await sb.functions.invoke('manage-user', { body });
+  let msg = data && data.error;
+  if (error && !msg) { try { const j = await error.context.json(); msg = j.error; } catch (e) { msg = errMsg(error); } }
+  if (msg) { toast(msg, true); return false; }
+  if (okMsg) toast(okMsg);
+  return true;
 }
 
 /* ---------- modals ---------- */
@@ -480,6 +495,9 @@ const A = {
   pcOk: async d => { await run(sb.rpc('decide_petty', { p_id: d.v, p_approve: true }), 'اعتُمد وأُضيف لمصروفات المشروع'); refresh(); },
   pcNo: async d => { await run(sb.rpc('decide_petty', { p_id: d.v, p_approve: false }), 'تم الرفض'); refresh(); },
   voApprove: d => { const v = S.variations.find(x => x.id === d.v); modal('رفع موافقة العميل - ' + v.title, '<form class="f" data-form="voFile" data-v="' + v.id + '"><label class="fld"><span>ملف الموافقة</span><input id="vf" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع واعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  resetPass: d => { const u = S.profiles.find(x => x.id === d.v); modal('كلمة مرور جديدة - ' + u.full_name, '<form class="f" data-form="resetPass" data-v="' + u.id + '"><label class="fld"><span>كلمة المرور الجديدة</span><input id="rp" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  delUser: d => { const u = S.profiles.find(x => x.id === d.v); modal('حذف ' + u.full_name, '<p>بيتم حذف حساب <b>' + esc(u.full_name) + '</b> نهائياً وما يقدر يدخل النظام. إذا عنده طلبات مسجلة، الأفضل توقف حسابه بتغيير دوره إلى "موقوف" بدل الحذف.</p><div class="actions"><button class="btn bad" data-act="delUserGo" data-v="' + u.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'); },
+  delUserGo: async d => { if (await callFn({ action: 'delete', id: d.v }, 'تم حذف الحساب')) { closeModal(); refresh(); } },
   saveUser: async d => { await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: document.getElementById('ud-' + d.v).value }), 'تم الحفظ'); refresh(); }
 };
 document.addEventListener('click', e => {
@@ -511,6 +529,10 @@ document.addEventListener('submit', async e => {
       const { data, error } = await sb.auth.signUp({ email: v('a-email').trim(), password: v('a-pass'), options: { data: { full_name: v('a-name').trim() }, emailRedirectTo: location.origin + location.pathname } });
       if (error) { ui.authErr = error.message; render(); }
       else if (!data.session) { ui.authMode = 'login'; ui.authErr = ''; render(); toast('أرسلنا رسالة تأكيد لبريدك. أكّده ثم سجّل دخول.'); }
+    } else if (kind === 'newUser') {
+      if (await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: v('nu-dept') }, 'أُضيف الموظف ويقدر يدخل الحين')) { f.reset(); refresh(); }
+    } else if (kind === 'resetPass') {
+      if (await callFn({ action: 'password', id: f.dataset.v, password: v('rp') }, 'تم تغيير كلمة المرور')) closeModal();
     } else if (kind === 'req') {
       const items = [...f.querySelectorAll('.line')].map(l => ({ description: l.querySelector('.l-d').value.trim(), qty: +l.querySelector('.l-q').value, unit: l.querySelector('.l-u').value.trim() || 'عدد' })).filter(i => i.description);
       const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
