@@ -3,7 +3,7 @@
 const sb = supabase.createClient(window.CARBON_CONFIG.supabaseUrl, window.CARBON_CONFIG.supabaseKey);
 
 const DEPTS = { arch: 'معماري', interior: 'تصميم داخلي', fitout: 'فيت أوت', joinery: 'منجرة', contracting: 'مقاولات', supervision: 'إشراف' };
-const ROLES = { owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', finance: 'المالية', pending: 'بانتظار التفعيل' };
+const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', finance: 'المالية', pending: 'بانتظار التفعيل' };
 const STAGES = [
   { k: 'dept', l: 'موافقة رئيس القسم', role: 'head' },
   { k: 'procurement', l: 'عروض الأسعار', role: 'procurement' },
@@ -42,7 +42,7 @@ const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
 const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
-const isAdmin = () => me && (me.role === 'owner' || me.role === 'gm');
+const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
 
 function contract(p) { return p.boq.reduce((a, b) => a + b.t, 0); }
@@ -161,10 +161,10 @@ function vAuth() {
     '<label class="fld"><span>كلمة المرور</span><input id="a-pass" type="password" required minlength="6" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" dir="ltr"></label>' +
     '<button class="btn pri" type="submit">' + (signup ? 'إنشاء الحساب' : 'دخول') + '</button></form>' +
     '<span class="small muted">' + (signup ? 'عندك حساب؟ ' : 'موظف جديد؟ ') + '<button class="linkbtn" data-act="authMode">' + (signup ? 'سجّل دخول' : 'أنشئ حساب') + '</button></span>' +
-    (signup ? '<span class="hint">بعد إنشاء الحساب، يفعّله صاحب الشركة أو المدير العام ويحدد دورك.</span>' : '') + '</div></div>';
+    (signup ? '<span class="hint">بعد إنشاء الحساب، يفعّله مدير النظام ويحدد دورك.</span>' : '') + '</div></div>';
 }
 function vPending() {
-  return '<div class="auth"><div class="box"><div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج صاحب الشركة أو المدير العام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div>';
+  return '<div class="auth"><div class="box"><div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div>';
 }
 
 /* ---------- views ---------- */
@@ -225,7 +225,7 @@ function vProject(id) {
   const p = P(id); if (!p) return '<div class="empty">المشروع غير موجود</div>';
   const hh = health(p), pr = progress(p), c = contract(p), va = varsApproved(p), b = budget(p), s = spent(p), cm = committed(p), dl = daysLeft(p);
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
-  const canProg = ['site', 'head', 'gm', 'owner'].includes(me.role) && p.status === 'active';
+  const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(p.short) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'مشروع حكومي' : 'مشروع خاص') + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">' + esc(p.client) + '</span></div>' +
     '<div class="actions">' + (p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">حالة المشروع</button>' : '') + '</div></div>';
   if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
@@ -364,7 +364,7 @@ function vInbox() {
   return h;
 }
 function vUsers() {
-  if (!isAdmin()) return '<div class="empty">هذه الصفحة لصاحب الشركة والمدير العام.</div>';
+  if (!isAdmin()) return '<div class="empty">هذه الصفحة لمدير النظام وصاحب الشركة والمدير العام.</div>';
   const pend = S.profiles.filter(u => u.role === 'pending').length;
   return '<div class="head"><div class="t"><h1>المستخدمين</h1><span class="muted">' + S.profiles.length + ' مستخدم' + (pend ? '، ' + pend + ' بانتظار التفعيل' : '') + '</span></div></div>' +
     '<div class="card"><p class="muted small" style="margin-top:0">كل موظف ينشئ حسابه من صفحة الدخول، وبعدها تحدد هنا دوره. رئيس القسم يعتمد طلبات قسمه فقط؛ اتركه بدون قسم إذا يعتمد كل الأقسام.</p><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>القسم</th><th></th></tr></thead><tbody>' +
