@@ -1,0 +1,751 @@
+<title>نظام كربون للمشاريع</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Readex+Pro:wght@400;500;600&display=swap">
+<style>
+/* Layout: right-hand sidebar (RTL start) on desktop, bottom tab bar on phone; content is cards of tables built for scanning. */
+:root{
+  --bg:#F3F5F6; --surface:#FFFFFF; --sunk:#EBEEF0; --ink:#1A2026; --muted:#5B6570; --line:#DDE2E6;
+  --accent:#0D6772; --accent-ink:#FFFFFF; --accent-soft:#DDEFF0;
+  --ok:#2C7A4B; --ok-soft:#E1F2E7; --warn:#A8670E; --warn-soft:#FBEFD9; --bad:#B4341B; --bad-soft:#FBE3DD; --idle:#6B7280; --idle-soft:#ECEEF1;
+  --font:"IBM Plex Sans Arabic","Segoe UI",Tahoma,system-ui,sans-serif;
+  --display:"Readex Pro","IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111518; --surface:#192024; --sunk:#141A1D; --ink:#E5E9EC; --muted:#99A4AE; --line:#2A3339;
+  --accent:#4DB3BE; --accent-ink:#0B1F22; --accent-soft:#163338;
+  --ok:#5CC487; --ok-soft:#173225; --warn:#E3A84A; --warn-soft:#352813; --bad:#F07F66; --bad-soft:#3A1E18; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111518; --surface:#192024; --sunk:#141A1D; --ink:#E5E9EC; --muted:#99A4AE; --line:#2A3339;
+  --accent:#4DB3BE; --accent-ink:#0B1F22; --accent-soft:#163338;
+  --ok:#5CC487; --ok-soft:#173225; --warn:#E3A84A; --warn-soft:#352813; --bad:#F07F66; --bad-soft:#3A1E18; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14.5px;line-height:1.55}
+*{box-sizing:border-box}
+h1,h2,h3{font-family:var(--display);font-weight:600;margin:0;text-wrap:balance;line-height:1.3}
+h1{font-size:1.45rem} h2{font-size:1.1rem} h3{font-size:.98rem}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums;font-family:var(--display)}
+.muted{color:var(--muted)}
+.small{font-size:.84rem}
+
+.app{display:grid;grid-template-columns:232px 1fr;min-height:100%}
+.side{background:var(--surface);border-inline-end:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 6px}
+.mark{width:34px;height:34px;border-radius:8px;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-family:var(--display);font-weight:600;font-size:1.05rem}
+.brand b{font-family:var(--display);font-size:1.05rem;display:block;line-height:1.1}
+.brand span{font-size:.75rem;color:var(--muted)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--ink);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--sunk)}
+.nav a.on{background:var(--accent-soft);color:var(--accent)}
+.nav svg{width:18px;height:18px;flex:none}
+.badge{margin-inline-start:auto;background:var(--bad);color:#fff;border-radius:99px;font-size:.72rem;padding:0 7px;min-width:20px;text-align:center;font-family:var(--display)}
+.rolebox{margin-top:auto;background:var(--sunk);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:6px}
+.rolebox label{font-size:.75rem;color:var(--muted);letter-spacing:.02em}
+.rolebox select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--surface)}
+.rolebox button{background:none;border:0;color:var(--muted);font-size:.75rem;text-align:start;padding:2px 0;cursor:pointer;text-decoration:underline}
+
+main{min-width:0;padding-block:22px 90px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.demo{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:7px 12px;font-size:.82rem}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;justify-content:space-between}
+.head .t{display:flex;flex-direction:column;gap:4px;min-width:0}
+.crumb{font-size:.8rem;color:var(--muted)} .crumb a{color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500;text-decoration:none;color:var(--ink);white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.bad{color:var(--bad);border-color:var(--bad)}
+.btn.sm{padding:5px 10px;font-size:.85rem}
+.btn:focus-visible,.nav a:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;min-width:0}
+.card>h2,.card>.ch{margin-bottom:12px}
+.ch{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .l{font-size:.8rem;color:var(--muted)}
+.kpi .v{font-family:var(--display);font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.3}
+.kpi .v small{font-size:.8rem;font-weight:400;color:var(--muted)}
+.kpi .s{font-size:.8rem;color:var(--muted)}
+.kpi.alert{border-color:var(--bad);background:var(--bad-soft)} .kpi.alert .v{color:var(--bad)}
+
+.seg{display:inline-flex;background:var(--sunk);border-radius:8px;padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:500;color:var(--muted)}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:.78rem;font-weight:600;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.p-ok{background:var(--ok-soft);color:var(--ok)} .p-warn{background:var(--warn-soft);color:var(--warn)} .p-bad{background:var(--bad-soft);color:var(--bad)} .p-idle{background:var(--idle-soft);color:var(--idle)} .p-acc{background:var(--accent-soft);color:var(--accent)}
+.tag{display:inline-block;padding:1px 7px;border-radius:5px;background:var(--sunk);font-size:.75rem;color:var(--muted);margin:1px}
+.gov{background:var(--accent-soft);color:var(--accent)}
+
+.tbl{overflow-x:auto;margin:0 -16px;padding:0 16px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{font-weight:600;font-size:.76rem;color:var(--muted);text-align:start;padding:8px 8px;border-bottom:1px solid var(--line);white-space:nowrap;letter-spacing:.02em}
+td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tr.click{cursor:pointer} tr.click:hover td{background:var(--sunk)}
+td.n,th.n{text-align:end;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.sec td{background:var(--sunk);font-weight:600}
+
+.bar{position:relative;height:7px;background:var(--sunk);border-radius:99px;min-width:90px}
+.bar i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:99px;background:var(--accent)}
+.bar i.ok{background:var(--ok)} .bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
+.bar b{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);border-radius:1px}
+.barrow{display:flex;align-items:center;gap:8px} .barrow .bar{flex:1}
+.barrow span{font-size:.8rem;min-width:38px;font-variant-numeric:tabular-nums}
+
+.attn{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.ac{border:1px solid var(--line);border-inline-start:4px solid var(--bad);border-radius:8px;padding:12px 14px;background:var(--surface);cursor:pointer;display:flex;flex-direction:column;gap:6px}
+.ac.warn{border-inline-start-color:var(--warn)}
+.ac:hover{background:var(--sunk)}
+.ac .why{font-size:.84rem;color:var(--muted)}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs button{border:0;background:none;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.tabs .c{font-size:.72rem;background:var(--sunk);border-radius:99px;padding:0 6px;margin-inline-start:4px}
+
+.grid2{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;align-items:start}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:.9rem}
+.dl dt{color:var(--muted)} .dl dd{margin:0;font-weight:500}
+
+.steps{display:flex;gap:0;overflow-x:auto;padding-bottom:4px}
+.step{flex:1;min-width:112px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;position:relative;font-size:.8rem;color:var(--muted)}
+.step::after{content:"";position:absolute;top:13px;inset-inline-start:50%;width:100%;height:2px;background:var(--line);z-index:0}
+.step:last-child::after{display:none}
+.step .dot{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--sunk);border:2px solid var(--line);z-index:1;font-family:var(--display);font-size:.8rem;color:var(--muted)}
+.step.done .dot{background:var(--ok);border-color:var(--ok);color:#fff}
+.step.done::after{background:var(--ok)}
+.step.cur .dot{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.step.cur{color:var(--ink);font-weight:600}
+.step.rej .dot{background:var(--bad);border-color:var(--bad);color:#fff}
+
+.panel{border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel.wait{border-color:var(--line);background:var(--sunk)}
+.check{display:flex;flex-direction:column;gap:8px}
+.check .row{display:flex;justify-content:space-between;gap:10px;font-size:.9rem;border-bottom:1px dashed var(--line);padding-bottom:6px}
+.check .row:last-child{border-bottom:0}
+.flag{padding:8px 12px;border-radius:8px;font-size:.88rem;font-weight:500}
+.flag.ok{background:var(--ok-soft);color:var(--ok)} .flag.bad{background:var(--bad-soft);color:var(--bad)} .flag.warn{background:var(--warn-soft);color:var(--warn)}
+
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.log li{display:grid;grid-template-columns:10px 1fr;gap:10px;font-size:.86rem}
+.log li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:7px}
+.log li.r::before{background:var(--bad)}
+
+form.f{display:flex;flex-direction:column;gap:12px}
+.fr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>span{font-size:.8rem;color:var(--muted);font-weight:500}
+input,select,textarea{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+textarea{min-height:70px;resize:vertical}
+.lines{display:flex;flex-direction:column;gap:6px}
+.line{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,1fr) minmax(0,1fr) auto;gap:6px}
+.x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0 6px}
+.radio{display:flex;gap:8px;flex-wrap:wrap}
+.radio label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;background:var(--surface)}
+.radio input{width:auto}
+
+.ov{position:fixed;inset:0;background:rgba(10,14,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top,0px)) 16px 24px;z-index:50;overflow-y:auto}
+.modal{background:var(--surface);border-radius:14px;width:100%;max-width:620px;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.modal .mh{display:flex;justify-content:space-between;align-items:center}
+.toast{position:fixed;bottom:calc(84px + env(safe-area-inset-bottom,0px));inset-inline-start:50%;transform:translateX(50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;z-index:60;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+
+.gantt{display:flex;flex-direction:column;gap:4px;min-width:640px}
+.gr{display:grid;grid-template-columns:230px 1fr;gap:10px;align-items:center;font-size:.82rem}
+.gr.ph{font-weight:600;margin-top:6px}
+.gt{position:relative;height:16px;background:var(--sunk);border-radius:4px}
+.gt i{position:absolute;inset-block:3px;background:var(--accent);border-radius:3px;opacity:.85}
+.gr.ph .gt i{background:var(--ink);inset-block:5px}
+.gt .now{position:absolute;inset-block:-4px;width:2px;background:var(--bad)}
+.gmon{display:grid;grid-template-columns:230px 1fr;gap:10px;font-size:.72rem;color:var(--muted)}
+.gmon div{position:relative;height:16px}
+.gmon span{position:absolute;transform:translateX(50%)}
+
+.po{border:1px solid var(--line);border-radius:var(--r);padding:20px;background:var(--surface);display:flex;flex-direction:column;gap:12px}
+.po .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:10px}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.prog-in{width:74px;padding:4px 6px;text-align:center}
+
+.bnav{display:none}
+@media (max-width:900px){
+  .app{grid-template-columns:1fr}
+  .side{display:none}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr}
+  .bnav{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);z-index:40;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));justify-content:space-around}
+  .bnav a{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:.7rem;color:var(--muted);text-decoration:none;padding:4px 6px;position:relative}
+  .bnav a.on{color:var(--accent)}
+  .bnav svg{width:20px;height:20px}
+  .bnav .badge{position:absolute;top:0;inset-inline-start:55%;margin:0}
+  .mrole{display:flex !important}
+}
+.mrole{display:none;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px}
+.mrole select{flex:1}
+@media (max-width:520px){
+  .fr{grid-template-columns:1fr}
+  .line{grid-template-columns:minmax(0,1fr) 70px 70px auto}
+  .kpi .v{font-size:1.25rem}
+  .gr,.gmon{grid-template-columns:150px 1fr}
+}
+@media (prefers-reduced-motion:no-preference){.toast{animation:up .2s ease-out}@keyframes up{from{opacity:0;transform:translate(50%,8px)}}}
+</style>
+
+<div class="app" dir="rtl" lang="ar">
+  <aside class="side">
+    <div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="rolebox">
+      <label for="role">تجربة النظام بصفة</label>
+      <select id="role"></select>
+      <button type="button" data-act="reset">إعادة البيانات التجريبية</button>
+    </div>
+  </aside>
+  <main><div class="wrap" id="view"></div></main>
+  <nav class="bnav" id="bnav"></nav>
+</div>
+<div id="layer"></div>
+
+<script>
+(function(){
+document.documentElement.setAttribute('dir','rtl');document.documentElement.setAttribute('lang','ar');
+const KEY='carbon-erp-proto-v1';
+const DEPTS={arch:'معماري',interior:'تصميم داخلي',fitout:'فيت أوت',joinery:'منجرة',contracting:'مقاولات',supervision:'إشراف'};
+const ROLES={
+  owner:{label:'صاحب الشركة',who:'صاحب الشركة'},
+  gm:{label:'المدير العام',who:'المدير العام'},
+  head:{label:'رئيس القسم',who:'م. خالد (رئيس قسم المقاولات)'},
+  site:{label:'مهندس الموقع',who:'م. سالم (مهندس الموقع)'},
+  procurement:{label:'المشتريات',who:'يوسف (المشتريات)'},
+  finance:{label:'المالية',who:'مريم (المالية)'}
+};
+const STAGES=[
+  {k:'dept',l:'موافقة رئيس القسم',role:'head'},
+  {k:'procurement',l:'عروض الأسعار',role:'procurement'},
+  {k:'finance',l:'تدقيق الميزانية',role:'finance'},
+  {k:'gm',l:'اعتماد المدير العام',role:'gm'},
+  {k:'po',l:'إصدار أمر الشراء',role:'procurement'},
+  {k:'done',l:'أُرسل PO للمورّد'}
+];
+const TERMS={advance:'دفعة مقدّمة',credit30:'آجل 30 يوم'};
+const today=new Date();today.setHours(0,0,0,0);
+const ICONS={
+  dash:'<path d="M3 13h8V3H3zm10 8h8V11h-8zM3 21h8v-6H3zm10-18v6h8V3z"/>',
+  proj:'<path d="M3 21V8l9-5 9 5v13h-6v-7H9v7z"/>',
+  req:'<path d="M7 4h10l3 3v13H4V4h3m2 6h6m-6 4h6m-6 4h4" fill="none" stroke="currentColor" stroke-width="2"/>',
+  cash:'<path d="M2 6h20v12H2zm10 3a3 3 0 100 6 3 3 0 000-6z"/>',
+  inbox:'<path d="M3 13l3-9h12l3 9v7H3zm2 0h5a2 2 0 004 0h5" fill="none" stroke="currentColor" stroke-width="2"/>'
+};
+const ico=k=>'<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'+ICONS[k]+'</svg>';
+
+/* ---------- seed data ---------- */
+function seed(){
+  const inc={
+    id:'incubators',name:'تصميم وتنفيذ الحاضنات المتخصصة في الصناعات الحرفية الإبداعية',short:'الحاضنات الحرفية',
+    client:'هيئة تنمية المؤسسات الصغيرة والمتوسطة (ريادة)',type:'gov',depts:['arch','interior','fitout','joinery','contracting','supervision'],
+    start:'2026-04-16',end:'2026-10-28',status:'active',manager:'مدير المشروع',vat:5,real:true,
+    sections:[['1','التمهيدات'],['2','أعمال التصميم'],['3','الأعمال الإنشائية'],['4','أعمال التشطيبات'],['5','الديكور الداخلي'],['6','أعمال التكييف'],['7','الأعمال الكهربائية'],['8','الأمن والسلامة والشبكات'],['9','مكافحة الحريق'],['10','أعمال متفرقة']],
+    boq:[
+      ['1.1','1','التمهيدات (التجهيز والإخلاء)',1,'مقطوعية',2000,2000],
+      ['2.1','2','التصميم المعماري المبدئي واعتماده من المالك',1,'مقطوعية',3000,3000],
+      ['2.2','2','المخططات المعمارية التفصيلية',1,'مقطوعية',300,300],
+      ['2.3','2','التصميم والتحليل الإنشائي',1,'مقطوعية',600,600],
+      ['2.4','2','مخططات الكهرباء',1,'مقطوعية',600,600],
+      ['2.5','2','مخططات التكييف والميكانيك',1,'مقطوعية',300,300],
+      ['2.6','2','مخطط ومواصفات التشطيبات الداخلية',1,'مقطوعية',200,200],
+      ['2.7','2','إعداد جدول كميات تفصيلي',1,'مقطوعية',300,300],
+      ['2.8','2','المخططات التنفيذية (Shop Drawings)',1,'مقطوعية',300,300],
+      ['2.9','2','تقديم التصاميم للبلدية والدفاع المدني',1,'مقطوعية',300,300],
+      ['2.10','2','زيارات الإشراف على التصميم (4 مراحل)',1,'مقطوعية',3600,3600],
+      ['2.11','2','مخططات As-Built وكتيبات التشغيل',1,'مقطوعية',400,400],
+      ['3.1','3','أعمدة حديد HEB / HSS',4,'طن',1217,4867],
+      ['3.2','3','جسور رئيسية IPE 300',4,'طن',1182,4728],
+      ['3.3','3','جسور ثانوية IPE 200',2,'طن',2016,4032],
+      ['3.4','3','ألواح ديك مجلفنة 1.2 مم',230,'م²',17,3963],
+      ['3.5','3','خرسانة خفيفة 100 مم فوق الديك',23,'م³',170,3910],
+      ['4.1.1','4','أرضية إيبوكسي - الطابق الأرضي',406,'م²',35,14114],
+      ['4.1.2','4','أرضية إيبوكسي - الميزانين',230,'م²',35,7995],
+      ['4.2.1','4','لياسة الجدران الداخلية',600,'م²',13,7509],
+      ['4.2.2','4','معجون وأساس ودهان الجدران',600,'م²',6,3754],
+      ['4.2.3','4','دهان السقف المكشوف والدكت',636,'م²',9,5773],
+      ['5.1','5','قواطع زجاج سيكوريت 10-12 مم',255,'م²',41,10429],
+      ['5.2','5','أبواب زجاج مفردة 12 مم',13,'عدد',202,2621],
+      ['5.3','5','أبواب زجاج مزدوجة',4,'عدد',358,1432],
+      ['5.4','5','أرضيات فينيل LVT',100,'م²',33,3337],
+      ['5.5','5','تكسية جدران خشبية',60,'م²',63,3754],
+      ['5.6','5','كاونتر الاستقبال',1,'عدد',3441,3441],
+      ['5.7','5','ورق جدران',45,'م²',21,939],
+      ['5.8','5','اللوحات الإرشادية',30,'عدد',21,626],
+      ['5.9','5','ستائر رول',80,'م²',21,1669],
+      ['5.10','5','نباتات صناعية وأحواض',20,'م²',118,2364],
+      ['6.1','6','دكت مجلفن رئيسي وفرعي',180,'م²',49,8899],
+      ['6.2','6','وصلات دكت مرنة',40,'عدد',27,1097],
+      ['6.3','6','مخارج هواء 60×60',45,'عدد',77,3476],
+      ['6.4','6','دامبرات تحكم VCD',12,'عدد',127,1530],
+      ['7.1','7','نقاط القوى والإنارة والمفاتيح',1,'مجموعة',10981,10981],
+      ['7.5','7','وحدات الإنارة LED والأفياش',1,'مجموعة',7464,7464],
+      ['7.6','7','لوحات التوزيع والتأريض والكيبل الرئيسي',1,'مجموعة',6968,6968],
+      ['7.9','7','أعمال مساندة ومخططات واختبارات',1,'مجموعة',5771,5771],
+      ['8.1','8','نقاط الشبكة والكاميرات والدخول',1,'مجموعة',16102,16102],
+      ['8.3','8','نظام كاميرات المراقبة CCTV',1,'مجموعة',5284,5284],
+      ['8.4','8','أجهزة الدخول والبصمة والواي فاي',1,'مجموعة',3615,3615],
+      ['9.1','9','نقاط إنذار الحريق',1,'مجموعة',3795,3795],
+      ['9.2','9','ملحقات ولوحة إنذار الحريق',1,'مجموعة',3735,3735],
+      ['9.3','9','طفايات الحريق',12,'عدد',77,919],
+      ['10.1.1','10','وحدات FCU',10,'عدد',1053,10530],
+      ['10.1.2','10','مراوح شفط',5,'عدد',127,633],
+      ['10.1.3','10','تمديدات الغاز',20,'عدد',14,278],
+      ['10.1.4','10','أعمال تعديل حسب تعليمات المهندس',1,'مقطوعية',1112,1112],
+      ['10.1.5','10','جبس بورد',40,'م²',14,556],
+      ['10.1.6','10','أنابيب غاز',50,'م.ط',14,695],
+      ['10.1.7','10','سباكة المطبخ',1,'مقطوعية',417,417],
+      ['10.1.8','10','تعديلات ديكورية للسقف والجدران',10,'م²',120,1200]
+    ],
+    tasks:[
+      ['التمهيدات والتجهيز','2026-04-16','2026-04-22',1],
+      ['مرحلة التصميم','2026-04-23','2026-07-15',1],
+      ['التصميم المعماري المبدئي والاعتماد','2026-04-23','2026-05-20'],
+      ['المخططات المعمارية التفصيلية','2026-05-21','2026-05-27'],
+      ['التصميم الإنشائي','2026-05-28','2026-06-05'],
+      ['مخططات الكهرباء والتكييف','2026-06-08','2026-06-23'],
+      ['جدول الكميات والمخططات التنفيذية','2026-06-22','2026-07-01'],
+      ['تقديم التصاميم للجهات المختصة','2026-06-22','2026-07-15'],
+      ['مرحلة التنفيذ','2026-06-08','2026-10-19',1],
+      ['تركيب الهيكل الحديدي','2026-06-08','2026-07-03'],
+      ['التمديدات الأولى (كهرباء، تكييف، حريق، غاز)','2026-07-06','2026-07-20'],
+      ['الخرسانة الخفيفة','2026-07-16','2026-07-17'],
+      ['اللياسة والمعجون','2026-07-20','2026-08-04'],
+      ['أرضيات الإيبوكسي','2026-08-05','2026-08-13'],
+      ['القواطع والأبواب الزجاجية','2026-08-14','2026-09-03'],
+      ['LVT والتكسية الخشبية وورق الجدران','2026-08-14','2026-09-03'],
+      ['كاونتر الاستقبال','2026-08-14','2026-09-08'],
+      ['التمديدات الثانية','2026-09-09','2026-09-22'],
+      ['الدهان النهائي','2026-09-21','2026-10-02'],
+      ['التركيبات النهائية','2026-10-05','2026-10-14'],
+      ['اللوحات والستائر والنباتات','2026-10-15','2026-10-19'],
+      ['الإخلاء والتسليم','2026-10-15','2026-10-28',1],
+      ['التنظيف','2026-10-20','2026-10-26'],
+      ['الاختبار والتشغيل','2026-10-15','2026-10-26'],
+      ['مخططات As-Built والضمانات','2026-10-27','2026-10-27'],
+      ['تسليم المشروع','2026-10-28','2026-10-28']
+    ]
+  };
+  const secProg={'1':80,'2':92,'3':100,'4':96,'5':84,'6':92,'7':86,'8':74,'9':70,'10':48};
+  const tweak={'2.10':85,'2.11':0,'5.6':100,'5.9':40,'5.10':0,'5.8':30,'10.1.1':70,'4.2.3':85,'1.1':80};
+  inc.boq=inc.boq.map(b=>{const p=tweak[b[0]]!=null?tweak[b[0]]:secProg[b[1]];return{c:b[0],s:b[1],d:b[2],q:b[3],u:b[4],r:b[5],t:b[6],p,sp:Math.round(b[6]*p/100*0.72)}});
+  inc.tasks=inc.tasks.map(t=>({n:t[0],s:t[1],e:t[2],ph:!!t[3]}));
+
+  const mk=(o,items)=>Object.assign(o,{boq:items.map(i=>({c:i[0],s:i[0].split('.')[0],d:i[1],q:i[2],u:i[3],r:Math.round(i[4]/i[2]),t:i[4],p:i[5],sp:i[6]})),tasks:[],vat:5,demo:true});
+  const projects=[inc,
+    mk({id:'office-fitout',short:'فيت أوت مكاتب شركة خاصة',name:'فيت أوت مكاتب الطابق الثالث - شركة خاصة',client:'عميل خاص (مثال)',type:'private',depts:['interior','fitout','joinery','supervision'],start:'2026-08-15',end:'2026-11-30',status:'active',sections:[['1','التصميم'],['2','الفيت أوت'],['3','أعمال المنجرة']]},[
+      ['1.1','التصميم الداخلي والمخططات',1,'مقطوعية',6500,100,4100],
+      ['2.1','قواطع جبس بورد',420,'م²',12600,80,8300],
+      ['2.2','أسقف معلقة',380,'م²',9100,60,4900],
+      ['2.3','أرضيات وموكيت',520,'م²',11400,35,3600],
+      ['3.1','تكسية جدران وأبواب خشبية',1,'مجموعة',14800,45,6200],
+      ['3.2','مكاتب وخزائن حسب الطلب',1,'مجموعة',9600,20,1500]]),
+    mk({id:'villa-design',short:'تصميم داخلي لفيلا خاصة',name:'التصميم الداخلي لفيلا سكنية',client:'عميل خاص (مثال)',type:'private',depts:['arch','interior'],start:'2026-09-01',end:'2026-12-20',status:'active',sections:[['1','التصميم المعماري'],['2','التصميم الداخلي']]},[
+      ['1.1','تعديل المخططات المعمارية',1,'مقطوعية',4200,100,1800],
+      ['2.1','المفهوم التصميمي والمودبورد',1,'مقطوعية',3800,100,1500],
+      ['2.2','التصاميم ثلاثية الأبعاد',1,'مقطوعية',6200,70,2100],
+      ['2.3','المخططات التنفيذية وجداول المواد',1,'مقطوعية',4300,10,200]]),
+    mk({id:'ministry-majlis',short:'منجرة مجلس جهة حكومية',name:'أعمال المنجرة لمجلس جهة حكومية',client:'جهة حكومية (مثال)',type:'gov',depts:['interior','joinery','supervision'],start:'2026-07-01',end:'2027-01-31',status:'stopped',stopReason:'بانتظار اعتماد العينات من الجهة',sections:[['1','المنجرة'],['2','التركيب']]},[
+      ['1.1','تكسية جدران خشبية مع حفر',140,'م²',18900,40,7400],
+      ['1.2','أبواب خشب صلب',12,'عدد',10800,25,2900],
+      ['2.1','التركيب والتشطيب في الموقع',1,'مقطوعية',11500,0,0]]),
+    mk({id:'school-super',short:'إشراف مبنى مدرسة',name:'الإشراف على تنفيذ مبنى مدرسة',client:'جهة حكومية (مثال)',type:'gov',depts:['supervision'],start:'2026-01-10',end:'2026-10-15',status:'closed',sections:[['1','الإشراف']]},[
+      ['1.1','الإشراف الهندسي الشهري',9,'شهر',19800,100,14600],
+      ['1.2','تقارير الاستلام والتسليم',1,'مقطوعية',2200,100,1300]]),
+    mk({id:'retail-shop',short:'فيت أوت محل تجاري',name:'فيت أوت محل تجاري في مجمع',client:'عميل خاص (مثال)',type:'private',depts:['interior','fitout','joinery','contracting'],start:'2026-10-01',end:'2027-02-15',status:'active',sections:[['1','التصميم'],['2','الفيت أوت'],['3','المنجرة']]},[
+      ['1.1','التصميم الداخلي',1,'مقطوعية',3400,100,2100],
+      ['2.1','أعمال مدنية وكهرباء',1,'مجموعة',9800,15,1200],
+      ['2.2','واجهة زجاج',1,'مجموعة',6200,0,0],
+      ['3.1','أرفف عرض وكاونتر',1,'مجموعة',8400,5,300]])
+  ];
+  const H=(t,by,role,a,note)=>({t,by,role,a,note:note||''});
+  const requests=[
+    {id:'REQ-1041',pid:'office-fitout',boq:'3.1',dept:'joinery',by:'م. سالم (مهندس الموقع)',date:'2026-11-11',need:'2026-11-18',items:[{d:'ألواح MDF 18 مم بقشرة بلوط',q:40,u:'لوح'},{d:'غراء خشب',q:10,u:'جالون'}],note:'لتكسية جدار غرفة الاجتماعات',stage:'dept',quotes:[],hist:[H('2026-11-11 09:20','م. سالم (مهندس الموقع)','site','أنشأ الطلب')]},
+    {id:'REQ-1040',pid:'incubators',boq:'9.1',dept:'contracting',by:'م. سالم (مهندس الموقع)',date:'2026-11-10',need:'2026-11-14',items:[{d:'كاشف دخان عنواني',q:6,u:'عدد'},{d:'قاعدة كاشف',q:6,u:'عدد'}],note:'نقص في الميزانين بعد ملاحظات الدفاع المدني',stage:'procurement',quotes:[],hist:[H('2026-11-10 08:05','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-11-10 11:40','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم','مستعجل')]},
+    {id:'REQ-1039',pid:'incubators',boq:'5.9',dept:'fitout',by:'م. سالم (مهندس الموقع)',date:'2026-11-08',need:'2026-11-16',items:[{d:'ستائر رول نصف معتمة مع مجرى ألمنيوم',q:48,u:'م²'}],note:'الكمية المتبقية للطابق الأرضي',stage:'finance',quotes:[{sup:'مؤسسة الستائر الحديثة',amt:912,terms:'credit30',days:7,sel:true},{sup:'شركة الديكور المتحدة',amt:1035,terms:'advance',days:4,sel:false}],hist:[H('2026-11-08 10:00','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-11-08 13:15','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم'),H('2026-11-10 09:30','يوسف (المشتريات)','procurement','سجّل عرضي سعر وأرسل للمالية','اخترنا الأرخص مع دفع آجل')]},
+    {id:'REQ-1038',pid:'incubators',boq:'5.10',dept:'interior',by:'م. سالم (مهندس الموقع)',date:'2026-11-05',need:'2026-11-20',items:[{d:'نباتات صناعية مع أحواض',q:20,u:'م²'}],note:'',stage:'gm',quotes:[{sup:'حدائق الخليج',amt:1890,terms:'advance',days:10,sel:true}],hist:[H('2026-11-05 09:00','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-11-05 12:00','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم'),H('2026-11-07 10:20','يوسف (المشتريات)','procurement','سجّل عرض سعر وأرسل للمالية'),H('2026-11-09 14:10','مريم (المالية)','finance','وافقت المالية','ضمن بند 5.10 والمتبقي يغطي الطلب')]},
+    {id:'REQ-1037',pid:'incubators',boq:'6.3',dept:'contracting',by:'م. سالم (مهندس الموقع)',date:'2026-11-02',need:'2026-11-09',items:[{d:'مخارج هواء 60×60 مع دامبر',q:6,u:'عدد'}],note:'بدل تالف',stage:'po',quotes:[{sup:'مصنع عمان للتكييف',amt:438,terms:'credit30',days:3,sel:true}],hist:[H('2026-11-02 08:30','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-11-02 10:00','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم'),H('2026-11-03 11:00','يوسف (المشتريات)','procurement','سجّل عرض سعر وأرسل للمالية'),H('2026-11-04 09:15','مريم (المالية)','finance','وافقت المالية'),H('2026-11-04 16:40','المدير العام','gm','اعتمد المدير العام')]},
+    {id:'REQ-1036',pid:'office-fitout',boq:'2.1',dept:'fitout',by:'م. سالم (مهندس الموقع)',date:'2026-10-27',need:'2026-11-01',items:[{d:'ألواح جبس بورد مقاوم للرطوبة',q:120,u:'لوح'},{d:'قطاعات حديد مجلفن',q:300,u:'م.ط'}],note:'',stage:'done',po:{no:'PO-2026-0218',date:'2026-10-30'},quotes:[{sup:'مستودع مواد البناء',amt:1460,terms:'credit30',days:2,sel:true}],hist:[H('2026-10-27 08:10','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-10-27 09:30','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم'),H('2026-10-28 10:00','يوسف (المشتريات)','procurement','سجّل عرض سعر وأرسل للمالية'),H('2026-10-29 09:00','مريم (المالية)','finance','وافقت المالية'),H('2026-10-29 15:30','المدير العام','gm','اعتمد المدير العام'),H('2026-10-30 08:45','يوسف (المشتريات)','procurement','أصدر أمر الشراء PO-2026-0218 وأرسله للمورّد')]},
+    {id:'REQ-1035',pid:'incubators',boq:null,dept:'contracting',by:'م. سالم (مهندس الموقع)',date:'2026-10-25',need:'2026-10-30',items:[{d:'مظلة سيارات حديد',q:1,u:'مجموعة'}],note:'طلب العميل شفهياً',stage:'rejected',quotes:[{sup:'ورشة الحديد الوطنية',amt:2750,terms:'advance',days:14,sel:true}],hist:[H('2026-10-25 09:00','م. سالم (مهندس الموقع)','site','أنشأ الطلب'),H('2026-10-25 12:00','م. خالد (رئيس قسم المقاولات)','head','وافق رئيس القسم'),H('2026-10-26 10:00','يوسف (المشتريات)','procurement','سجّل عرض سعر وأرسل للمالية'),H('2026-10-27 11:30','مريم (المالية)','finance','رفضت المالية','البند غير موجود في BOQ. يُسجّل كعمل إضافي بعد موافقة العميل الخطية')]}
+  ];
+  const petty=[
+    {id:'PC-311',pid:'incubators',boq:'10.1.4',amt:85,d:'شراء براغي ومثبتات ومواد سيليكون عاجلة لتركيب الكاونتر',by:'م. سالم (مهندس الموقع)',date:'2026-11-11',status:'pending'},
+    {id:'PC-310',pid:'office-fitout',boq:null,amt:40,d:'أجرة نقل مخلفات من الموقع',by:'م. سالم (مهندس الموقع)',date:'2026-11-09',status:'pending'},
+    {id:'PC-309',pid:'incubators',boq:'4.2.2',amt:62,d:'دهان ترميم للجدران بعد تركيب القواطع',by:'م. سالم (مهندس الموقع)',date:'2026-11-04',status:'approved',dec:'2026-11-04'},
+    {id:'PC-308',pid:'retail-shop',boq:null,amt:120,d:'إيجار سقالة لمدة أسبوع',by:'م. سالم (مهندس الموقع)',date:'2026-10-28',status:'approved',dec:'2026-10-28'}
+  ];
+  const variations=[
+    {id:'VO-01',pid:'incubators',title:'غرفة صلاة إضافية في الميزانين',d:'قواطع جبس وأرضية موكيت وإنارة لغرفة صلاة غير موجودة في المخطط المعتمد',amt:3450,file:'موافقة-العميل-غرفة-الصلاة.pdf',client:'approved',date:'2026-09-14',by:'م. خالد (رئيس قسم المقاولات)'},
+    {id:'VO-02',pid:'incubators',title:'مظلة مواقف سيارات',d:'مظلة حديد لعدد 6 سيارات عند المدخل الرئيسي',amt:2900,file:'',client:'pending',date:'2026-10-27',by:'م. خالد (رئيس قسم المقاولات)'}
+  ];
+  return {v:1,role:'owner',projects,requests,petty,variations,seq:{req:1042,pc:312,vo:3,po:219}};
+}
+let S;
+try{const raw=localStorage.getItem(KEY);S=raw?JSON.parse(raw):null}catch(e){S=null}
+if(!S||S.v!==1)S=seed();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+
+/* ---------- helpers ---------- */
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>Math.round(n).toLocaleString('en-US');
+const omr=n=>'<span class="num">'+money(n)+'</span> <span class="muted small">ر.ع</span>';
+const D=s=>{const d=new Date(s+'T00:00:00');return d};
+const fd=s=>{if(!s)return'—';const d=D(s.slice(0,10));return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()};
+const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const nowStamp=()=>{const d=new Date();return iso(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+const daysBetween=(a,b)=>Math.round((b-a)/864e5);
+const P=id=>S.projects.find(p=>p.id===id);
+const R=id=>S.requests.find(r=>r.id===id);
+const me=()=>ROLES[S.role].who;
+const selQuote=r=>(r.quotes||[]).find(q=>q.sel);
+const reqAmt=r=>{const q=selQuote(r);return q?q.amt:0};
+
+function contract(p){return p.boq.reduce((a,b)=>a+b.t,0)}
+function varsApproved(p){return S.variations.filter(v=>v.pid===p.id&&v.client==='approved').reduce((a,v)=>a+v.amt,0)}
+function budget(p){return contract(p)+varsApproved(p)}
+function itemSpent(p,code){
+  const b=p.boq.find(x=>x.c===code);let s=b?b.sp:0;
+  S.requests.forEach(r=>{if(r.pid===p.id&&r.boq===code&&r.stage==='done')s+=reqAmt(r)});
+  S.petty.forEach(c=>{if(c.pid===p.id&&c.boq===code&&c.status==='approved')s+=c.amt});
+  return s;
+}
+function spent(p){
+  let s=p.boq.reduce((a,b)=>a+b.sp,0);
+  S.requests.forEach(r=>{if(r.pid===p.id&&r.stage==='done')s+=reqAmt(r)});
+  S.petty.forEach(c=>{if(c.pid===p.id&&c.status==='approved')s+=c.amt});
+  return s;
+}
+function committed(p,code,exceptId){
+  return S.requests.filter(r=>r.pid===p.id&&['finance','gm','po'].includes(r.stage)&&r.id!==exceptId&&(code===undefined||r.boq===code)).reduce((a,r)=>a+reqAmt(r),0);
+}
+function progress(p){const t=contract(p);return t?p.boq.reduce((a,b)=>a+b.t*b.p,0)/t:0}
+function secProgress(p,s){const it=p.boq.filter(b=>b.s===s);const t=it.reduce((a,b)=>a+b.t,0);return t?it.reduce((a,b)=>a+b.t*b.p,0)/t:0}
+function timePct(p){const a=D(p.start),b=D(p.end);return Math.max(0,Math.min(100,(today-a)/(b-a)*100))}
+function daysLeft(p){return daysBetween(today,D(p.end))}
+function health(p){
+  const pr=progress(p),dl=daysLeft(p),tp=timePct(p);
+  if(p.status==='closed')return{k:'closed',l:'مغلق',c:'p-idle'};
+  if(p.status==='stopped')return{k:'stopped',l:'متوقف',c:'p-idle',why:p.stopReason};
+  if(dl<0&&pr<100)return{k:'late',l:'متأخر عن التسليم',c:'p-bad',why:'تجاوز موعد التسليم ب'+(-dl)+' يوم والإنجاز '+Math.round(pr)+'%'};
+  if(tp-pr>=15||(dl<=21&&pr<85))return{k:'risk',l:'يحتاج اهتمام',c:'p-warn',why:'باقي '+dl+' يوم والإنجاز '+Math.round(pr)+'% فقط من العمل'};
+  if(pr>=85)return{k:'near',l:'قارب على الانتهاء',c:'p-acc'};
+  return{k:'ok',l:'ضمن الخطة',c:'p-ok'};
+}
+function stageInfo(r){if(r.stage==='rejected')return{l:'مرفوض',c:'p-bad'};if(r.stage==='done')return{l:'أُرسل PO',c:'p-ok'};const s=STAGES.find(x=>x.k===r.stage);return{l:'بانتظار: '+s.l,c:r.stage==='dept'?'p-idle':'p-warn'}}
+function myQueue(){
+  const role=S.role;
+  const reqs=S.requests.filter(r=>{const s=STAGES.find(x=>x.k===r.stage);return s&&s.role===role});
+  const pc=role==='gm'?S.petty.filter(c=>c.status==='pending'):[];
+  return{reqs,pc,n:reqs.length+pc.length};
+}
+function bar(pct,cls,marker){return '<div class="bar"><i class="'+(cls||'')+'" style="width:'+Math.min(100,Math.max(0,pct)).toFixed(1)+'%"></i>'+(marker!=null?'<b style="inset-inline-start:calc('+Math.min(100,marker).toFixed(1)+'% - 1px)" title="الوقت المنقضي"></b>':'')+'</div>'}
+function boqOptions(p,sel,allowNone){
+  let h=allowNone?'<option value="">خارج BOQ / غير محدد</option>':'';
+  p.sections.forEach(([s,n])=>{h+='<optgroup label="'+esc(s+' - '+n)+'">';p.boq.filter(b=>b.s===s).forEach(b=>{h+='<option value="'+esc(b.c)+'"'+(b.c===sel?' selected':'')+'>'+esc(b.c+' '+b.d)+'</option>'});h+='</optgroup>'});
+  return h;
+}
+function projOptions(sel){return S.projects.filter(p=>p.status!=='closed').map(p=>'<option value="'+p.id+'"'+(p.id===sel?' selected':'')+'>'+esc(p.short)+'</option>').join('')}
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
+
+/* ---------- views ---------- */
+let ui={filter:'all',tab:'boq',reqFilter:'mine'};
+function views(){
+  const h=location.hash.slice(1)||'dashboard';
+  if(h==='dashboard')return vDash();
+  if(h==='projects')return vProjects();
+  if(h.startsWith('p-'))return vProject(h.slice(2));
+  if(h==='requests')return vRequests();
+  if(h.startsWith('r-'))return vRequest(h.slice(2));
+  if(h==='petty')return vPetty();
+  if(h==='inbox')return vInbox();
+  return vDash();
+}
+const demoNote='<div class="demo">نموذج تجريبي: مشروع الحاضنات مأخوذ من ملفات BOQ والجدول الزمني الحقيقية، وباقي المشاريع والطلبات أمثلة للتوضيح. التغييرات تُحفظ في متصفحك فقط.</div>';
+
+function vDash(){
+  const all=S.projects.filter(p=>ui.filter==='all'||p.type===ui.filter);
+  const active=all.filter(p=>p.status==='active');
+  const val=active.reduce((a,p)=>a+budget(p),0), sp=active.reduce((a,p)=>a+spent(p),0);
+  const hs=all.map(p=>({p,h:health(p)}));
+  const attn=hs.filter(x=>x.h.k==='late'||x.h.k==='risk');
+  const cnt=k=>hs.filter(x=>x.h.k===k).length;
+  const pend=S.requests.filter(r=>!['done','rejected'].includes(r.stage)).length+S.petty.filter(c=>c.status==='pending').length;
+  let h=demoNote+'<div class="head"><div class="t"><h1>لوحة متابعة المشاريع</h1><span class="muted">اليوم '+fd(iso(today))+'</span></div>'+
+    '<div class="seg" role="group" aria-label="نوع المشروع">'+[['all','الكل'],['gov','حكومي'],['private','خاص']].map(([k,l])=>'<button data-act="filter" data-v="'+k+'" class="'+(ui.filter===k?'on':'')+'">'+l+'</button>').join('')+'</div></div>';
+  h+='<div class="kpis">'+
+    '<div class="kpi"><span class="l">قيمة المشاريع الجارية</span><span class="v">'+money(val)+' <small>ر.ع</small></span><span class="s">'+active.length+' مشاريع جارية، شاملة الأعمال الإضافية</span></div>'+
+    '<div class="kpi"><span class="l">المصروف حتى الآن</span><span class="v">'+money(sp)+' <small>ر.ع</small></span><span class="s">'+(val?Math.round(sp/val*100):0)+'% من قيمة المشاريع الجارية</span></div>'+
+    '<div class="kpi'+(attn.length?' alert':'')+'"><span class="l">مشاريع تحتاج تركيز</span><span class="v">'+attn.length+'</span><span class="s">متأخرة أو الوقت المتبقي لا يكفي</span></div>'+
+    '<div class="kpi"><span class="l">طلبات بانتظار الاعتماد</span><span class="v">'+pend+'</span><span class="s">طلبات مواد وبيتي كاش</span></div></div>';
+  h+='<div class="card"><div class="ch"><h2>حالة المشاريع</h2></div><div class="actions">'+
+    [['ok','ضمن الخطة','p-ok'],['near','قارب على الانتهاء','p-acc'],['risk','يحتاج اهتمام','p-warn'],['late','متأخر','p-bad'],['stopped','متوقف','p-idle'],['closed','مغلق','p-idle']].map(([k,l,c])=>'<span class="pill '+c+'">'+l+' <span class="num">'+cnt(k)+'</span></span>').join('')+'</div></div>';
+  if(attn.length){h+='<div class="card"><div class="ch"><h2>تحتاج تركيزك الآن</h2></div><div class="attn">'+attn.map(({p,h:hh})=>'<div class="ac'+(hh.k==='risk'?' warn':'')+'" data-go="p-'+p.id+'" tabindex="0" role="link"><div class="ch"><b>'+esc(p.short)+'</b><span class="pill '+hh.c+'">'+hh.l+'</span></div><span class="why">'+esc(hh.why)+'</span><div class="barrow">'+bar(progress(p),hh.k==='late'?'bad':'warn',timePct(p))+'<span>'+Math.round(progress(p))+'%</span></div></div>').join('')+'</div></div>'}
+  h+='<div class="card"><div class="ch"><h2>كل المشاريع</h2><span class="muted small">الخط الأسود على شريط الإنجاز = الوقت المنقضي من مدة المشروع</span></div>'+projTable(all)+'</div>';
+  return h;
+}
+function projTable(list){
+  return '<div class="tbl"><table><thead><tr><th>المشروع</th><th>النوع</th><th>الأقسام</th><th>الإنجاز</th><th>الصرف من القيمة</th><th class="n">المتبقي للتسليم</th><th>الحالة</th></tr></thead><tbody>'+
+  list.map(p=>{const hh=health(p),pr=progress(p),b=budget(p),s=spent(p),dl=daysLeft(p);
+    return '<tr class="click" data-go="p-'+p.id+'"><td><b>'+esc(p.short)+'</b><div class="muted small">'+esc(p.client)+'</div></td>'+
+    '<td><span class="tag '+(p.type==='gov'?'gov':'')+'">'+(p.type==='gov'?'حكومي':'خاص')+'</span></td>'+
+    '<td style="max-width:200px">'+p.depts.map(d=>'<span class="tag">'+DEPTS[d]+'</span>').join('')+'</td>'+
+    '<td style="min-width:150px"><div class="barrow">'+bar(pr,hh.k==='late'?'bad':hh.k==='risk'?'warn':'',p.status==='closed'?null:timePct(p))+'<span>'+Math.round(pr)+'%</span></div></td>'+
+    '<td style="min-width:170px"><div class="barrow">'+bar(s/b*100,s>b?'bad':'ok')+'<span>'+Math.round(s/b*100)+'%</span></div><div class="muted small num">'+money(s)+' / '+money(b)+'</div></td>'+
+    '<td class="n">'+(p.status==='closed'?'—':dl<0?'<span style="color:var(--bad)">متأخر '+(-dl)+' يوم</span>':dl+' يوم')+'</td>'+
+    '<td><span class="pill '+hh.c+'">'+hh.l+'</span></td></tr>'}).join('')+'</tbody></table></div>';
+}
+function vProjects(){
+  return demoNote+'<div class="head"><div class="t"><h1>المشاريع</h1><span class="muted">'+S.projects.length+' مشاريع</span></div><div class="seg">'+[['all','الكل'],['gov','حكومي'],['private','خاص']].map(([k,l])=>'<button data-act="filter" data-v="'+k+'" class="'+(ui.filter===k?'on':'')+'">'+l+'</button>').join('')+'</div></div><div class="card">'+projTable(S.projects.filter(p=>ui.filter==='all'||p.type===ui.filter))+'</div>';
+}
+function vProject(id){
+  const p=P(id);if(!p)return '<div class="empty">المشروع غير موجود</div>';
+  const hh=health(p),pr=progress(p),c=contract(p),va=varsApproved(p),b=budget(p),s=spent(p),cm=committed(p),dl=daysLeft(p);
+  const reqs=S.requests.filter(r=>r.pid===id),pcs=S.petty.filter(x=>x.pid===id),vos=S.variations.filter(v=>v.pid===id);
+  const canAct=['site','head'].includes(S.role);
+  let h=(p.demo?demoNote:'')+'<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / '+esc(p.short)+'</span><h1>'+esc(p.name)+'</h1><div class="actions"><span class="pill '+hh.c+'">'+hh.l+'</span><span class="tag '+(p.type==='gov'?'gov':'')+'">'+(p.type==='gov'?'مشروع حكومي':'مشروع خاص')+'</span>'+p.depts.map(d=>'<span class="tag">'+DEPTS[d]+'</span>').join('')+'</div></div>'+
+   '<div class="actions">'+(p.status!=='closed'?'<button class="btn pri" data-act="newReq" data-p="'+id+'">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="'+id+'">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="'+id+'">+ عمل إضافي</button>':'')+'</div></div>';
+  if(hh.why)h+='<div class="flag '+(hh.k==='late'?'bad':'warn')+'">'+esc(hh.why)+'</div>';
+  h+='<div class="kpis">'+
+   '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">'+money(c)+' <small>ر.ع</small></span><span class="s">'+(va?'+ '+money(va)+' أعمال إضافية معتمدة':'لا توجد أعمال إضافية معتمدة')+'</span></div>'+
+   '<div class="kpi"><span class="l">المصروف</span><span class="v">'+money(s)+' <small>ر.ع</small></span><span class="s">'+Math.round(s/b*100)+'% من القيمة، وملتزم به '+money(cm)+'</span></div>'+
+   '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">'+Math.round(pr)+'%</span><span class="s">الوقت المنقضي '+Math.round(timePct(p))+'%</span></div>'+
+   '<div class="kpi'+(dl<0&&p.status==='active'?' alert':'')+'"><span class="l">موعد التسليم</span><span class="v">'+fd(p.end)+'</span><span class="s">'+(p.status==='closed'?'المشروع مغلق':dl<0?'متأخر '+(-dl)+' يوم':'باقي '+dl+' يوم')+' · البداية '+fd(p.start)+'</span></div></div>';
+  const tabs=[['boq','بنود BOQ',p.boq.length],['time','الجدول الزمني',p.tasks.length],['req','طلبات المواد',reqs.length],['pc','بيتي كاش',pcs.length],['vo','الأعمال الإضافية',vos.length]];
+  if(!p.tasks.length&&ui.tab==='time')ui.tab='boq';
+  h+='<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">'+tabs.filter(t=>t[0]!=='time'||t[2]).map(([k,l,n])=>'<button role="tab" data-act="tab" data-v="'+k+'" class="'+(ui.tab===k?'on':'')+'">'+l+'<span class="c num">'+n+'</span></button>').join('')+'</div><div style="padding-top:14px">';
+  if(ui.tab==='boq'){
+    h+='<div class="ch" style="margin-bottom:8px"><span class="muted small">'+(canAct?'تقدر تحدّث نسبة الإنجاز لكل بند مباشرة من الجدول.':'نسبة الإنجاز يحدّثها مهندس الموقع أو رئيس القسم.')+'</span></div><div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th class="n">المصروف</th><th>الإنجاز</th></tr></thead><tbody>';
+    p.sections.forEach(([sc,sn])=>{const it=p.boq.filter(b=>b.s===sc);if(!it.length)return;const st=it.reduce((a,b)=>a+b.t,0);const ss=it.reduce((a,b)=>a+itemSpent(p,b.c),0);
+      h+='<tr class="sec"><td>'+sc+'</td><td>'+esc(sn)+'</td><td></td><td></td><td class="n">'+money(st)+'</td><td class="n">'+money(ss)+'</td><td><div class="barrow">'+bar(secProgress(p,sc))+'<span>'+Math.round(secProgress(p,sc))+'%</span></div></td></tr>';
+      it.forEach(b=>{const isp=itemSpent(p,b.c);h+='<tr><td class="num small">'+b.c+'</td><td>'+esc(b.d)+'</td><td class="n">'+b.q+' '+esc(b.u)+'</td><td class="n">'+money(b.r)+'</td><td class="n">'+money(b.t)+'</td><td class="n"'+(isp>b.t?' style="color:var(--bad)" title="تجاوز قيمة البند"':'')+'>'+money(isp)+'</td><td style="min-width:150px">'+(canAct&&p.status==='active'?'<div class="barrow">'+bar(b.p,b.p>=100?'ok':'')+'<input class="prog-in num" type="number" min="0" max="100" value="'+b.p+'" data-prog="'+esc(b.c)+'" data-p="'+id+'" aria-label="نسبة إنجاز البند '+esc(b.c)+'"></div>':'<div class="barrow">'+bar(b.p,b.p>=100?'ok':'')+'<span>'+b.p+'%</span></div>')+'</td></tr>'})});
+    h+='<tr class="sec"><td></td><td>الإجمالي بدون الضريبة</td><td></td><td></td><td class="n">'+money(c)+'</td><td class="n">'+money(p.boq.reduce((a,b)=>a+itemSpent(p,b.c),0))+'</td><td></td></tr>';
+    h+='<tr><td></td><td class="muted">ضريبة القيمة المضافة '+p.vat+'%</td><td></td><td></td><td class="n muted">'+money(c*p.vat/100)+'</td><td></td><td></td></tr><tr><td></td><td><b>الإجمالي الكلي</b></td><td></td><td></td><td class="n"><b>'+money(c*(1+p.vat/100))+'</b></td><td></td><td></td></tr></tbody></table></div>';
+  }else if(ui.tab==='time'){
+    const a=D(p.start),z=D(p.end);const span=z-a;const pos=d=>((D(d)-a)/span*100);
+    const nowPos=(today-a)/span*100;
+    let months=[];const m=new Date(a.getFullYear(),a.getMonth()+1,1);while(m<=z){months.push([((m-a)/span*100),m.toLocaleDateString('ar',{month:'short'})]);m.setMonth(m.getMonth()+1)}
+    h+='<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>'+months.map(([x,l])=>'<span style="inset-inline-start:'+x.toFixed(1)+'%">'+l+'</span>').join('')+'</div></div>'+
+      p.tasks.map(t=>{const s=pos(t.s),e=Math.max(pos(t.e)+(100/ (span/864e5)),s+.6);return '<div class="gr'+(t.ph?' ph':'')+'"><span title="'+fd(t.s)+' - '+fd(t.e)+'">'+esc(t.n)+'</span><div class="gt"><i style="inset-inline-start:'+s.toFixed(2)+'%;width:'+(e-s).toFixed(2)+'%"></i>'+(nowPos<=100?'<span class="now" style="inset-inline-start:'+nowPos.toFixed(1)+'%"></span>':'')+'</div></div>'}).join('')+
+      '</div></div><p class="muted small">'+(nowPos>100?'تاريخ اليوم بعد نهاية الخطة الزمنية ('+fd(p.end)+'). يُنصح بتحديث الجدول الزمني إذا تم الاتفاق على تمديد.':'الخط الأحمر يمثل تاريخ اليوم.')+'</p>';
+  }else if(ui.tab==='req'){h+=reqTable(reqs,false)}
+  else if(ui.tab==='pc'){h+=pettyTable(pcs,false)}
+  else if(ui.tab==='vo'){
+    h+=vos.length?'<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th><th class="n">القيمة</th><th>موافقة العميل</th><th>المرفق</th><th>التاريخ</th></tr></thead><tbody>'+vos.map(v=>'<tr><td class="num small">'+v.id+'</td><td><b>'+esc(v.title)+'</b><div class="muted small">'+esc(v.d)+'</div></td><td class="n">'+money(v.amt)+'</td><td>'+(v.client==='approved'?'<span class="pill p-ok">معتمد من العميل</span>':'<span class="pill p-warn">بانتظار العميل</span>')+'</td><td class="small">'+(v.file?'📎 '+esc(v.file):(canAct?'<button class="btn sm" data-act="voApprove" data-v="'+v.id+'">رفع موافقة العميل</button>':'—'))+'</td><td class="small">'+fd(v.date)+'</td></tr>').join('')+'</tbody></table></div><p class="muted small">الأعمال الإضافية المعتمدة من العميل تُضاف لقيمة المشروع وميزانيته تلقائياً.</p>':'<div class="empty">لا توجد أعمال إضافية لهذا المشروع.</div>';
+  }
+  h+='</div></div>';
+  return h;
+}
+function reqTable(list,showProj){
+  if(!list.length)return '<div class="empty">لا توجد طلبات.</div>';
+  return '<div class="tbl"><table><thead><tr><th>رقم الطلب</th>'+(showProj?'<th>المشروع</th>':'')+'<th>المواد</th><th>البند</th><th class="n">المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead><tbody>'+
+   list.slice().sort((a,b)=>b.id.localeCompare(a.id)).map(r=>{const si=stageInfo(r),p=P(r.pid);return '<tr class="click" data-go="r-'+r.id+'"><td class="num small"><b>'+r.id+'</b></td>'+(showProj?'<td>'+esc(p.short)+'</td>':'')+'<td>'+esc(r.items[0].d)+(r.items.length>1?' <span class="muted small">+'+(r.items.length-1)+'</span>':'')+'</td><td class="num small">'+(r.boq||'<span style="color:var(--warn)">خارج BOQ</span>')+'</td><td class="n">'+(reqAmt(r)?money(reqAmt(r)):'<span class="muted">—</span>')+'</td><td class="small">'+fd(r.date)+'</td><td><span class="pill '+si.c+'">'+si.l+'</span></td></tr>'}).join('')+'</tbody></table></div>';
+}
+function pettyTable(list,showProj){
+  if(!list.length)return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
+  const gm=S.role==='gm';
+  return '<div class="tbl"><table><thead><tr><th>الرقم</th>'+(showProj?'<th>المشروع</th>':'')+'<th>التفاصيل</th><th class="n">المبلغ</th><th>مقدم الطلب</th><th>الحالة</th></tr></thead><tbody>'+
+   list.slice().sort((a,b)=>b.id.localeCompare(a.id)).map(c=>'<tr><td class="num small"><b>'+c.id+'</b><div class="muted">'+fd(c.date)+'</div></td>'+(showProj?'<td><a href="#p-'+c.pid+'">'+esc(P(c.pid).short)+'</a></td>':'')+'<td>'+esc(c.d)+'<div class="muted small">'+(c.boq?'بند '+c.boq:'مصروف عام للمشروع')+(c.file?' · 📎 '+esc(c.file):'')+'</div></td><td class="n">'+money(c.amt)+'</td><td class="small">'+esc(c.by)+'</td><td>'+
+   (c.status==='pending'?(gm?'<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="'+c.id+'">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="'+c.id+'">رفض</button></div>':'<span class="pill p-warn">بانتظار المدير العام</span>'):c.status==='approved'?'<span class="pill p-ok">معتمد</span>':'<span class="pill p-bad">مرفوض</span>')+'</td></tr>').join('')+'</tbody></table></div>';
+}
+function vRequests(){
+  const f=ui.reqFilter;const q=myQueue();
+  let list=S.requests;
+  if(f==='mine')list=q.reqs;else if(f==='open')list=list.filter(r=>!['done','rejected'].includes(r.stage));else if(f==='done')list=list.filter(r=>r.stage==='done');
+  return demoNote+'<div class="head"><div class="t"><h1>طلبات المواد</h1><span class="muted">من الموقع حتى أمر الشراء</span></div><div class="actions"><button class="btn pri" data-act="newReq">+ طلب مواد جديد</button></div></div>'+
+   '<div class="card"><div class="ch"><div class="seg">'+[['mine','بانتظار إجرائي ('+q.reqs.length+')'],['open','قيد الإجراء'],['done','صدر لها PO'],['all','الكل']].map(([k,l])=>'<button data-act="reqFilter" data-v="'+k+'" class="'+(f===k?'on':'')+'">'+l+'</button>').join('')+'</div></div>'+reqTable(list,true)+'</div>'+
+   '<div class="card"><h2>مسار الطلب</h2><div class="steps">'+STAGES.map((s,i)=>'<div class="step"><span class="dot">'+(i+1)+'</span>'+s.l+(s.role?'<span class="muted small">'+ROLES[s.role].label+'</span>':'')+'</div>').join('')+'</div></div>';
+}
+function vRequest(id){
+  const r=R(id);if(!r)return '<div class="empty">الطلب غير موجود</div>';
+  const p=P(r.pid),si=stageInfo(r),idx=STAGES.findIndex(s=>s.k===r.stage);
+  const rejIdx=r.stage==='rejected'?STAGES.findIndex(s=>s.k===rejStage(r)):-1;
+  let h=demoNote+'<div class="head"><div class="t"><span class="crumb"><a href="#requests">طلبات المواد</a> / '+r.id+'</span><h1>طلب مواد '+r.id+'</h1><div class="actions"><span class="pill '+si.c+'">'+si.l+'</span><a class="tag" href="#p-'+p.id+'">'+esc(p.short)+'</a><span class="tag">'+DEPTS[r.dept]+'</span></div></div></div>';
+  h+='<div class="card"><div class="steps">'+STAGES.map((s,i)=>{let c='';if(r.stage==='rejected'){c=i<rejIdx?'done':i===rejIdx?'rej':''}else if(r.stage==='done'||i<idx)c='done';else if(i===idx)c='cur';return '<div class="step '+c+'"><span class="dot">'+(c==='done'?'✓':c==='rej'?'✕':i+1)+'</span>'+s.l+'</div>'}).join('')+'</div></div>';
+  h+='<div class="grid2"><div style="display:flex;flex-direction:column;gap:18px;min-width:0">';
+  h+=actionPanel(r,p);
+  h+='<div class="card"><h2>المواد المطلوبة</h2><div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th></tr></thead><tbody>'+r.items.map((it,i)=>'<tr><td class="num">'+(i+1)+'</td><td>'+esc(it.d)+'</td><td class="n">'+it.q+'</td><td>'+esc(it.u)+'</td></tr>').join('')+'</tbody></table></div>'+(r.note?'<p class="muted small" style="margin:10px 0 0">ملاحظة: '+esc(r.note)+'</p>':'')+'</div>';
+  if(r.quotes.length&&!(r.stage==='procurement'&&S.role==='procurement'))h+='<div class="card"><h2>عروض الأسعار</h2>'+quotesTable(r,false)+'</div>';
+  if(r.po)h+=poDoc(r,p);
+  h+='</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-'+p.id+'">'+esc(p.short)+'</a></dd><dt>بند BOQ</dt><dd>'+(r.boq?esc(r.boq+' '+p.boq.find(b=>b.c===r.boq).d):'<span style="color:var(--warn)">خارج BOQ</span>')+'</dd><dt>القسم</dt><dd>'+DEPTS[r.dept]+'</dd><dt>مقدم الطلب</dt><dd>'+esc(r.by)+'</dd><dt>تاريخ الطلب</dt><dd>'+fd(r.date)+'</dd><dt>مطلوب قبل</dt><dd>'+fd(r.need)+'</dd></dl></div>'+
+   '<div class="card"><h2>سجل الإجراءات</h2><ul class="log">'+r.hist.map(x=>'<li class="'+(/رفض/.test(x.a)?'r':'')+'"><div><b>'+esc(x.a)+'</b><div class="muted small">'+esc(x.by)+' · '+fd(x.t)+' '+esc(x.t.slice(11))+'</div>'+(x.note?'<div class="small">'+esc(x.note)+'</div>':'')+'</div></li>').join('')+'</ul></div></div></div>';
+  return h;
+}
+function rejStage(r){const last=r.hist[r.hist.length-1];return({head:'dept',procurement:'procurement',finance:'finance',gm:'gm'})[last.role]||'dept'}
+function budgetCheck(r,p){
+  const amt=reqAmt(r);const b=r.boq?p.boq.find(x=>x.c===r.boq):null;
+  const pb=budget(p),ps=spent(p),pc=committed(p,undefined,r.id);const premain=pb-ps-pc-amt;
+  let h='<div class="check">';
+  if(b){const is=itemSpent(p,b.c),ic=committed(p,b.c,r.id),rem=b.t-is-ic-amt;
+    h+='<div class="flag ok">✓ الطلب ضمن بند BOQ رقم '+esc(b.c)+': '+esc(b.d)+'</div>'+
+      '<div class="row"><span>قيمة البند في BOQ</span><b class="num">'+money(b.t)+'</b></div>'+
+      '<div class="row"><span>المصروف على البند</span><b class="num">'+money(is)+'</b></div>'+
+      '<div class="row"><span>طلبات أخرى معتمدة قيد الشراء</span><b class="num">'+money(ic)+'</b></div>'+
+      '<div class="row"><span>قيمة هذا الطلب</span><b class="num">'+money(amt)+'</b></div>'+
+      '<div class="row"><span>المتبقي في البند بعد الطلب</span><b class="num" style="color:'+(rem<0?'var(--bad)':'var(--ok)')+'">'+money(rem)+'</b></div>';
+    if(rem<0)h+='<div class="flag bad">الطلب يتجاوز قيمة البند ب '+money(-rem)+' ر.ع</div>';
+  }else h+='<div class="flag warn">الطلب غير مرتبط ببند في BOQ. إذا كان عملاً خارج العقد، يُسجّل كعمل إضافي مع موافقة العميل.</div>';
+  h+='<div class="row"><span>ميزانية المشروع / المتبقي بعد الطلب</span><b class="num">'+money(pb)+' / <span style="color:'+(premain<0?'var(--bad)':'inherit')+'">'+money(premain)+'</span></b></div></div>';
+  return h;
+}
+function quotesTable(r,edit){
+  if(!r.quotes.length)return '<div class="empty">لم تُسجّل عروض أسعار بعد.</div>';
+  return '<div class="tbl"><table><thead><tr>'+(edit?'<th>اختيار</th>':'')+'<th>المورّد</th><th class="n">المبلغ</th><th>الدفع</th><th class="n">مدة التوريد</th>'+(edit?'<th></th>':'')+'</tr></thead><tbody>'+r.quotes.map((q,i)=>'<tr'+(q.sel&&!edit?' style="font-weight:600"':'')+'>'+(edit?'<td><input type="radio" name="qsel" data-act="qsel" data-v="'+i+'" '+(q.sel?'checked':'')+' style="width:auto" aria-label="اختيار '+esc(q.sup)+'"></td>':'')+'<td>'+esc(q.sup)+(q.sel&&!edit?' <span class="pill p-ok">المختار</span>':'')+'</td><td class="n">'+money(q.amt)+'</td><td>'+TERMS[q.terms]+'</td><td class="n">'+q.days+' يوم</td>'+(edit?'<td><button class="x" data-act="qdel" data-v="'+i+'" aria-label="حذف">×</button></td>':'')+'</tr>').join('')+'</tbody></table></div>';
+}
+function actionPanel(r,p){
+  const st=STAGES.find(s=>s.k===r.stage);
+  if(r.stage==='done')return '<div class="flag ok">تم إصدار أمر الشراء '+r.po.no+' وإرساله للمورّد.</div>';
+  if(r.stage==='rejected'){const l=r.hist[r.hist.length-1];return '<div class="flag bad">رُفض الطلب: '+esc(l.note||l.a)+'</div>'}
+  if(st.role!==S.role){
+    return '<div class="panel wait"><b>بانتظار '+ROLES[st.role].label+'</b><span class="muted small">'+st.l+'. غيّر "تجربة النظام بصفة" إلى '+ROLES[st.role].label+' لتجربة هذه الخطوة.</span>'+(['finance','gm'].includes(r.stage)?budgetCheck(r,p):'')+'</div>';
+  }
+  const noteF='<label class="fld"><span>ملاحظة (اختياري)</span><textarea id="actnote" placeholder="سبب الرفض أو أي توجيه"></textarea></label>';
+  if(r.stage==='dept')return '<div class="panel"><h2>موافقة رئيس القسم</h2><span class="small">راجع المواد والكميات. بعد موافقتك يروح الطلب مباشرة للمشتريات.</span>'+noteF+'<div class="actions"><button class="btn ok" data-act="approve" data-v="'+r.id+'">موافقة وإرسال للمشتريات</button><button class="btn bad" data-act="reject" data-v="'+r.id+'">رفض</button></div></div>';
+  if(r.stage==='procurement')return '<div class="panel"><h2>تسجيل عروض الأسعار</h2>'+quotesTable(r,true)+
+    '<form class="f" data-form="quote" data-v="'+r.id+'"><div class="fr"><label class="fld"><span>المورّد</span><input id="q-sup" required placeholder="اسم المورّد"></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="q-amt" type="number" min="0" step="0.001" required></label></div><div class="fr"><label class="fld"><span>طريقة الدفع</span><select id="q-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label><label class="fld"><span>مدة التوريد (يوم)</span><input id="q-days" type="number" min="0" value="3"></label></div><div><button class="btn" type="submit">+ إضافة العرض</button></div></form>'+
+    noteF+'<div class="actions"><button class="btn ok" data-act="approve" data-v="'+r.id+'" '+(selQuote(r)?'':'disabled')+'>إرسال العرض المختار للمالية</button><button class="btn bad" data-act="reject" data-v="'+r.id+'">إلغاء الطلب</button></div></div>';
+  if(r.stage==='finance')return '<div class="panel"><h2>تدقيق الميزانية</h2>'+budgetCheck(r,p)+noteF+'<div class="actions"><button class="btn ok" data-act="approve" data-v="'+r.id+'">ضمن الميزانية، إرسال للمدير العام</button><button class="btn bad" data-act="reject" data-v="'+r.id+'">رفض</button></div></div>';
+  if(r.stage==='gm'){const q=selQuote(r);return '<div class="panel"><h2>الاعتماد النهائي للشراء</h2><div class="check"><div class="row"><span>المورّد</span><b>'+esc(q.sup)+'</b></div><div class="row"><span>المبلغ</span><b class="num">'+money(q.amt)+' ر.ع</b></div><div class="row"><span>الدفع</span><b>'+TERMS[q.terms]+'</b></div></div>'+budgetCheck(r,p)+noteF+'<div class="actions"><button class="btn ok" data-act="approve" data-v="'+r.id+'">اعتماد الشراء</button><button class="btn bad" data-act="reject" data-v="'+r.id+'">رفض</button></div></div>'}
+  if(r.stage==='po'){const q=selQuote(r);return '<div class="panel"><h2>إصدار أمر الشراء</h2><span class="small">المدير العام اعتمد الشراء. أصدر أمر الشراء للمورّد <b>'+esc(q.sup)+'</b> بمبلغ <b class="num">'+money(q.amt)+'</b> ر.ع ('+TERMS[q.terms]+').</span><div class="actions"><button class="btn ok" data-act="approve" data-v="'+r.id+'">إصدار PO وإرساله للمورّد</button></div></div>'}
+  return '';
+}
+function poDoc(r,p){
+  const q=selQuote(r);const due=q.terms==='credit30'?(()=>{const d=D(r.po.date);d.setDate(d.getDate()+30);return iso(d)})():r.po.date;
+  return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">'+r.po.no+'</span></div><div style="text-align:end"><b>كربون للهندسة</b><div class="muted small">التاريخ '+fd(r.po.date)+'</div></div></div>'+
+   '<dl class="dl"><dt>المورّد</dt><dd>'+esc(q.sup)+'</dd><dt>المشروع / موقع التوريد</dt><dd>'+esc(p.short)+'</dd><dt>مرجع الطلب</dt><dd>'+r.id+(r.boq?' · بند BOQ '+r.boq:'')+'</dd><dt>شروط الدفع</dt><dd>'+TERMS[q.terms]+(q.terms==='credit30'?' · تاريخ الاستحقاق '+fd(due):' · يُدفع قبل التوريد')+'</dd><dt>مدة التوريد</dt><dd>'+q.days+' يوم</dd></dl>'+
+   '<div class="tbl"><table><thead><tr><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th></tr></thead><tbody>'+r.items.map(it=>'<tr><td>'+esc(it.d)+'</td><td class="n">'+it.q+'</td><td>'+esc(it.u)+'</td></tr>').join('')+'</tbody></table></div>'+
+   '<div class="ch"><span class="muted small">معتمد من المدير العام</span><b class="num">الإجمالي '+money(q.amt)+' ر.ع</b></div></div>';
+}
+function vPetty(){
+  const pend=S.petty.filter(c=>c.status==='pending'),tot=S.petty.filter(c=>c.status==='approved').reduce((a,c)=>a+c.amt,0);
+  return demoNote+'<div class="head"><div class="t"><h1>بيتي كاش</h1><span class="muted">مصروفات سريعة تُعتمد من المدير العام وتُحسب على المشروع</span></div><div class="actions"><button class="btn pri" data-act="newPetty">+ طلب بيتي كاش</button></div></div>'+
+   '<div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><span class="l">بانتظار اعتماد المدير العام</span><span class="v">'+pend.length+'</span><span class="s num">'+money(pend.reduce((a,c)=>a+c.amt,0))+' ر.ع</span></div><div class="kpi"><span class="l">إجمالي المعتمد</span><span class="v">'+money(tot)+' <small>ر.ع</small></span><span class="s">محسوب ضمن مصروفات المشاريع</span></div></div>'+
+   '<div class="card">'+pettyTable(S.petty,true)+'</div>';
+}
+function vInbox(){
+  const q=myQueue();
+  let h='<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">'+ROLES[S.role].label+'</span></div></div>';
+  if(!q.n){h+='<div class="card empty">ما عندك شي ينتظر إجراءك الحين.'+(S.role==='owner'?' صاحب الشركة يتابع من لوحة المتابعة. جرّب تغيير الصفة إلى المدير العام أو المالية أو المشتريات.':'')+'</div>';return h}
+  if(q.reqs.length)h+='<div class="card"><h2>طلبات المواد</h2>'+reqTable(q.reqs,true)+'</div>';
+  if(q.pc.length)h+='<div class="card"><h2>بيتي كاش</h2>'+pettyTable(q.pc,true)+'</div>';
+  return h;
+}
+
+/* ---------- modals ---------- */
+function modal(title,body){document.getElementById('layer').innerHTML='<div class="ov" data-act="closeOv"><div class="modal" role="dialog" aria-modal="true" aria-label="'+esc(title)+'"><div class="mh"><h2>'+esc(title)+'</h2><button class="x" data-act="close" aria-label="إغلاق">×</button></div>'+body+'</div></div>';const f=document.querySelector('.modal input,.modal select');if(f)f.focus()}
+function closeModal(){document.getElementById('layer').innerHTML=''}
+function newReqForm(pid){
+  pid=pid||(location.hash.startsWith('#p-')?location.hash.slice(3):'incubators');const p=P(pid)||P('incubators');
+  modal('طلب مواد جديد','<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p" data-act="nrProj">'+projOptions(p.id)+'</select></label><label class="fld"><span>القسم</span><select id="nr-d">'+p.depts.map(d=>'<option value="'+d+'">'+DEPTS[d]+'</option>').join('')+'</select></label></div>'+
+   '<label class="fld"><span>بند BOQ</span><select id="nr-b">'+boqOptions(p,'',true)+'</select></label>'+
+   '<div class="fld"><span>المواد المطلوبة</span><div class="lines" id="nr-lines">'+lineRow()+'</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>'+
+   '<div class="fr"><label class="fld"><span>مطلوب قبل</span><input id="nr-need" type="date" value="'+iso(new Date(today.getTime()+5*864e5))+'"></label><label class="fld"><span>ملاحظة</span><input id="nr-note" placeholder="مثال: للطابق الأرضي"></label></div>'+
+   '<div class="actions"><button class="btn pri" type="submit">إرسال لرئيس القسم</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+}
+function lineRow(){return '<div class="line"><input placeholder="وصف المادة" class="l-d" required aria-label="وصف المادة"><input type="number" min="0" step="any" placeholder="الكمية" class="l-q" required aria-label="الكمية"><input placeholder="الوحدة" class="l-u" value="عدد" aria-label="الوحدة"><button type="button" class="x" data-act="delLine" aria-label="حذف">×</button></div>'}
+function newPettyForm(pid){
+  pid=pid||(location.hash.startsWith('#p-')?location.hash.slice(3):'incubators');const p=P(pid)||P('incubators');
+  modal('طلب بيتي كاش','<form class="f" data-form="petty"><div class="fr"><label class="fld"><span>المشروع</span><select id="pc-p" data-act="pcProj">'+projOptions(p.id)+'</select></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="pc-a" type="number" min="0" step="0.001" required></label></div>'+
+   '<label class="fld"><span>التفاصيل</span><textarea id="pc-d" required placeholder="وش اشتريت أو وش تحتاج، ولماذا كان عاجلاً"></textarea></label>'+
+   '<div class="fr"><label class="fld"><span>بند BOQ (اختياري)</span><select id="pc-b">'+boqOptions(p,'',true)+'</select></label><label class="fld"><span>صورة الفاتورة (اختياري)</span><input id="pc-f" type="file" accept="image/*,.pdf"></label></div>'+
+   '<div class="actions"><button class="btn pri" type="submit">إرسال للمدير العام</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+}
+function newVOForm(pid){
+  modal('إضافة عمل إضافي (Variation)','<form class="f" data-form="vo" data-v="'+pid+'"><label class="fld"><span>عنوان العمل الإضافي</span><input id="vo-t" required placeholder="مثال: غرفة تخزين إضافية"></label><label class="fld"><span>الوصف ونطاق العمل</span><textarea id="vo-d" required></textarea></label>'+
+   '<div class="fr"><label class="fld"><span>القيمة (ر.ع)</span><input id="vo-a" type="number" min="0" step="0.001" required></label><label class="fld"><span>موافقة العميل (PDF أو صورة)</span><input id="vo-f" type="file" accept="image/*,.pdf"></label></div>'+
+   '<span class="muted small">إذا أرفقت موافقة العميل، يُعتمد العمل الإضافي ويُضاف لقيمة المشروع. بدونها يبقى "بانتظار العميل".</span>'+
+   '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+}
+
+/* ---------- actions ---------- */
+const A={
+  filter:d=>{ui.filter=d.v;render()},
+  tab:d=>{ui.tab=d.v;render()},
+  reqFilter:d=>{ui.reqFilter=d.v;render()},
+  reset:()=>{S=seed();save();render();toast('رجعت البيانات التجريبية')},
+  newReq:d=>newReqForm(d.p),newPetty:d=>newPettyForm(d.p),newVO:d=>newVOForm(d.p),
+  close:closeModal,closeOv:(d,el,e)=>{if(e.target===el)closeModal()},
+  addLine:()=>{document.getElementById('nr-lines').insertAdjacentHTML('beforeend',lineRow())},
+  delLine:(d,el)=>{const ls=document.querySelectorAll('#nr-lines .line');if(ls.length>1)el.closest('.line').remove()},
+  qsel:d=>{const r=R(location.hash.slice(3));r.quotes.forEach((q,i)=>q.sel=i==d.v);save();render()},
+  qdel:d=>{const r=R(location.hash.slice(3));r.quotes.splice(+d.v,1);if(r.quotes.length&&!selQuote(r))r.quotes[0].sel=true;save();render()},
+  approve:d=>{
+    const r=R(d.v),note=(document.getElementById('actnote')||{}).value||'';const by=me(),t=nowStamp();
+    const msgs={dept:'وافق رئيس القسم',procurement:'سجّل عروض الأسعار وأرسل للمالية',finance:'وافقت المالية',gm:'اعتمد المدير العام'};
+    if(r.stage==='po'){S.seq.po++;r.po={no:'PO-2026-0'+S.seq.po,date:iso(today)};r.hist.push({t,by,role:S.role,a:'أصدر أمر الشراء '+r.po.no+' وأرسله للمورّد',note});r.stage='done';toast('صدر أمر الشراء '+r.po.no)}
+    else{r.hist.push({t,by,role:S.role,a:msgs[r.stage],note});const i=STAGES.findIndex(s=>s.k===r.stage);r.stage=STAGES[i+1].k;toast('تم. الطلب الحين عند: '+ROLES[STAGES[i+1].role].label)}
+    save();render();
+  },
+  reject:d=>{
+    const r=R(d.v),note=(document.getElementById('actnote')||{}).value||'';
+    if(!note.trim()){toast('اكتب سبب الرفض في خانة الملاحظة');document.getElementById('actnote').focus();return}
+    r.hist.push({t:nowStamp(),by:me(),role:S.role,a:r.stage==='procurement'?'ألغت المشتريات الطلب':'رفض '+ROLES[S.role].label,note});r.stage='rejected';save();render();toast('تم رفض الطلب');
+  },
+  pcOk:d=>{const c=S.petty.find(x=>x.id===d.v);c.status='approved';c.dec=iso(today);save();render();toast('اعتُمد '+c.id+' وأُضيف لمصروفات المشروع')},
+  pcNo:d=>{const c=S.petty.find(x=>x.id===d.v);c.status='rejected';save();render();toast('رُفض '+c.id)},
+  voApprove:d=>{const v=S.variations.find(x=>x.id===d.v);modal('رفع موافقة العميل - '+v.title,'<form class="f" data-form="voFile" data-v="'+v.id+'"><label class="fld"><span>ملف الموافقة</span><input id="vf" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع واعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>')}
+};
+document.addEventListener('click',e=>{
+  const go=e.target.closest('[data-go]');
+  const a=e.target.closest('[data-act]');
+  if(a&&a.tagName!=='SELECT'){const k=a.dataset.act;if(A[k]){if(k!=='closeOv'&&k!=='qsel')e.preventDefault();A[k](a.dataset,a,e);return}}
+  if(go&&!e.target.closest('a,button,input')){location.hash=go.dataset.go}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='Enter'){const g=e.target.closest&&e.target.closest('[data-go]');if(g&&g.tagName==='DIV')location.hash=g.dataset.go}});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.id==='role'||t.id==='role2'){S.role=t.value;save();render();toast('أنت الحين: '+ROLES[S.role].label);return}
+  if(t.dataset.prog){const p=P(t.dataset.p),b=p.boq.find(x=>x.c===t.dataset.prog);b.p=Math.max(0,Math.min(100,Math.round(+t.value||0)));save();render();toast('تم تحديث إنجاز البند '+b.c);return}
+  if(t.id==='nr-p'){const p=P(t.value);document.getElementById('nr-b').innerHTML=boqOptions(p,'',true);document.getElementById('nr-d').innerHTML=p.depts.map(d=>'<option value="'+d+'">'+DEPTS[d]+'</option>').join('')}
+  if(t.id==='pc-p'){document.getElementById('pc-b').innerHTML=boqOptions(P(t.value),'',true)}
+});
+document.addEventListener('submit',e=>{
+  const f=e.target;e.preventDefault();const v=id=>document.getElementById(id).value;
+  const fileName=id=>{const el=document.getElementById(id);return el&&el.files&&el.files[0]?el.files[0].name:''};
+  if(f.dataset.form==='req'){
+    const items=[...f.querySelectorAll('.line')].map(l=>({d:l.querySelector('.l-d').value.trim(),q:+l.querySelector('.l-q').value,u:l.querySelector('.l-u').value.trim()||'عدد'})).filter(i=>i.d);
+    const id='REQ-'+(S.seq.req++);
+    S.requests.push({id,pid:v('nr-p'),boq:v('nr-b')||null,dept:v('nr-d'),by:me(),date:iso(today),need:v('nr-need'),items,note:v('nr-note'),stage:'dept',quotes:[],hist:[{t:nowStamp(),by:me(),role:S.role,a:'أنشأ الطلب',note:''}]});
+    save();closeModal();location.hash='r-'+id;render();toast('أُرسل الطلب '+id+' لرئيس القسم');
+  }else if(f.dataset.form==='quote'){
+    const r=R(f.dataset.v);r.quotes.forEach(q=>q.sel=false);
+    r.quotes.push({sup:v('q-sup'),amt:+v('q-amt'),terms:v('q-terms'),days:+v('q-days')||0,sel:true});
+    const best=r.quotes.reduce((a,q)=>q.amt<a.amt?q:a);r.quotes.forEach(q=>q.sel=q===best);
+    save();render();toast('أُضيف العرض، واختير الأرخص تلقائياً');
+  }else if(f.dataset.form==='petty'){
+    const id='PC-'+(S.seq.pc++);
+    S.petty.push({id,pid:v('pc-p'),boq:v('pc-b')||null,amt:+v('pc-a'),d:v('pc-d'),by:me(),date:iso(today),status:'pending',file:fileName('pc-f')});
+    save();closeModal();render();toast('أُرسل '+id+' للمدير العام');
+  }else if(f.dataset.form==='vo'){
+    const file=fileName('vo-f');const id='VO-'+String(S.seq.vo++).padStart(2,'0');
+    S.variations.push({id,pid:f.dataset.v,title:v('vo-t'),d:v('vo-d'),amt:+v('vo-a'),file,client:file?'approved':'pending',date:iso(today),by:me()});
+    ui.tab='vo';save();closeModal();render();toast(file?'أُضيف العمل الإضافي ومعه موافقة العميل':'أُضيف العمل الإضافي بانتظار موافقة العميل');
+  }else if(f.dataset.form==='voFile'){
+    const vo=S.variations.find(x=>x.id===f.dataset.v);vo.file=fileName('vf');vo.client='approved';save();closeModal();render();toast('اعتُمد العمل الإضافي وأُضيف لقيمة المشروع');
+  }
+});
+window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#p-'))ui.tab=ui.tab||'boq';render();window.scrollTo(0,0)});
+
+function render(){
+  const q=myQueue();const h=location.hash.slice(1)||'dashboard';
+  const sec=h.startsWith('p-')?'projects':h.startsWith('r-')?'requests':h;
+  const items=[['dashboard','لوحة المتابعة','dash'],['projects','المشاريع','proj'],['requests','طلبات المواد','req'],['petty','بيتي كاش','cash'],['inbox','بانتظار إجرائي','inbox']];
+  document.getElementById('nav').innerHTML=items.map(([k,l,i])=>'<a href="#'+k+'" class="'+(sec===k?'on':'')+'">'+ico(i)+l+(k==='inbox'&&q.n?'<span class="badge">'+q.n+'</span>':'')+'</a>').join('');
+  document.getElementById('bnav').innerHTML=items.map(([k,l,i])=>'<a href="#'+k+'" class="'+(sec===k?'on':'')+'">'+ico(i)+'<span>'+l.replace('بانتظار إجرائي','إجرائي').replace('لوحة المتابعة','المتابعة').replace('طلبات المواد','الطلبات')+'</span>'+(k==='inbox'&&q.n?'<span class="badge">'+q.n+'</span>':'')+'</a>').join('');
+  const opts=Object.entries(ROLES).map(([k,r])=>'<option value="'+k+'"'+(k===S.role?' selected':'')+'>'+r.label+'</option>').join('');
+  document.getElementById('role').innerHTML=opts;
+  document.getElementById('view').innerHTML='<div class="mrole"><label for="role2" class="small muted">تجربة بصفة</label><select id="role2">'+opts+'</select></div>'+views();
+}
+render();
+})();
+</script>
