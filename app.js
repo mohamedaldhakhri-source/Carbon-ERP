@@ -474,7 +474,7 @@ function vNewProject() {
     '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
     '<div class="fld"><span>الأقسام المشاركة (تتحدد تلقائياً من توزيع البنود، وتقدر تعدلها)</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
   h += '<div class="card"><h2>2. جدول الكميات BOQ</h2>' +
-    '<div class="fr"><label class="fld"><span>ملف BOQ (PDF أو Excel أو صورة)</span><input id="np-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy === 'boq' ? 'جاري التحليل… (حتى دقيقتين)' : 'حلّل الملف بالذكاء الاصطناعي') + '</button></div></div>' +
+    '<div class="fr"><label class="fld"><span>ملف BOQ (PDF أو Excel أو صورة)</span><input id="np-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy === 'boq' ? 'جاري التحليل…' : 'حلّل الملف بالذكاء الاصطناعي') + '</button></div></div>' +
     '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
     '<span class="hint">الأعمدة بالترتيب: رقم البند، الوصف، الكمية، الوحدة، سعر الوحدة، الإجمالي. السطر اللي فيه رقم ووصف فقط يُعتبر عنوان قسم.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
     boqReview(n) + '</div>';
@@ -539,28 +539,67 @@ function secSummary(sections, items) {
   return order.map(sc => { const it = items.filter(i => i.sec === sc); const s = sections.find(x => x[0] === sc); return { code: sc, name: s ? s[1] : sc, items: it.length, total: it.reduce((a, i) => a + (+i.total || 0), 0), depts: [...new Set(it.map(i => i.dept).filter(Boolean))] }; }).filter(s => s.items);
 }
 const aiTasks = list => list.map(t => ({ name: t.name, start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase }));
+function loadScript(src, name) {
+  if (window[name]) return Promise.resolve(window[name]);
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window[name]); s.onerror = () => no(new Error('تعذّر تحميل مكتبة القراءة')); document.head.appendChild(s); });
+}
+async function pdfParts(file, per) {
+  const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js', 'PDFLib');
+  const src = await L.PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+  const n = src.getPageCount(), out = [];
+  if (n <= per) return [await fileB64(file)];
+  for (let i = 0; i < n; i += per) {
+    const d = await L.PDFDocument.create();
+    const pages = await d.copyPages(src, Array.from({ length: Math.min(per, n - i) }, (_, k) => i + k));
+    pages.forEach(pg => d.addPage(pg));
+    out.push(await d.saveAsBase64());
+  }
+  return out;
+}
+function textParts(text, per) {
+  const lines = text.split('\n'); if (lines.length <= per) return [text];
+  const head = lines.slice(0, 4).join('\n'), out = [];
+  for (let i = 0; i < lines.length; i += per) out.push((i ? head + '\n...\n' : '') + lines.slice(i, i + per).join('\n'));
+  return out;
+}
+// Runs jobs a few at a time; each part retries once before giving up.
+async function pool(jobs, size, onDone) {
+  const res = new Array(jobs.length); let next = 0, done = 0;
+  async function worker() { while (next < jobs.length) { const i = next++; try { res[i] = await jobs[i](); } catch (e) { res[i] = await jobs[i](); } onDone(++done, jobs.length); } }
+  await Promise.all(Array.from({ length: Math.min(size, jobs.length) }, worker));
+  return res;
+}
+const quietAi = async body => { const { data, error } = await sb.functions.invoke('analyze-boq', { body }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
+function setBusyText(t) { const b = document.querySelector('[data-act=npAnalyze]'); if (b) b.textContent = t; }
 async function npAnalyze() {
   const n = npState(); npSync();
   const f = (document.getElementById('np-file') || {}).files; const file = f && f[0];
   if (!file) return toast('اختر ملف BOQ أولاً', true);
-  if (file.size > 10 * 1024 * 1024) return toast('حجم الملف أكبر من 10 ميجا', true);
-  const name = file.name.toLowerCase(); const body = { mode: 'extract' };
+  if (file.size > 20 * 1024 * 1024) return toast('حجم الملف أكبر من 20 ميجا', true);
+  const name = file.name.toLowerCase(); let bodies;
   try {
-    if (/\.(xlsx|xls|csv)$/.test(name)) body.text = await sheetText(file);
-    else body.file = { name: file.name, mime: file.type || (name.endsWith('.pdf') ? 'application/pdf' : ''), data: await fileB64(file) };
+    if (/\.(xlsx|xls|csv)$/.test(name)) bodies = textParts(await sheetText(file), 120).map(t => ({ text: t }));
+    else if (name.endsWith('.pdf') || file.type === 'application/pdf') bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
+    else bodies = [{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }];
   } catch (e) { return toast(errMsg(e), true); }
-  n.busy = 'boq'; render();
+  n.busy = 'boq'; render(); setBusyText('جاري التحليل… 0 من ' + bodies.length + ' أجزاء');
   try {
-    const d = await ai(body);
-    n.sections = (d.sections || []).map(s => [s.code, s.name]);
-    n.items = (d.items || []).map(i => ({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], dept: i.dept || null }));
-    n.stated = +d.stated_total || 0; n.notes = d.notes || ''; addDepts(n);
-    toast('تمت قراءة ' + n.items.length + ' بند وتوزيعها على الأقسام. راجعها تحت');
-  } catch (e) { } finally { n.busy = ''; render(); }
+    const parts = await pool(bodies.map((b, i) => () => quietAi(Object.assign({ mode: 'extract', part: { n: i + 1, of: bodies.length } }, b))), 4, (d, t) => setBusyText('جاري التحليل… ' + d + ' من ' + t + ' أجزاء'));
+    const secs = [], items = [], notes = []; let stated = 0;
+    parts.forEach(d => {
+      (d.sections || []).forEach(x => { if (!secs.find(y => y[0] === x.code)) secs.push([x.code, x.name]); });
+      (d.items || []).forEach(i => { if (!items.find(y => y.code === i.code)) items.push({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], dept: i.dept || null }); });
+      if (+d.stated_total > stated) stated = +d.stated_total;
+      if (d.notes && d.notes.trim()) notes.push(d.notes.trim());
+    });
+    n.sections = secs; n.items = items; n.stated = stated; n.notes = notes.join(' · '); addDepts(n);
+    toast('تمت قراءة ' + items.length + ' بند وتوزيعها على الأقسام. راجعها تحت');
+  } catch (e) { toast(errMsg(e), true); } finally { n.busy = ''; render(); }
 }
 async function classifyItems(items) {
-  const d = await ai({ mode: 'classify', items: items.map(i => ({ code: i.code, description: i.desc, section: i.secName || i.sec })) });
-  const m = {}; (d.items || []).forEach(x => { m[x.code] = x.dept; }); return m;
+  const chunks = []; for (let i = 0; i < items.length; i += 100) chunks.push(items.slice(i, i + 100));
+  const res = await pool(chunks.map(c => () => quietAi({ mode: 'classify', items: c.map(i => ({ code: i.code, description: i.desc, section: i.secName || i.sec })) })), 4, () => {});
+  const m = {}; res.forEach(d => (d.items || []).forEach(x => { m[x.code] = x.dept; })); return m;
 }
 const A2 = {
   npReset: () => { ui.np = null; render(); },
@@ -572,7 +611,7 @@ const A2 = {
   },
   npClassify: async (d, el) => {
     const n = npState(); npSync(); el.disabled = true; el.textContent = 'جاري التوزيع…';
-    try { const m = await classifyItems(n.items.map(i => Object.assign({ secName: (n.sections.find(s => s[0] === i.sec) || [])[1] }, i))); n.items.forEach(i => { if (m[i.code]) i.dept = m[i.code]; }); addDepts(n); toast('تم توزيع البنود على الأقسام'); } catch (e) { }
+    try { const m = await classifyItems(n.items.map(i => Object.assign({ secName: (n.sections.find(s => s[0] === i.sec) || [])[1] }, i))); n.items.forEach(i => { if (m[i.code]) i.dept = m[i.code]; }); addDepts(n); toast('تم توزيع البنود على الأقسام'); } catch (e) { toast(errMsg(e), true); }
     render();
   },
   aiSched: async (d, el) => {
@@ -624,7 +663,7 @@ const A2 = {
       const ds = [...new Set(p.depts.concat(Object.keys(groups)))];
       if (ds.length !== p.depts.length) await run(sb.from('projects').update({ depts: ds }).eq('id', p.id));
       toast('تم توزيع ' + Object.values(groups).reduce((a, g) => a + g.length, 0) + ' بند على الأقسام');
-    } catch (e) { }
+    } catch (e) { toast(errMsg(e), true); }
     refresh();
   },
   bdeptFilter: d => { ui.bdept = d.v; render(); },

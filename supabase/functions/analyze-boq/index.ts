@@ -12,6 +12,7 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
+// The browser splits big files into small parts so each call stays well inside the Edge Function time limit.
 const MODEL = "claude-opus-5-5";
 const DEPTS = ["arch", "interior", "fitout", "joinery", "contracting", "supervision"];
 const DEPT_GUIDE = `Company departments (use these exact keys):
@@ -101,13 +102,14 @@ type Body = {
   text?: string;
   items?: { code: string; description: string; section?: string }[];
   project?: { name?: string; type?: string; start_date: string; end_date: string; depts?: string[]; location?: string };
+  part?: { n: number; of: number };
   sections?: { code: string; name: string; total: number; items: number; depts: string[] }[];
 };
 
 async function ask(client: Anthropic, system: string, content: Anthropic.ContentBlockParam[], schema: Record<string, unknown>, effort: "low" | "medium") {
   const stream = client.messages.stream({
     model: MODEL,
-    max_tokens: 64000,
+    max_tokens: 32000,
     thinking: { type: "adaptive" },
     output_config: { effort, format: { type: "json_schema", schema } },
     system,
@@ -153,7 +155,8 @@ Deno.serve(async (req) => {
       if (!content.length) return json({ error: "ارفع ملف BOQ أولاً" }, 400);
       content.push({
         type: "text",
-        text: "Extract every priced line item of this Bill of Quantities, in document order, with its section, and assign each item to the one department that will deliver it. Section header rows go in sections, not items. Keep numbers exactly as printed (no rounding, no thousands separators). If a line has a total but no quantity, use qty 1. Skip subtotal, VAT and grand-total rows. Write notes in Arabic.",
+        text: (body.part && body.part.of > 1 ? `This is part ${body.part.n} of ${body.part.of} of a longer BOQ. Extract only what is on this part. If an item's section header is not in this part, use the item number's prefix before the first dot as section_code. ` : "") +
+          "Extract every priced line item of this Bill of Quantities, in document order, with its section, and assign each item to the one department that will deliver it. Section header rows go in sections, not items. Keep numbers exactly as printed (no rounding, no thousands separators). If a line has a total but no quantity, use qty 1. Skip subtotal, VAT and grand-total rows. Write notes in Arabic, and leave notes empty if there is nothing worth flagging.",
       });
       const { data, usage } = await ask(client,
         "You read construction and fit-out BOQs for Carbon Engineering, a company in Oman.\n" + DEPT_GUIDE,
