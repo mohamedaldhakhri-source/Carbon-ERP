@@ -1,20 +1,20 @@
 /* Layout: right-hand sidebar (RTL start) on desktop, bottom tab bar on phone; content is cards of tables built for scanning. */
 :root{
-  --bg:#F3F5F6; --surface:#FFFFFF; --sunk:#EBEEF0; --ink:#1A2026; --muted:#5B6570; --line:#DDE2E6;
-  --accent:#0D6772; --accent-ink:#FFFFFF; --accent-soft:#DDEFF0;
-  --ok:#2C7A4B; --ok-soft:#E1F2E7; --warn:#A8670E; --warn-soft:#FBEFD9; --bad:#B4341B; --bad-soft:#FBE3DD; --idle:#6B7280; --idle-soft:#ECEEF1;
+  --bg:#F4F4F2; --surface:#FFFFFF; --sunk:#ECECE8; --ink:#111111; --muted:#5E5E5A; --line:#DEDED8;
+  --accent:#146698; --accent-ink:#FFFFFF; --accent-soft:#E1ECF4; --brand-y:#DDC762; --brand-r:#B82039; --brand-b:#146698; --side:#0B0B0B; --side-ink:#F2F2F2; --side-muted:#9A9A9A;
+  --ok:#2C7A4B; --ok-soft:#E1F2E7; --warn:#9A7A12; --warn-soft:#FAF2D3; --bad:#B82039; --bad-soft:#F9E1E5; --idle:#6B7280; --idle-soft:#ECEEF1;
   --font:"IBM Plex Sans Arabic","Segoe UI",Tahoma,system-ui,sans-serif;
   --display:"Readex Pro","IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif;
   --r:10px;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#111518; --surface:#192024; --sunk:#141A1D; --ink:#E5E9EC; --muted:#99A4AE; --line:#2A3339;
-  --accent:#4DB3BE; --accent-ink:#0B1F22; --accent-soft:#163338;
-  --ok:#5CC487; --ok-soft:#173225; --warn:#E3A84A; --warn-soft:#352813; --bad:#F07F66; --bad-soft:#3A1E18; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}}
+  --bg:#121212; --surface:#1B1B1B; --sunk:#151515; --ink:#EDEDEA; --muted:#A3A39D; --line:#2C2C2A;
+  --accent:#4C9FD3; --accent-ink:#06121B; --accent-soft:#132A3A;
+  --ok:#5CC487; --ok-soft:#173225; --warn:#DDC762; --warn-soft:#2E2914; --bad:#EE6A80; --bad-soft:#3A1820; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#111518; --surface:#192024; --sunk:#141A1D; --ink:#E5E9EC; --muted:#99A4AE; --line:#2A3339;
-  --accent:#4DB3BE; --accent-ink:#0B1F22; --accent-soft:#163338;
-  --ok:#5CC487; --ok-soft:#173225; --warn:#E3A84A; --warn-soft:#352813; --bad:#F07F66; --bad-soft:#3A1E18; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}
+  --bg:#121212; --surface:#1B1B1B; --sunk:#151515; --ink:#EDEDEA; --muted:#A3A39D; --line:#2C2C2A;
+  --accent:#4C9FD3; --accent-ink:#06121B; --accent-soft:#132A3A;
+  --ok:#5CC487; --ok-soft:#173225; --warn:#DDC762; --warn-soft:#2E2914; --bad:#EE6A80; --bad-soft:#3A1820; --idle:#9CA3AF; --idle-soft:#262D33; color-scheme:dark}
 html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14.5px;line-height:1.55}
 *{box-sizing:border-box}
@@ -27,7 +27,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .small{font-size:.84rem}
 
 .app{display:grid;grid-template-columns:232px 1fr;min-height:100%}
-.side{background:var(--surface);border-inline-end:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh}
+.side{background:var(--surface);padding:18px 14px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 6px}
 .mark{width:34px;height:34px;border-radius:8px;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-family:var(--display);font-weight:600;font-size:1.05rem}
 .brand b{font-family:var(--display);font-size:1.05rem;display:block;line-height:1.1}
@@ -207,3 +207,39 @@ textarea{min-height:70px;resize:vertical}
 .chk label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
 .chk input{width:auto}
 @media print{.side,.bnav,.mrole,.head .actions,.panel,.btn{display:none!important}.app{display:block}main{padding:0}.card,.po{border:0}}
+
+/* ---------- Carbon brand: black sidebar, Mondrian primaries ---------- */
+.side{background:var(--side);color:var(--side-ink);border-inline-end:0}
+.side .brand{padding:6px 6px 14px;border-bottom:1px solid #222}
+.side .brand img{width:42px;height:auto;display:block}
+.side .brand b{color:#fff;letter-spacing:.12em;font-size:1.05rem}
+.side .brand span{color:var(--side-muted);letter-spacing:.04em}
+.side .nav a{color:var(--side-ink);border-radius:0;border-inline-start:3px solid transparent}
+.side .nav a:hover{background:#1A1A1A}
+.side .nav a.on{background:#1A1A1A;color:#fff;border-inline-start-color:var(--brand-y)}
+.side .nav a.on svg{color:var(--brand-y)}
+.side .rolebox{background:#161616;border-radius:0}
+.side .rolebox .muted,.side .rolebox button{color:var(--side-muted)}
+.side .rolebox b{color:#fff}
+.stripe{display:flex;height:4px;width:100%}
+.stripe i{flex:1}
+.stripe i:nth-child(1){background:#fff;flex:.6}.stripe i:nth-child(2){background:var(--brand-r)}.stripe i:nth-child(3){background:var(--brand-y);flex:2}.stripe i:nth-child(4){background:var(--brand-b)}
+.side .stripe{margin-top:auto}
+.btn.pri{border-radius:4px}
+.kpi{border-radius:4px}
+.card{border-radius:6px}
+.kpi:nth-child(1){box-shadow:inset 0 3px 0 var(--brand-y)}
+.kpi:nth-child(2){box-shadow:inset 0 3px 0 var(--brand-b)}
+.kpi:nth-child(3){box-shadow:inset 0 3px 0 var(--brand-r)}
+.kpi:nth-child(4){box-shadow:inset 0 3px 0 var(--ink)}
+.mrole{background:var(--side);color:var(--side-ink);border-color:var(--side)}
+.mrole img{height:28px}
+.mrole .linkbtn{color:var(--brand-y)}
+.bnav a.on{color:var(--brand-b)}
+/* login */
+.auth{background:var(--side)}
+.auth .box{border-radius:6px;border:0;overflow:hidden;padding:0;gap:0}
+.auth .logo{background:#000;display:flex;justify-content:center;padding:28px 24px 18px}
+.auth .logo img{width:150px;height:auto}
+.auth .inner{padding:24px;display:flex;flex-direction:column;gap:16px}
+#root{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}#root>*{flex:1}

@@ -22,6 +22,7 @@ const ICONS = {
   inbox: '<path d="M3 13l3-9h12l3 9v7H3zm2 0h5a2 2 0 004 0h5" fill="none" stroke="currentColor" stroke-width="2"/>',
   users: '<path d="M9 11a4 4 0 100-8 4 4 0 000 8zm-7 10v-1a6 6 0 0112 0v1zm14-10a3 3 0 100-6m2 16v-1a5 5 0 00-3-4.6" fill="none" stroke="currentColor" stroke-width="2"/>'
 };
+const LOGO = '<div class="logo"><img src="assets/logo.png" alt="Carbon Engineering Design"></div><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div>';
 const ico = k => '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICONS[k] + '</svg>';
 
 /* ---------- state ---------- */
@@ -153,7 +154,7 @@ async function refresh() { try { await loadAll(); render(); } catch (e) { toast(
 /* ---------- auth ---------- */
 function vAuth() {
   const signup = ui.authMode === 'signup';
-  return '<div class="auth"><div class="box"><div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div>' +
+  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner">' +
     '<h1>' + (signup ? 'حساب جديد' : 'تسجيل الدخول') + '</h1>' + (ui.authErr ? '<div class="err">' + esc(ui.authErr) + '</div>' : '') +
     '<form class="f" data-form="' + (signup ? 'signup' : 'login') + '">' +
     (signup ? '<label class="fld"><span>الاسم الكامل</span><input id="a-name" required autocomplete="name"></label>' : '') +
@@ -161,10 +162,10 @@ function vAuth() {
     '<label class="fld"><span>كلمة المرور</span><input id="a-pass" type="password" required minlength="6" autocomplete="' + (signup ? 'new-password' : 'current-password') + '" dir="ltr"></label>' +
     '<button class="btn pri" type="submit">' + (signup ? 'إنشاء الحساب' : 'دخول') + '</button></form>' +
     '<span class="small muted">' + (signup ? 'عندك حساب؟ ' : 'موظف جديد؟ ') + '<button class="linkbtn" data-act="authMode">' + (signup ? 'سجّل دخول' : 'أنشئ حساب') + '</button></span>' +
-    (signup ? '<span class="hint">بعد إنشاء الحساب، يفعّله مدير النظام ويحدد دورك.</span>' : '') + '</div></div>';
+    (signup ? '<span class="hint">بعد إنشاء الحساب، يفعّله مدير النظام ويحدد دورك.</span>' : '') + '</div></div></div>';
 }
 function vPending() {
-  return '<div class="auth"><div class="box"><div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div>';
+  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner"><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div></div>';
 }
 
 /* ---------- views ---------- */
@@ -565,10 +566,10 @@ function render() {
   if (isAdmin()) items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
   const pendUsers = isAdmin() ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
-  root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><div class="mark">C</div><div><b>كربون</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
+  root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
     items.map(([k, l, i]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + l + badge(k) + '</a>').join('') +
-    '</nav><div class="rolebox"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
-    '<main><div class="wrap"><div class="mrole"><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + views() + '</div></main>' +
+    '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
+    '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + views() + '</div></main>' +
     '<nav class="bnav">' + items.filter(x => x[0] !== 'users').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
 }
 
