@@ -65,7 +65,7 @@ const govOpts = sel => '<option value="">اختر المحافظة</option>' + O
 const wilOpts = (gov, sel) => '<option value="">اختر الولاية</option>' + (OMAN[gov] || []).map(w => '<option' + (w === sel ? ' selected' : '') + '>' + w + '</option>').join('');
 const deptSel = (sel, attrs, allowNone) => '<select ' + attrs + '>' + (allowNone || !sel ? '<option value="">' + (allowNone || 'غير محدد') + '</option>' : '') + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
 function nextCode() {
-  const y = today.getFullYear(), pre = 'CE-' + y + '-';
+  const d = new Date(), per = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0'), pre = 'CEC-PRJ-' + per + '-';
   const n = S.projects.map(p => String(p.code || '')).filter(c => c.startsWith(pre)).map(c => parseInt(c.slice(pre.length), 10) || 0);
   return pre + String((n.length ? Math.max.apply(null, n) : 0) + 1).padStart(3, '0');
 }
@@ -425,7 +425,7 @@ function vUsers() {
   return h;
 }
 function npState() {
-  if (!ui.np) ui.np = { f: { code: nextCode(), type: 'gov', start: iso(today), depts: [] }, sections: [], items: [], tasks: [], notes: '', stated: 0, schedNotes: '', busy: '' };
+  if (!ui.np) ui.np = { f: { code: '', type: 'gov', start: iso(today), depts: [] }, sections: [], items: [], tasks: [], notes: '', stated: 0, schedNotes: '', busy: '' };
   return ui.np;
 }
 function npSync() {
@@ -467,7 +467,7 @@ function vNewProject() {
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويقترح الجدول الزمني. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
     '<form class="f" data-form="project">' +
     '<div class="card"><h2>1. بيانات المشروع</h2>' +
-    '<div class="fr"><label class="fld"><span>كود المشروع</span><input data-npf="code" id="np-code" required value="' + fv('code') + '" dir="ltr"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
+    '<div class="fr"><label class="fld"><span>كود المشروع</span><input data-npf="code" id="np-code" value="' + fv('code') + '" dir="ltr" placeholder="يتولد تلقائياً مثل ' + nextCode() + '"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
     '<div class="fr"><label class="fld"><span>اسم المشروع الكامل</span><input data-npf="name" id="np-name" required value="' + fv('name') + '"></label><label class="fld"><span>اسم مختصر (يظهر في القوائم)</span><input data-npf="short" id="np-short" required value="' + fv('short') + '"></label></div>' +
     '<div class="fr"><label class="fld"><span>العميل</span><input data-npf="client" id="np-client" value="' + fv('client') + '"></label><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
@@ -789,10 +789,10 @@ document.addEventListener('submit', async e => {
       const n = npState(); npSync(); const pf = n.f;
       if (!pf.depts.length) { toast('اختر قسم واحد على الأقل', true); return; }
       if (pf.end < pf.start) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
-      if (S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
+      if ((pf.code || '').trim() && S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
       const badT = n.tasks.find(t => !String(t.name).trim() || !t.start_date || !t.end_date || t.end_date < t.start_date);
       if (badT) { toast('راجع الجدول الزمني: كل مهمة تحتاج اسم وتواريخ صحيحة', true); return; }
-      const pr = await run(sb.from('projects').insert({ code: pf.code.trim(), name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null }).select().single());
+      const pr = await run(sb.from('projects').insert(Object.assign((pf.code || '').trim() ? { code: pf.code.trim() } : {}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, sort: i }))));
