@@ -243,3 +243,12 @@ textarea{min-height:70px;resize:vertical}
 .auth .logo img{width:150px;height:auto}
 .auth .inner{padding:24px;display:flex;flex-direction:column;gap:16px}
 #root{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}#root>*{flex:1}
+/* smart BOQ */
+.dsel{padding:4px 6px;font-size:.8rem;min-width:110px}
+.tked td{padding:4px}
+.tked input,.tked select{padding:5px 6px;font-size:.85rem}
+.tked input[type=checkbox]{width:auto}
+.tked td:nth-child(2){min-width:200px}
+.tked tr.sec input{font-weight:600}
+.dot-w{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);margin-inline-start:5px;vertical-align:middle}
+details summary{margin:4px 0}

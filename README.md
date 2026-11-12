@@ -20,6 +20,11 @@
 
 أول حساب يصير "مدير النظام". بعدها مدير النظام يضيف الموظفين من صفحة المستخدمين (ما فيه تسجيل ذاتي). إضافة الموظفين تتم عبر Edge Function `manage-user`.
 
+## التحليل الذكي لـ BOQ
+عند إضافة مشروع جديد ترفع ملف BOQ (PDF أو Excel أو صورة)، والنظام يقرأ البنود بالذكاء الاصطناعي (Claude) ويوزع كل بند على القسم المسؤول، وتقدر تغيّر قسم أي بند. بعدها يقترح جدول زمني تقدر تعدله، والمدير العام يراجعه ويعتمده من صفحة المشروع. أي تعديل بعد الاعتماد يرجّع الجدول مسودة.
+- يعمل عبر Edge Function `analyze-boq` ويحتاج سر `ANTHROPIC_API_KEY` في Supabase (Edge Functions ← Secrets).
+- التكلفة حسب الاستخدام من حساب Anthropic.
+
 ## التشغيل
 1. في Supabase: افتح SQL Editor والصق محتوى `supabase/setup.sql` واضغط Run (مرة وحدة فقط).
 2. في Supabase: Authentication ← URL Configuration، حط رابط الموقع في Site URL.
@@ -29,5 +34,6 @@
 ## الملفات
 - `index.html`, `app.js`, `styles.css`, `config.js`: التطبيق.
 - `supabase/setup.sql`: الجداول والصلاحيات وبيانات مشروع الحاضنات (BOQ والجدول الزمني).
-- `supabase/migrations/`: نفس قاعدة البيانات مقسمة على ملفات.
+- `supabase/migrations/`: نفس قاعدة البيانات مقسمة على ملفات (من 004 فما فوق تُطبّق بعد setup.sql).
+- `supabase/functions/`: `manage-user` لإدارة الموظفين و`analyze-boq` للتحليل الذكي.
 - `prototype/`: النموذج التجريبي الأول ببيانات أمثلة.

@@ -3,6 +3,19 @@
 const sb = supabase.createClient(window.CARBON_CONFIG.supabaseUrl, window.CARBON_CONFIG.supabaseKey);
 
 const DEPTS = { arch: 'معماري', interior: 'تصميم داخلي', fitout: 'فيت أوت', joinery: 'منجرة', contracting: 'مقاولات', supervision: 'إشراف' };
+const OMAN = {
+  'مسقط': ['مسقط', 'مطرح', 'بوشر', 'السيب', 'العامرات', 'قريات'],
+  'ظفار': ['صلالة', 'طاقة', 'مرباط', 'رخيوت', 'ثمريت', 'ضلكوت', 'المزيونة', 'مقشن', 'شليم وجزر الحلانيات', 'سدح'],
+  'مسندم': ['خصب', 'دبا', 'بخا', 'مدحاء'],
+  'البريمي': ['البريمي', 'محضة', 'السنينة'],
+  'الداخلية': ['نزوى', 'بهلا', 'منح', 'الحمراء', 'أدم', 'إزكي', 'سمائل', 'بدبد', 'الجبل الأخضر'],
+  'شمال الباطنة': ['صحار', 'شناص', 'لوى', 'صحم', 'الخابورة', 'السويق'],
+  'جنوب الباطنة': ['الرستاق', 'العوابي', 'نخل', 'وادي المعاول', 'بركاء', 'المصنعة'],
+  'جنوب الشرقية': ['صور', 'الكامل والوافي', 'جعلان بني بو حسن', 'جعلان بني بو علي', 'مصيرة'],
+  'شمال الشرقية': ['إبراء', 'المضيبي', 'بدية', 'القابل', 'وادي بني خالد', 'دماء والطائيين', 'سناو'],
+  'الظاهرة': ['عبري', 'ينقل', 'ضنك'],
+  'الوسطى': ['هيماء', 'محوت', 'الدقم', 'الجازر']
+};
 const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', finance: 'المالية', pending: 'بانتظار التفعيل' };
 const STAGES = [
   { k: 'dept', l: 'موافقة رئيس القسم', role: 'head' },
@@ -45,6 +58,17 @@ const selQuote = r => (r.quotes || []).find(q => q.sel);
 const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
 const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
+const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
+const locText = p => [p.wil, p.gov].filter(Boolean).join('، ') + (p.loc ? (p.wil || p.gov ? ' - ' : '') + p.loc : '');
+const pName = p => p ? (p.code ? p.code + ' · ' : '') + p.short : '';
+const govOpts = sel => '<option value="">اختر المحافظة</option>' + Object.keys(OMAN).map(g => '<option' + (g === sel ? ' selected' : '') + '>' + g + '</option>').join('');
+const wilOpts = (gov, sel) => '<option value="">اختر الولاية</option>' + (OMAN[gov] || []).map(w => '<option' + (w === sel ? ' selected' : '') + '>' + w + '</option>').join('');
+const deptSel = (sel, attrs, allowNone) => '<select ' + attrs + '>' + (allowNone || !sel ? '<option value="">' + (allowNone || 'غير محدد') + '</option>' : '') + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
+function nextCode() {
+  const y = today.getFullYear(), pre = 'CE-' + y + '-';
+  const n = S.projects.map(p => String(p.code || '')).filter(c => c.startsWith(pre)).map(c => parseInt(c.slice(pre.length), 10) || 0);
+  return pre + String((n.length ? Math.max.apply(null, n) : 0) + 1).padStart(3, '0');
+}
 
 function contract(p) { return p.boq.reduce((a, b) => a + b.t, 0); }
 function varsApproved(p) { return S.variations.filter(v => v.pid === p.id && v.client === 'approved').reduce((a, v) => a + v.amt, 0); }
@@ -92,7 +116,8 @@ function canActOn(r) {
 function myQueue() {
   const reqs = S.requests.filter(canActOn);
   const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
-  return { reqs, pc, n: reqs.length + pc.length };
+  const sched = canSched() ? S.projects.filter(p => p.status !== 'closed' && p.tasks.length && p.sched.status !== 'approved') : [];
+  return { reqs, pc, sched, n: reqs.length + pc.length + sched.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
 function boqOptions(p, sel, allowNone) {
@@ -100,7 +125,7 @@ function boqOptions(p, sel, allowNone) {
   p.sections.forEach(([s, n]) => { const it = p.boq.filter(b => b.s === s); if (!it.length) return; h += '<optgroup label="' + esc(s + ' - ' + n) + '">'; it.forEach(b => { h += '<option value="' + esc(b.id) + '"' + (b.id === sel ? ' selected' : '') + '>' + esc(b.c + ' ' + b.d) + '</option>'; }); h += '</optgroup>'; });
   return h;
 }
-function projOptions(sel) { return S.projects.filter(p => p.status !== 'closed').map(p => '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.short) + '</option>').join(''); }
+function projOptions(sel) { return S.projects.filter(p => p.status !== 'closed').map(p => '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(pName(p)) + '</option>').join(''); }
 function toast(m, bad) { const t = document.createElement('div'); t.className = 'toast'; if (bad) t.style.background = 'var(--bad)'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 3200); }
 function errMsg(e) { const m = (e && (e.message || e.error_description)) || String(e); return m.replace(/^.*?ERROR:\s*/, ''); }
 async function run(promise, okMsg) {
@@ -134,11 +159,12 @@ async function loadAll() {
   S.profiles = profs;
   const codeOf = {}; items.forEach(b => { codeOf[b.id] = b.code; });
   S.projects = pr.map(p => ({
-    id: p.id, name: p.name, short: p.short_name, client: p.client, type: p.type, depts: p.depts || [], start: p.start_date, end: p.end_date,
-    status: p.status, stopReason: p.stop_reason, vat: +p.vat,
+    id: p.id, code: p.code, name: p.name, short: p.short_name, client: p.client, type: p.type, depts: p.depts || [], start: p.start_date, end: p.end_date,
+    status: p.status, stopReason: p.stop_reason, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
+    sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
     sections: secs.filter(s => s.project_id === p.id).map(s => [s.code, s.name]),
-    boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent })),
-    tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase }))
+    boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept })),
+    tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ id: t.id, n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase, dept: t.dept }))
   }));
   S.requests = reqs.map(r => ({
     id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
@@ -208,7 +234,7 @@ function projTable(list) {
   return '<div class="tbl"><table><thead><tr><th>المشروع</th><th>النوع</th><th>الأقسام</th><th>الإنجاز</th><th>الصرف من القيمة</th><th class="n">المتبقي للتسليم</th><th>الحالة</th></tr></thead><tbody>' +
     list.map(p => {
       const hh = health(p), pr = progress(p), b = budget(p), s = spent(p), dl = daysLeft(p);
-      return '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(p.short) + '</b><div class="muted small">' + esc(p.client) + '</div></td>' +
+      return '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(p.short) + '</b><div class="muted small"><span class="num">' + esc(p.code || '') + '</span>' + (p.client ? ' · ' + esc(p.client) : '') + (p.wil || p.gov ? ' · ' + esc(p.wil || p.gov) : '') + '</div></td>' +
         '<td><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'حكومي' : 'خاص') + '</span></td>' +
         '<td style="max-width:200px">' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</td>' +
         '<td style="min-width:150px"><div class="barrow">' + bar(pr, hh.k === 'late' ? 'bad' : hh.k === 'risk' ? 'warn' : '', p.status === 'closed' ? null : timePct(p)) + '<span>' + Math.round(pr) + '%</span></div></td>' +
@@ -225,8 +251,8 @@ function vProject(id) {
   const hh = health(p), pr = progress(p), c = contract(p), va = varsApproved(p), b = budget(p), s = spent(p), cm = committed(p), dl = daysLeft(p);
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
   const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
-  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(p.short) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'مشروع حكومي' : 'مشروع خاص') + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">' + esc(p.client) + '</span></div>' +
-    '<div class="actions">' + (p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">حالة المشروع</button>' : '') + '</div></div>';
+  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'مشروع حكومي' : 'مشروع خاص') + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
+    '<div class="actions">' + (p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
   if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
   h += '<div class="kpis">' +
     '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + (va ? '+ ' + money(va) + ' أعمال إضافية معتمدة' : 'لا توجد أعمال إضافية معتمدة') + '</span></div>' +
@@ -234,30 +260,50 @@ function vProject(id) {
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (p.status === 'closed' ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
   const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', p.tasks.length], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length]];
-  if (!p.tasks.length && ui.tab === 'time') ui.tab = 'boq';
-  h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || t[2]).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span></button>').join('') + '</div><div style="padding-top:14px">';
+  const showTime = p.tasks.length || isAdmin() || (ui.ted && ui.ted.pid === p.id);
+  if (!showTime && ui.tab === 'time') ui.tab = 'boq';
+  h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && p.tasks.length && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
   if (ui.tab === 'boq') {
     if (!p.boq.length) h += '<div class="empty">لا توجد بنود BOQ لهذا المشروع.</div>';
     else {
-      h += '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (canProg ? 'حدّث نسبة الإنجاز لكل بند مباشرة من الجدول.' : 'نسبة الإنجاز يحدّثها مهندس الموقع أو رئيس القسم.') + '</span></div><div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th class="n">المصروف</th><th>الإنجاز</th></tr></thead><tbody>';
+      const bf = ui.bdept && ui.bdept !== 'all' ? ui.bdept : null; const noDept = p.boq.filter(x => !x.dept).length;
+      const usedD = Object.keys(DEPTS).filter(k => p.boq.some(x => x.dept === k));
+      h += '<div class="ch" style="margin-bottom:8px"><div class="seg">' + [['all', 'كل الأقسام']].concat(usedD.map(k => [k, DEPTS[k]])).concat(noDept ? [['none', 'بدون قسم (' + noDept + ')']] : []).map(([k, l]) => '<button data-act="bdeptFilter" data-v="' + k + '" class="' + ((ui.bdept || 'all') === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+        (isAdmin() && noDept ? '<button class="btn sm" data-act="boqClassify" data-v="' + p.id + '">وزّع ' + noDept + ' بند على الأقسام بالذكاء</button>' : '') + '</div>' +
+        '<span class="muted small">' + (canProg ? 'حدّث نسبة الإنجاز لكل بند مباشرة من الجدول.' : 'نسبة الإنجاز يحدّثها مهندس الموقع أو رئيس القسم.') + (isAdmin() ? ' تقدر تغيّر القسم المسؤول عن أي بند.' : '') + '</span>' +
+        '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th class="n">المصروف</th><th>الإنجاز</th></tr></thead><tbody>';
+      const match = x => !bf || (bf === 'none' ? !x.dept : x.dept === bf);
       p.sections.forEach(([sc, sn]) => {
-        const it = p.boq.filter(x => x.s === sc); if (!it.length) return; const st = it.reduce((a, x) => a + x.t, 0); const ss = it.reduce((a, x) => a + itemSpent(p, x.c), 0);
-        h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td></td><td></td><td class="n">' + money(st) + '</td><td class="n">' + money(ss) + '</td><td><div class="barrow">' + bar(secProgress(p, sc)) + '<span>' + Math.round(secProgress(p, sc)) + '%</span></div></td></tr>';
+        const it = p.boq.filter(x => x.s === sc && match(x)); if (!it.length) return; const st = it.reduce((a, x) => a + x.t, 0); const ss = it.reduce((a, x) => a + itemSpent(p, x.c), 0);
+        h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td></td><td></td><td></td><td class="n">' + money(st) + '</td><td class="n">' + money(ss) + '</td><td><div class="barrow">' + bar(secProgress(p, sc)) + '<span>' + Math.round(secProgress(p, sc)) + '%</span></div></td></tr>';
         it.forEach(x => {
           const isp = itemSpent(p, x.c);
-          h += '<tr><td class="num small">' + esc(x.c) + '</td><td>' + esc(x.d) + '</td><td class="n">' + x.q + ' ' + esc(x.u) + '</td><td class="n">' + money(x.r) + '</td><td class="n">' + money(x.t) + '</td><td class="n"' + (isp > x.t ? ' style="color:var(--bad)" title="تجاوز قيمة البند"' : '') + '>' + money(isp) + '</td><td style="min-width:150px"><div class="barrow">' + bar(x.p, x.p >= 100 ? 'ok' : '') + (canProg ? '<input class="prog-in num" type="number" min="0" max="100" value="' + x.p + '" data-prog="' + x.id + '" aria-label="نسبة إنجاز البند ' + esc(x.c) + '">' : '<span>' + x.p + '%</span>') + '</div></td></tr>';
+          h += '<tr><td class="num small">' + esc(x.c) + '</td><td>' + esc(x.d) + '</td><td>' + (isAdmin() ? deptSel(x.dept, 'class="dsel" data-bdept="' + x.id + '" aria-label="قسم البند ' + esc(x.c) + '"') : (x.dept ? '<span class="tag">' + DEPTS[x.dept] + '</span>' : '<span class="muted">—</span>')) + '</td><td class="n">' + x.q + ' ' + esc(x.u) + '</td><td class="n">' + money(x.r) + '</td><td class="n">' + money(x.t) + '</td><td class="n"' + (isp > x.t ? ' style="color:var(--bad)" title="تجاوز قيمة البند"' : '') + '>' + money(isp) + '</td><td style="min-width:150px"><div class="barrow">' + bar(x.p, x.p >= 100 ? 'ok' : '') + (canProg ? '<input class="prog-in num" type="number" min="0" max="100" value="' + x.p + '" data-prog="' + x.id + '" aria-label="نسبة إنجاز البند ' + esc(x.c) + '">' : '<span>' + x.p + '%</span>') + '</div></td></tr>';
         });
       });
-      h += '<tr class="sec"><td></td><td>الإجمالي بدون الضريبة</td><td></td><td></td><td class="n">' + money(c) + '</td><td class="n">' + money(p.boq.reduce((a, x) => a + itemSpent(p, x.c), 0)) + '</td><td></td></tr>';
-      h += '<tr><td></td><td class="muted">ضريبة القيمة المضافة ' + p.vat + '%</td><td></td><td></td><td class="n muted">' + money(c * p.vat / 100) + '</td><td></td><td></td></tr><tr><td></td><td><b>الإجمالي الكلي</b></td><td></td><td></td><td class="n"><b>' + money(c * (1 + p.vat / 100)) + '</b></td><td></td><td></td></tr></tbody></table></div>';
+      if (bf) { const fl = p.boq.filter(match); h += '<tr class="sec"><td></td><td>إجمالي ' + (bf === 'none' ? 'البنود بدون قسم' : 'بنود ' + DEPTS[bf]) + '</td><td></td><td></td><td></td><td class="n">' + money(fl.reduce((a, x) => a + x.t, 0)) + '</td><td class="n">' + money(fl.reduce((a, x) => a + itemSpent(p, x.c), 0)) + '</td><td></td></tr></tbody></table></div>'; }
+      else {
+        h += '<tr class="sec"><td></td><td>الإجمالي بدون الضريبة</td><td></td><td></td><td></td><td class="n">' + money(c) + '</td><td class="n">' + money(p.boq.reduce((a, x) => a + itemSpent(p, x.c), 0)) + '</td><td></td></tr>';
+        h += '<tr><td></td><td class="muted">ضريبة القيمة المضافة ' + p.vat + '%</td><td></td><td></td><td></td><td class="n muted">' + money(c * p.vat / 100) + '</td><td></td><td></td></tr><tr><td></td><td><b>الإجمالي الكلي</b></td><td></td><td></td><td></td><td class="n"><b>' + money(c * (1 + p.vat / 100)) + '</b></td><td></td><td></td></tr></tbody></table></div>';
+      }
     }
   } else if (ui.tab === 'time') {
-    const a = D(p.start), z = D(p.end); const span = z - a; const pos = d => ((D(d) - a) / span * 100);
-    const nowPos = (today - a) / span * 100;
-    const months = []; const m = new Date(a.getFullYear(), a.getMonth() + 1, 1); while (m <= z) { months.push([((m - a) / span * 100), m.toLocaleDateString('ar', { month: 'short' })]); m.setMonth(m.getMonth() + 1); }
-    h += '<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>' + months.map(([x, l]) => '<span style="inset-inline-start:' + x.toFixed(1) + '%">' + l + '</span>').join('') + '</div></div>' +
-      p.tasks.map(t => { const s0 = pos(t.s), e = Math.max(pos(t.e) + (100 / (span / 864e5)), s0 + .6); return '<div class="gr' + (t.ph ? ' ph' : '') + '"><span title="' + fd(t.s) + ' - ' + fd(t.e) + '">' + esc(t.n) + '</span><div class="gt"><i style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%"></i>' + (nowPos <= 100 ? '<span class="now" style="inset-inline-start:' + nowPos.toFixed(1) + '%"></span>' : '') + '</div></div>'; }).join('') +
-      '</div></div><p class="muted small">' + (nowPos > 100 ? 'تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "حالة المشروع" إذا تم الاتفاق على تمديد.' : 'الخط الأحمر يمثل تاريخ اليوم.') + '</p>';
+    if (ui.ted && ui.ted.pid === p.id) {
+      h += '<div class="flag warn">وضع التعديل: عدّل المهام ثم احفظ. ' + (canSched() ? 'بعد الحفظ اعتمد الجدول.' : 'بعد الحفظ يروح للمدير العام للاعتماد.') + '</div>' + (ui.ted.notes ? '<div class="flag warn">ملاحظات: ' + esc(ui.ted.notes) + '</div>' : '') +
+        taskEditor(ui.ted.list, p.id) + '<div class="actions" style="margin-top:10px"><button class="btn pri" data-act="schedSave">حفظ الجدول</button><button class="btn" data-act="schedCancel">إلغاء</button></div>';
+    } else {
+      const st = p.sched;
+      h += '<div class="ch" style="margin-bottom:8px">' + (!p.tasks.length ? '<span class="muted small">لا يوجد جدول زمني بعد.</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
+        '<div class="actions">' + (canSched() && p.tasks.length && st.status !== 'approved' ? '<button class="btn ok" data-act="schedApprove" data-v="' + p.id + '">اعتماد الجدول</button>' : '') + (isAdmin() ? '<button class="btn" data-act="schedEdit" data-v="' + p.id + '">' + (p.tasks.length ? 'تعديل الجدول' : 'إضافة جدول') + '</button>' + (!p.tasks.length ? '<button class="btn pri" data-act="aiSched" data-v="' + p.id + '">اقترح جدول زمني ذكي</button>' : '') : '') + '</div></div>';
+      if (p.tasks.length) {
+        const a = D(p.start), z = D(p.end); const span = z - a; const pos = d => ((D(d) - a) / span * 100);
+        const nowPos = (today - a) / span * 100;
+        const months = []; const m = new Date(a.getFullYear(), a.getMonth() + 1, 1); while (m <= z) { months.push([((m - a) / span * 100), m.toLocaleDateString('ar', { month: 'short' })]); m.setMonth(m.getMonth() + 1); }
+        h += '<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>' + months.map(([x, l]) => '<span style="inset-inline-start:' + x.toFixed(1) + '%">' + l + '</span>').join('') + '</div></div>' +
+          p.tasks.map(t => { const s0 = Math.max(0, pos(t.s)), e = Math.min(100, Math.max(pos(t.e) + (100 / (span / 864e5)), s0 + .6)); return '<div class="gr' + (t.ph ? ' ph' : '') + '"><span title="' + fd(t.s) + ' - ' + fd(t.e) + '">' + esc(t.n) + (t.dept && !t.ph ? ' <span class="tag">' + DEPTS[t.dept] + '</span>' : '') + '</span><div class="gt"><i style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%"></i>' + (nowPos <= 100 ? '<span class="now" style="inset-inline-start:' + nowPos.toFixed(1) + '%"></span>' : '') + '</div></div>'; }).join('') +
+          '</div></div><p class="muted small">' + (nowPos > 100 ? 'تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.' : 'الخط الأحمر يمثل تاريخ اليوم.') + '</p>';
+      }
+    }
   } else if (ui.tab === 'req') h += reqTable(reqs, false);
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
   else if (ui.tab === 'vo') {
@@ -269,13 +315,13 @@ function vProject(id) {
 function reqTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات.</div>';
   return '<div class="tbl"><table><thead><tr><th>رقم الطلب</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>المواد</th><th>البند</th><th class="n">المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead><tbody>' +
-    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(r => { const si = stageInfo(r), p = P(r.pid); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.no) + '</b></td>' + (showProj ? '<td>' + esc(p ? p.short : '') + '</td>' : '') + '<td>' + esc(r.items[0] ? r.items[0].d : '') + (r.items.length > 1 ? ' <span class="muted small">+' + (r.items.length - 1) + '</span>' : '') + '</td><td class="num small">' + (r.boq ? esc(r.boq) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</td><td class="n">' + (reqAmt(r) ? money(reqAmt(r)) : '<span class="muted">—</span>') + '</td><td class="small">' + fd(r.date) + '</td><td><span class="pill ' + si.c + '">' + si.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(r => { const si = stageInfo(r), p = P(r.pid); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.no) + '</b></td>' + (showProj ? '<td>' + esc(pName(p)) + '</td>' : '') + '<td>' + esc(r.items[0] ? r.items[0].d : '') + (r.items.length > 1 ? ' <span class="muted small">+' + (r.items.length - 1) + '</span>' : '') + '</td><td class="num small">' + (r.boq ? esc(r.boq) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</td><td class="n">' + (reqAmt(r) ? money(reqAmt(r)) : '<span class="muted">—</span>') + '</td><td class="small">' + fd(r.date) + '</td><td><span class="pill ' + si.c + '">' + si.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
 }
 function pettyTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
   const gm = me.role === 'gm' || me.role === 'admin';
   return '<div class="tbl"><table><thead><tr><th>الرقم</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التفاصيل</th><th class="n">المبلغ</th><th>مقدم الطلب</th><th>الحالة</th></tr></thead><tbody>' +
-    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(P(c.pid) ? P(c.pid).short : '') + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'الفاتورة') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(pName(P(c.pid))) + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'الفاتورة') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
       (c.status === 'pending' ? (gm ? '<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="' + c.id + '">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="' + c.id + '">رفض</button></div>' : '<span class="pill p-warn">بانتظار المدير العام</span>') : c.status === 'approved' ? '<span class="pill p-ok">معتمد</span>' : '<span class="pill p-bad">مرفوض</span>') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 function vRequests() {
@@ -292,14 +338,14 @@ function vRequest(id) {
   const p = P(r.pid), si = stageInfo(r), idx = STAGES.findIndex(s => s.k === r.stage);
   const rejIdx = r.stage === 'rejected' ? STAGES.findIndex(s => s.k === rejStage(r)) : -1;
   const bi = r.boq ? itemByCode(p, r.boq) : null;
-  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#requests">طلبات المواد</a> / ' + esc(r.no) + '</span><h1>طلب مواد ' + esc(r.no) + '</h1><div class="actions"><span class="pill ' + si.c + '">' + si.l + '</span><a class="tag" href="#p-' + p.id + '">' + esc(p.short) + '</a><span class="tag">' + DEPTS[r.dept] + '</span></div></div></div>';
+  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#requests">طلبات المواد</a> / ' + esc(r.no) + '</span><h1>طلب مواد ' + esc(r.no) + '</h1><div class="actions"><span class="pill ' + si.c + '">' + si.l + '</span><a class="tag" href="#p-' + p.id + '">' + esc(pName(p)) + '</a><span class="tag">' + DEPTS[r.dept] + '</span></div></div></div>';
   h += '<div class="card"><div class="steps">' + STAGES.map((s, i) => { let c = ''; if (r.stage === 'rejected') { c = i < rejIdx ? 'done' : i === rejIdx ? 'rej' : ''; } else if (r.stage === 'done' || i < idx) c = 'done'; else if (i === idx) c = 'cur'; return '<div class="step ' + c + '"><span class="dot">' + (c === 'done' ? '✓' : c === 'rej' ? '✕' : i + 1) + '</span>' + s.l + '</div>'; }).join('') + '</div></div>';
   h += '<div class="grid2"><div style="display:flex;flex-direction:column;gap:18px;min-width:0">';
   h += actionPanel(r, p);
   h += '<div class="card"><h2>المواد المطلوبة</h2><div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th></tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td></tr>').join('') + '</tbody></table></div>' + (r.note ? '<p class="muted small" style="margin:10px 0 0">ملاحظة: ' + esc(r.note) + '</p>' : '') + '</div>';
   if (r.quotes.length && !(r.stage === 'procurement' && canActOn(r))) h += '<div class="card"><h2>عروض الأسعار</h2>' + quotesTable(r, false) + '</div>';
   if (r.po) h += poDoc(r, p);
-  h += '</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-' + p.id + '">' + esc(p.short) + '</a></dd><dt>بند BOQ</dt><dd>' + (bi ? esc(bi.c + ' ' + bi.d) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</dd><dt>القسم</dt><dd>' + DEPTS[r.dept] + '</dd><dt>مقدم الطلب</dt><dd>' + esc(r.by) + '</dd><dt>تاريخ الطلب</dt><dd>' + fd(r.date) + '</dd><dt>مطلوب قبل</dt><dd>' + fd(r.need) + '</dd></dl></div>' +
+  h += '</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a></dd><dt>بند BOQ</dt><dd>' + (bi ? esc(bi.c + ' ' + bi.d) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</dd><dt>القسم</dt><dd>' + DEPTS[r.dept] + '</dd><dt>مقدم الطلب</dt><dd>' + esc(r.by) + '</dd><dt>تاريخ الطلب</dt><dd>' + fd(r.date) + '</dd><dt>مطلوب قبل</dt><dd>' + fd(r.need) + '</dd></dl></div>' +
     '<div class="card"><h2>سجل الإجراءات</h2><ul class="log">' + r.hist.map(x => '<li class="' + (/رفض/.test(x.a) ? 'r' : '') + '"><div><b>' + esc(x.a) + '</b><div class="muted small">' + esc(x.by) + ' · ' + ftime(x.t) + '</div>' + (x.note ? '<div class="small">' + esc(x.note) + '</div>' : '') + '</div></li>').join('') + '</ul></div></div></div>';
   return h;
 }
@@ -344,7 +390,7 @@ function poDoc(r, p) {
   const q = selQuote(r); if (!q) return '';
   const due = (() => { const d = D(r.po.date); if (q.terms === 'credit30') d.setDate(d.getDate() + 30); return iso(d); })();
   return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">' + esc(r.po.no) + '</span></div><div style="text-align:end"><b>كربون للهندسة</b><div class="muted small">التاريخ ' + fd(r.po.date) + '</div></div></div>' +
-    '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + '</dd><dt>المشروع / موقع التوريد</dt><dd>' + esc(p.short) + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
+    '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + '</dd><dt>المشروع</dt><dd>' + esc(pName(p)) + '</dd><dt>موقع التوريد</dt><dd>' + esc(locText(p) || '—') + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
     '<div class="tbl"><table><thead><tr><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th></tr></thead><tbody>' + r.items.map(it => '<tr><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td></tr>').join('') + '</tbody></table></div>' +
     '<div class="ch"><span class="muted small">معتمد من المدير العام</span><b class="num">الإجمالي ' + money(q.amt) + ' ر.ع</b></div><div><button class="btn sm" data-act="printPO">طباعة</button></div></div>';
 }
@@ -360,6 +406,7 @@ function vInbox() {
   if (!q.n) return h + '<div class="card empty">ما عندك شي ينتظر إجراءك الحين.</div>';
   if (q.reqs.length) h += '<div class="card"><h2>طلبات المواد</h2>' + reqTable(q.reqs, true) + '</div>';
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
+  if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + p.tasks.length + ' مهمة · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
 function vUsers() {
@@ -377,19 +424,64 @@ function vUsers() {
       (sysAdmin ? '<button class="btn sm" data-act="resetPass" data-v="' + u.id + '">كلمة مرور جديدة</button>' + (u.id !== me.id ? '<button class="btn sm bad" data-act="delUser" data-v="' + u.id + '">حذف</button>' : '') : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
+function npState() {
+  if (!ui.np) ui.np = { f: { code: nextCode(), type: 'gov', start: iso(today), depts: [] }, sections: [], items: [], tasks: [], notes: '', stated: 0, schedNotes: '', busy: '' };
+  return ui.np;
+}
+function npSync() {
+  const n = ui.np; if (!n) return;
+  document.querySelectorAll('[data-npf]').forEach(el => { n.f[el.dataset.npf] = el.value; });
+  const ds = document.querySelectorAll('[name=np-dept]');
+  if (ds.length) n.f.depts = [...ds].filter(x => x.checked).map(x => x.value);
+}
+function boqReview(n) {
+  if (!n.items.length) return '';
+  const sum = n.items.reduce((a, i) => a + (+i.total || 0), 0);
+  const noDept = n.items.filter(i => !i.dept).length;
+  let h = '<div class="ch" style="margin-top:6px"><b>' + n.sections.length + ' أقسام · ' + n.items.length + ' بند · الإجمالي ' + money(sum) + ' ر.ع</b>' +
+    (n.items.length ? '<button type="button" class="btn sm" data-act="npClassify">' + (noDept ? 'وزّع البنود على الأقسام بالذكاء' : 'أعد التوزيع بالذكاء') + '</button>' : '') + '</div>';
+  if (n.stated && Math.abs(n.stated - sum) > 1) h += '<div class="flag warn">إجمالي الملف المكتوب ' + money(n.stated) + ' ر.ع، ومجموع البنود المقروءة ' + money(sum) + ' ر.ع. راجع البنود قبل الحفظ.</div>';
+  if (n.notes) h += '<div class="flag warn">ملاحظات التحليل: ' + esc(n.notes) + '</div>';
+  if (noDept) h += '<span class="hint">' + noDept + ' بند بدون قسم.</span>';
+  h += '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">القيمة</th><th>القسم المسؤول</th></tr></thead><tbody>';
+  const secs = n.sections.length ? n.sections : [];
+  const order = secs.map(s => s[0]); n.items.forEach(i => { if (!order.includes(i.sec)) order.push(i.sec); });
+  order.forEach(sc => {
+    const it = n.items.map((x, k) => [x, k]).filter(([x]) => x.sec === sc); if (!it.length) return;
+    const sn = (secs.find(s => s[0] === sc) || [sc, 'قسم ' + sc])[1];
+    h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td></td><td class="n">' + money(it.reduce((a, [x]) => a + (+x.total || 0), 0)) + '</td><td>' + deptSel('', 'data-nps="' + esc(sc) + '" aria-label="قسم كل بنود ' + esc(sn) + '"', 'غيّر الكل…') + '</td></tr>';
+    it.forEach(([x, k]) => { h += '<tr><td class="num small">' + esc(x.code) + '</td><td>' + esc(x.desc) + '</td><td class="n">' + x.qty + ' ' + esc(x.unit) + '</td><td class="n">' + money(x.total) + '</td><td>' + deptSel(x.dept, 'data-npi="' + k + '" aria-label="قسم البند ' + esc(x.code) + '"') + '</td></tr>'; });
+  });
+  return h + '</tbody></table></div>';
+}
+function taskEditor(list, ctx) {
+  ui.tlist = list;
+  let h = '<div class="tbl"><table class="tked"><thead><tr><th>مرحلة</th><th>المهمة</th><th>القسم</th><th>البداية</th><th>النهاية</th><th></th></tr></thead><tbody>';
+  h += list.map((t, i) => '<tr' + (t.is_phase ? ' class="sec"' : '') + '><td><input type="checkbox" data-tk="' + i + '" data-k="is_phase"' + (t.is_phase ? ' checked' : '') + ' aria-label="مرحلة رئيسية"></td><td><input data-tk="' + i + '" data-k="name" value="' + esc(t.name) + '" aria-label="اسم المهمة"></td><td>' + deptSel(t.dept, 'data-tk="' + i + '" data-k="dept" aria-label="القسم"', 'عام') + '</td><td><input type="date" data-tk="' + i + '" data-k="start_date" value="' + esc(t.start_date) + '" aria-label="البداية"></td><td><input type="date" data-tk="' + i + '" data-k="end_date" value="' + esc(t.end_date) + '" aria-label="النهاية"></td><td><button type="button" class="x" data-act="tkDel" data-v="' + i + '" aria-label="حذف">×</button></td></tr>').join('');
+  return h + '</tbody></table></div><div class="actions"><button type="button" class="btn sm" data-act="tkAdd">+ مهمة</button><button type="button" class="btn sm" data-act="aiSched" data-v="' + ctx + '">' + (list.length ? 'أعد اقتراح الجدول بالذكاء' : 'اقترح جدول زمني ذكي') + '</button></div>';
+}
 function vNewProject() {
-  if (!isAdmin()) return '<div class="empty">إضافة المشاريع لصاحب الشركة والمدير العام.</div>';
-  return '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1></div></div>' +
-    '<div class="card"><form class="f" data-form="project">' +
-    '<div class="fr"><label class="fld"><span>اسم المشروع الكامل</span><input id="np-name" required></label><label class="fld"><span>اسم مختصر (يظهر في القوائم)</span><input id="np-short" required></label></div>' +
-    '<div class="fr"><label class="fld"><span>العميل</span><input id="np-client"></label><label class="fld"><span>نوع المشروع</span><select id="np-type"><option value="gov">حكومي</option><option value="private">خاص</option></select></label></div>' +
-    '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input id="np-start" type="date" required value="' + iso(today) + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input id="np-end" type="date" required></label></div>' +
-    '<div class="fld"><span>الأقسام المشاركة</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '">' + l + '</label>').join('') + '</div></div>' +
-    '<label class="fld"><span>جدول الكميات BOQ (انسخه من Excel والصقه هنا)</span><textarea id="np-boq" class="paste" placeholder="2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000\n2.2\tالمخططات التفصيلية\t1\tمقطوعية\t300\t300"></textarea></label>' +
-    '<span class="hint">الأعمدة بالترتيب: رقم البند، الوصف، الكمية، الوحدة، سعر الوحدة، الإجمالي. السطر اللي فيه رقم ووصف فقط يُعتبر عنوان قسم (مثل "3  الأعمال الإنشائية"). تقدر تضيف المشروع بدون BOQ وتضيفه لاحقاً.</span>' +
-    '<div id="np-preview" class="hint"></div>' +
-    '<label class="fld"><span>الجدول الزمني (اختياري): اسم المهمة، البداية، النهاية</span><textarea id="np-tasks" class="paste" style="min-height:90px" placeholder="مرحلة التصميم\t2026-04-23\t2026-07-15"></textarea></label>' +
-    '<div class="actions"><button class="btn pri" type="submit">حفظ المشروع</button><a class="btn" href="#projects">إلغاء</a></div></form></div>';
+  if (!isAdmin()) return '<div class="empty">إضافة المشاريع لمدير النظام وصاحب الشركة والمدير العام.</div>';
+  const n = npState(), f = n.f;
+  const fv = k => esc(f[k] || '');
+  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويقترح الجدول الزمني. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
+    '<form class="f" data-form="project">' +
+    '<div class="card"><h2>1. بيانات المشروع</h2>' +
+    '<div class="fr"><label class="fld"><span>كود المشروع</span><input data-npf="code" id="np-code" required value="' + fv('code') + '" dir="ltr"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
+    '<div class="fr"><label class="fld"><span>اسم المشروع الكامل</span><input data-npf="name" id="np-name" required value="' + fv('name') + '"></label><label class="fld"><span>اسم مختصر (يظهر في القوائم)</span><input data-npf="short" id="np-short" required value="' + fv('short') + '"></label></div>' +
+    '<div class="fr"><label class="fld"><span>العميل</span><input data-npf="client" id="np-client" value="' + fv('client') + '"></label><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
+    '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
+    '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
+    '<div class="fld"><span>الأقسام المشاركة (تتحدد تلقائياً من توزيع البنود، وتقدر تعدلها)</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
+  h += '<div class="card"><h2>2. جدول الكميات BOQ</h2>' +
+    '<div class="fr"><label class="fld"><span>ملف BOQ (PDF أو Excel أو صورة)</span><input id="np-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy === 'boq' ? 'جاري التحليل… (حتى دقيقتين)' : 'حلّل الملف بالذكاء الاصطناعي') + '</button></div></div>' +
+    '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
+    '<span class="hint">الأعمدة بالترتيب: رقم البند، الوصف، الكمية، الوحدة، سعر الوحدة، الإجمالي. السطر اللي فيه رقم ووصف فقط يُعتبر عنوان قسم.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
+    boqReview(n) + '</div>';
+  h += '<div class="card"><h2>3. الجدول الزمني</h2><span class="hint">النظام يقترح الجدول من بنود BOQ والتواريخ. تقدر تعدل أي مهمة الحين، والمدير العام يراجعه ويعتمده بعد الحفظ من صفحة المشروع.</span>' +
+    (n.busy === 'sched' ? '<div class="flag warn">جاري إعداد الجدول الزمني… (حتى دقيقتين)</div>' : '') +
+    (n.schedNotes ? '<div class="flag warn">ملاحظات: ' + esc(n.schedNotes) + '</div>' : '') + taskEditor(n.tasks, 'np') + '</div>';
+  return h + '<div class="actions"><button class="btn pri" type="submit">حفظ المشروع</button><a class="btn" href="#projects">إلغاء</a></div></form>';
 }
 function parseNum(s) { if (s == null) return NaN; s = String(s).replace(/[,\s]/g, '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)); return s === '' ? NaN : +s; }
 function parseBoq(text) {
@@ -423,6 +515,121 @@ async function callFn(body, okMsg) {
   return true;
 }
 
+/* ---------- smart BOQ (Claude via the analyze-boq function) ---------- */
+async function ai(body) {
+  const { data, error } = await sb.functions.invoke('analyze-boq', { body });
+  let msg = data && data.error;
+  if (error && !msg) { try { const j = await error.context.json(); msg = j.error; } catch (e) { msg = errMsg(error); } }
+  if (msg) { toast(msg, true); throw new Error(msg); }
+  return data;
+}
+const fileB64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = () => no(r.error); r.readAsDataURL(f); });
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = () => ok(window.XLSX); s.onerror = () => no(new Error('تعذّر تحميل قارئ Excel')); document.head.appendChild(s); });
+}
+async function sheetText(f) {
+  const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer());
+  return wb.SheetNames.map(n => '## ' + n + '\n' + X.utils.sheet_to_csv(wb.Sheets[n], { FS: '\t', blankrows: false })).join('\n\n');
+}
+function rerender() { npSync(); render(); }
+function addDepts(n) { n.items.forEach(i => { if (i.dept && !n.f.depts.includes(i.dept)) n.f.depts.push(i.dept); }); }
+function secSummary(sections, items) {
+  const order = sections.map(s => s[0]); items.forEach(i => { if (!order.includes(i.sec)) order.push(i.sec); });
+  return order.map(sc => { const it = items.filter(i => i.sec === sc); const s = sections.find(x => x[0] === sc); return { code: sc, name: s ? s[1] : sc, items: it.length, total: it.reduce((a, i) => a + (+i.total || 0), 0), depts: [...new Set(it.map(i => i.dept).filter(Boolean))] }; }).filter(s => s.items);
+}
+const aiTasks = list => list.map(t => ({ name: t.name, start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase }));
+async function npAnalyze() {
+  const n = npState(); npSync();
+  const f = (document.getElementById('np-file') || {}).files; const file = f && f[0];
+  if (!file) return toast('اختر ملف BOQ أولاً', true);
+  if (file.size > 10 * 1024 * 1024) return toast('حجم الملف أكبر من 10 ميجا', true);
+  const name = file.name.toLowerCase(); const body = { mode: 'extract' };
+  try {
+    if (/\.(xlsx|xls|csv)$/.test(name)) body.text = await sheetText(file);
+    else body.file = { name: file.name, mime: file.type || (name.endsWith('.pdf') ? 'application/pdf' : ''), data: await fileB64(file) };
+  } catch (e) { return toast(errMsg(e), true); }
+  n.busy = 'boq'; render();
+  try {
+    const d = await ai(body);
+    n.sections = (d.sections || []).map(s => [s.code, s.name]);
+    n.items = (d.items || []).map(i => ({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], dept: i.dept || null }));
+    n.stated = +d.stated_total || 0; n.notes = d.notes || ''; addDepts(n);
+    toast('تمت قراءة ' + n.items.length + ' بند وتوزيعها على الأقسام. راجعها تحت');
+  } catch (e) { } finally { n.busy = ''; render(); }
+}
+async function classifyItems(items) {
+  const d = await ai({ mode: 'classify', items: items.map(i => ({ code: i.code, description: i.desc, section: i.secName || i.sec })) });
+  const m = {}; (d.items || []).forEach(x => { m[x.code] = x.dept; }); return m;
+}
+const A2 = {
+  npReset: () => { ui.np = null; render(); },
+  npAnalyze: () => npAnalyze(),
+  npPaste: () => {
+    const n = npState(); npSync(); const r = parseBoq(n.f.paste || '');
+    if (!r.items.length) return toast('ما قدرت أقرأ بنود من النص الملصق', true);
+    n.sections = r.sections; n.items = r.items.map(i => Object.assign({ dept: null }, i)); n.stated = 0; n.notes = ''; render();
+  },
+  npClassify: async (d, el) => {
+    const n = npState(); npSync(); el.disabled = true; el.textContent = 'جاري التوزيع…';
+    try { const m = await classifyItems(n.items.map(i => Object.assign({ secName: (n.sections.find(s => s[0] === i.sec) || [])[1] }, i))); n.items.forEach(i => { if (m[i.code]) i.dept = m[i.code]; }); addDepts(n); toast('تم توزيع البنود على الأقسام'); } catch (e) { }
+    render();
+  },
+  aiSched: async (d, el) => {
+    let proj, secs;
+    if (d.v === 'np') {
+      const n = npState(); npSync(); const f = n.f;
+      if (!f.start || !f.end || f.end < f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true);
+      proj = { name: f.name, type: f.type, start_date: f.start, end_date: f.end, depts: f.depts, location: [f.wil, f.gov, f.loc].filter(Boolean).join('، ') };
+      secs = secSummary(n.sections, n.items); n.busy = 'sched'; render();
+    } else {
+      const p = P(d.v);
+      proj = { name: p.name, type: p.type, start_date: p.start, end_date: p.end, depts: p.depts, location: locText(p) };
+      secs = secSummary(p.sections, p.boq.map(b => ({ sec: b.s, total: b.t, dept: b.dept })));
+      el.disabled = true; el.textContent = 'جاري إعداد الجدول… (حتى دقيقتين)';
+    }
+    try {
+      const r = await ai({ mode: 'schedule', project: proj, sections: secs });
+      if (d.v === 'np') { ui.np.tasks = aiTasks(r.tasks || []); ui.np.schedNotes = r.notes || ''; }
+      else { ui.ted = { pid: d.v, list: aiTasks(r.tasks || []), notes: r.notes || '' }; }
+      toast('جاهز. راجع الجدول وعدّل اللي تبيه');
+    } catch (e) { }
+    if (ui.np) ui.np.busy = ''; render();
+  },
+  tkAdd: () => { const l = ui.tlist; const last = l[l.length - 1]; const p = ui.ted ? P(ui.ted.pid) : null; const s = last ? last.end_date : (p ? p.start : (ui.np && ui.np.f.start) || iso(today)); l.push({ name: '', start_date: s, end_date: s, dept: null, is_phase: false }); rerender(); },
+  tkDel: d => { ui.tlist.splice(+d.v, 1); rerender(); },
+  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.tasks.map(t => ({ name: t.n, start_date: t.s, end_date: t.e, dept: t.dept || null, is_phase: !!t.ph })), notes: '' }; render(); },
+  schedCancel: () => { ui.ted = null; render(); },
+  schedSave: async (d, el) => {
+    const p = P(ui.ted.pid), list = ui.ted.list;
+    const bad = list.find(t => !String(t.name).trim() || !t.start_date || !t.end_date || t.end_date < t.start_date);
+    if (bad) return toast('كل مهمة تحتاج اسم وتاريخ بداية ونهاية صحيحين' + (bad.name ? ': ' + bad.name : ''), true);
+    el.disabled = true;
+    try {
+      await run(sb.from('tasks').delete().eq('project_id', p.id));
+      if (list.length) await run(sb.from('tasks').insert(list.map((t, i) => ({ project_id: p.id, name: t.name.trim(), start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase, sort: i }))));
+      toast(canSched() ? 'تم حفظ الجدول. اعتمده إذا كان جاهز' : 'تم حفظ الجدول وأُرسل للمدير العام للاعتماد');
+      ui.ted = null; refresh();
+    } catch (e) { el.disabled = false; }
+  },
+  schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">' + p.tasks.length + ' مهمة من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. بعد الاعتماد أي تعديل على الجدول يرجعه مسودة لين تعتمده مرة ثانية.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  boqClassify: async (d, el) => {
+    const p = P(d.v); const todo = p.boq.filter(b => !b.dept); if (!todo.length) return;
+    el.disabled = true; el.textContent = 'جاري التوزيع…';
+    try {
+      const secName = c => (p.sections.find(s => s[0] === c) || [])[1];
+      const m = await classifyItems(todo.map(b => ({ code: b.c, desc: b.d, sec: b.s, secName: secName(b.s) })));
+      const groups = {}; todo.forEach(b => { const k = m[b.c]; if (k) (groups[k] = groups[k] || []).push(b.id); });
+      for (const k of Object.keys(groups)) await run(sb.from('boq_items').update({ dept: k }).in('id', groups[k]));
+      const ds = [...new Set(p.depts.concat(Object.keys(groups)))];
+      if (ds.length !== p.depts.length) await run(sb.from('projects').update({ depts: ds }).eq('id', p.id));
+      toast('تم توزيع ' + Object.values(groups).reduce((a, g) => a + g.length, 0) + ' بند على الأقسام');
+    } catch (e) { }
+    refresh();
+  },
+  bdeptFilter: d => { ui.bdept = d.v; render(); }
+};
+
 /* ---------- modals ---------- */
 function modal(title, body) { document.getElementById('layer').innerHTML = '<div class="ov" data-act="closeOv"><div class="modal" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><div class="mh"><h2>' + esc(title) + '</h2><button class="x" data-act="close" aria-label="إغلاق">×</button></div>' + body + '</div></div>'; const f = document.querySelector('.modal input,.modal select'); if (f) f.focus(); }
 function closeModal() { document.getElementById('layer').innerHTML = ''; }
@@ -452,7 +659,9 @@ function newVOForm(pid) {
 }
 function projStatusForm(pid) {
   const p = P(pid);
-  modal('حالة المشروع', '<form class="f" data-form="pstatus" data-v="' + pid + '"><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
+  modal('بيانات وحالة المشروع', '<form class="f" data-form="pstatus" data-v="' + pid + '"><label class="fld"><span>كود المشروع</span><input id="ps-c" required dir="ltr" value="' + esc(p.code || '') + '"></label>' +
+    '<div class="fr"><label class="fld"><span>المحافظة</span><select id="ps-g">' + govOpts(p.gov) + '</select></label><label class="fld"><span>الولاية</span><select id="ps-w">' + wilOpts(p.gov, p.wil) + '</select></label></div>' +
+    '<label class="fld"><span>تفاصيل الموقع</span><input id="ps-l" value="' + esc(p.loc || '') + '"></label><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
     '<label class="fld"><span>سبب التوقف (إن وجد)</span><input id="ps-r" value="' + esc(p.stopReason || '') + '"></label>' +
     '<label class="fld"><span>موعد التسليم</span><input id="ps-e" type="date" value="' + p.end + '"></label>' +
     '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
@@ -498,13 +707,14 @@ const A = {
   resetPass: d => { const u = S.profiles.find(x => x.id === d.v); modal('كلمة مرور جديدة - ' + u.full_name, '<form class="f" data-form="resetPass" data-v="' + u.id + '"><label class="fld"><span>كلمة المرور الجديدة</span><input id="rp" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   delUser: d => { const u = S.profiles.find(x => x.id === d.v); modal('حذف ' + u.full_name, '<p>بيتم حذف حساب <b>' + esc(u.full_name) + '</b> نهائياً وما يقدر يدخل النظام. إذا عنده طلبات مسجلة، الأفضل توقف حسابه بتغيير دوره إلى "موقوف" بدل الحذف.</p><div class="actions"><button class="btn bad" data-act="delUserGo" data-v="' + u.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'); },
   delUserGo: async d => { if (await callFn({ action: 'delete', id: d.v }, 'تم حذف الحساب')) { closeModal(); refresh(); } },
+  ...A2,
   saveUser: async d => { await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: document.getElementById('ud-' + d.v).value }), 'تم الحفظ'); refresh(); }
 };
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-go]');
   const a = e.target.closest('[data-act]');
   if (a && a.tagName !== 'SELECT') { const k = a.dataset.act; if (A[k]) { if (k !== 'closeOv' && k !== 'qsel') e.preventDefault(); Promise.resolve(A[k](a.dataset, a, e)).catch(() => {}); return; } }
-  if (go && !e.target.closest('a,button,input')) location.hash = go.dataset.go;
+  if (go && !e.target.closest('a,button,input,select')) { if (go.dataset.tab) ui.tab = go.dataset.tab; location.hash = go.dataset.go; }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); if (e.key === 'Enter') { const g = e.target.closest && e.target.closest('[data-go]'); if (g && g.tagName === 'DIV') location.hash = g.dataset.go; } });
 document.addEventListener('change', async e => {
@@ -512,9 +722,23 @@ document.addEventListener('change', async e => {
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-b').innerHTML = boqOptions(p, '', true); document.getElementById('nr-d').innerHTML = deptOptions(p); }
   if (t.id === 'pc-p') document.getElementById('pc-b').innerHTML = boqOptions(P(t.value), '', true);
+  if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
+  if (t.dataset.tk && ui.tlist) { const row = ui.tlist[+t.dataset.tk]; if (t.type === 'checkbox') { row.is_phase = t.checked; rerender(); } else row[t.dataset.k] = t.dataset.k === 'dept' ? (t.value || null) : t.value; return; }
+  if (t.id === 'np-gov') { npSync(); ui.np.f.wil = ''; render(); return; }
+  if (t.dataset.npi != null && ui.np) { npSync(); ui.np.items[+t.dataset.npi].dept = t.value || null; addDepts(ui.np); render(); return; }
+  if (t.dataset.nps != null && ui.np && t.value) { npSync(); ui.np.items.forEach(i => { if (i.sec === t.dataset.nps) i.dept = t.value; }); addDepts(ui.np); render(); return; }
+  if (t.dataset.bdept) {
+    const p = S.projects.find(x => x.boq.some(b => b.id === t.dataset.bdept));
+    try {
+      await run(sb.from('boq_items').update({ dept: t.value || null }).eq('id', t.dataset.bdept), 'تم تغيير القسم');
+      if (t.value && p && !p.depts.includes(t.value)) await run(sb.from('projects').update({ depts: p.depts.concat(t.value) }).eq('id', p.id));
+    } catch (x) { }
+    refresh();
+  }
 });
 document.addEventListener('input', e => {
-  if (e.target.id === 'np-boq') { const r = parseBoq(e.target.value); document.getElementById('np-preview').textContent = r.items.length ? 'تم التعرف على ' + r.sections.length + ' أقسام و ' + r.items.length + ' بند، بإجمالي ' + money(r.items.reduce((a, i) => a + i.total, 0)) + ' ر.ع' : ''; }
+  const t = e.target;
+  if (t.dataset.tk && ui.tlist && t.type !== 'checkbox') ui.tlist[+t.dataset.tk][t.dataset.k] = t.value;
 });
 document.addEventListener('submit', async e => {
   const f = e.target; e.preventDefault(); const v = id => document.getElementById(id).value;
@@ -557,19 +781,27 @@ document.addEventListener('submit', async e => {
       await run(sb.from('variations').update({ approval_path: path, client_status: 'approved' }).eq('id', f.dataset.v), 'اعتُمد العمل الإضافي وأُضيف لقيمة المشروع');
       closeModal(); refresh();
     } else if (kind === 'pstatus') {
-      await run(sb.from('projects').update({ status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e') }).eq('id', f.dataset.v), 'تم الحفظ');
+      const code = v('ps-c').trim();
+      if (S.projects.some(x => x.id !== f.dataset.v && String(x.code || '').toUpperCase() === code.toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
+      await run(sb.from('projects').update({ code, status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e'), governorate: v('ps-g') || null, wilayat: v('ps-w') || null, location_note: v('ps-l') || null }).eq('id', f.dataset.v), 'تم الحفظ');
       closeModal(); refresh();
     } else if (kind === 'project') {
-      const depts = [...f.querySelectorAll('[name=np-dept]:checked')].map(x => x.value);
-      if (!depts.length) { toast('اختر قسم واحد على الأقل', true); return; }
-      if (v('np-end') < v('np-start')) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
-      const boq = parseBoq(v('np-boq'));
-      const tasks = v('np-tasks').split(/\r?\n/).map(l => l.split('\t')).filter(c => c[0] && c[0].trim()).map((c, i) => ({ name: c[0].trim(), start_date: parseDate(c[1]), end_date: parseDate(c[2]), sort: i })).filter(t => t.start_date && t.end_date);
-      const p = await run(sb.from('projects').insert({ name: v('np-name'), short_name: v('np-short'), client: v('np-client'), type: v('np-type'), depts, start_date: v('np-start'), end_date: v('np-end') }).select().single());
-      if (boq.sections.length) await run(sb.from('boq_sections').insert(boq.sections.map((s, i) => ({ project_id: p.id, code: s[0], name: s[1], sort: i }))));
-      if (boq.items.length) await run(sb.from('boq_items').insert(boq.items.map((b, i) => ({ project_id: p.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, sort: i }))));
-      if (tasks.length) await run(sb.from('tasks').insert(tasks.map(t => Object.assign({ project_id: p.id }, t))));
-      await loadAll(); location.hash = 'p-' + p.id; toast('أُضيف المشروع' + (boq.items.length ? ' مع ' + boq.items.length + ' بند' : ''));
+      const n = npState(); npSync(); const pf = n.f;
+      if (!pf.depts.length) { toast('اختر قسم واحد على الأقل', true); return; }
+      if (pf.end < pf.start) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
+      if (S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
+      const badT = n.tasks.find(t => !String(t.name).trim() || !t.start_date || !t.end_date || t.end_date < t.start_date);
+      if (badT) { toast('راجع الجدول الزمني: كل مهمة تحتاج اسم وتواريخ صحيحة', true); return; }
+      const pr = await run(sb.from('projects').insert({ code: pf.code.trim(), name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null }).select().single());
+      const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
+      if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
+      if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, sort: i }))));
+      if (n.tasks.length) await run(sb.from('tasks').insert(n.tasks.map((t, i) => ({ project_id: pr.id, name: t.name.trim(), start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase, sort: i }))));
+      const cnt = n.items.length; ui.np = null; ui.tab = n.tasks.length ? 'time' : 'boq';
+      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (n.tasks.length && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+    } else if (kind === 'schedOk') {
+      await run(sb.rpc('approve_schedule', { p_project: f.dataset.v, p_note: v('so-n') || null }), 'اعتُمد الجدول الزمني');
+      closeModal(); refresh();
     }
   } catch (err) { /* toast already shown */ }
   finally { if (btn && document.body.contains(btn)) btn.disabled = false; }
