@@ -627,7 +627,17 @@ const A2 = {
     } catch (e) { }
     refresh();
   },
-  bdeptFilter: d => { ui.bdept = d.v; render(); }
+  bdeptFilter: d => { ui.bdept = d.v; render(); },
+  projDel: d => {
+    const p = P(d.v), n = S.requests.filter(r => r.pid === p.id).length + S.petty.filter(c => c.pid === p.id).length + S.variations.filter(v => v.pid === p.id).length;
+    modal('حذف المشروع ' + pName(p), '<p>بيتم حذف المشروع <b>' + esc(p.name) + '</b> نهائياً مع ' + p.boq.length + ' بند BOQ و' + p.tasks.length + ' مهمة' + (n ? ' و<b>' + n + ' طلب ومصروف مرتبط فيه</b>' : '') + '. ما يمكن التراجع عن الحذف.</p><label class="fld"><span>للتأكيد اكتب كود المشروع: <b class="num">' + esc(p.code) + '</b></span><input id="pd-c" dir="ltr" autocomplete="off"></label><div class="actions"><button class="btn bad" data-act="projDelGo" data-v="' + p.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>');
+  },
+  projDelGo: async (d, el) => {
+    const p = P(d.v); if ((document.getElementById('pd-c').value || '').trim().toUpperCase() !== String(p.code).toUpperCase()) return toast('الكود غير مطابق', true);
+    el.disabled = true;
+    try { await run(sb.from('projects').delete().eq('id', p.id), 'تم حذف المشروع'); } catch (e) { el.disabled = false; return; }
+    closeModal(); ui.tab = 'boq'; ui.ted = null; location.hash = 'projects'; refresh();
+  }
 };
 
 /* ---------- modals ---------- */
@@ -664,7 +674,7 @@ function projStatusForm(pid) {
     '<label class="fld"><span>تفاصيل الموقع</span><input id="ps-l" value="' + esc(p.loc || '') + '"></label><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
     '<label class="fld"><span>سبب التوقف (إن وجد)</span><input id="ps-r" value="' + esc(p.stopReason || '') + '"></label>' +
     '<label class="fld"><span>موعد التسليم</span><input id="ps-e" type="date" value="' + p.end + '"></label>' +
-    '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+    '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button>' + (me.role === 'admin' ? '<span style="flex:1"></span><button class="btn bad" type="button" data-act="projDel" data-v="' + pid + '">حذف المشروع</button>' : '') + '</div></form>');
 }
 
 /* ---------- actions ---------- */
