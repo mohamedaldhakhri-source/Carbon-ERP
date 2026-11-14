@@ -95,7 +95,13 @@
         // Section check: a "Total (...) carried" line is compared with the items read since the previous total line.
         if (/carried|مرحّل|مرحل/i.test(joined)) {
           const its = out.items.slice(out.mark || 0), got = its.reduce((a, i) => a + i.total, 0);
-          if (its.length) { const name = (joined.match(/\(([^)]+)\)/) || [])[1] || joined.replace(/total|carried.*$/ig, '').trim(); (out.checks = out.checks || []).push({ name: name.trim(), stated: v || 0, read: got, from: its[0].code, to: its[its.length - 1].code }); }
+          if (its.length) {
+            const name = ((joined.match(/\(([^)]+)\)/) || [])[1] || joined.replace(/total|carried.*$/ig, '').trim()).trim();
+            (out.checks = out.checks || []).push({ name, stated: v || 0, read: got, from: its[0].code, to: its[its.length - 1].code });
+            // The section heading is often unreadable in a scan; its "Total (Design Works) carried" line names it.
+            const sec = out.sections.find(x => x[0] === its[0].sec), clean = name.replace(/\s*\d+\s*$/, '').replace(/\s+/g, ' ').trim();
+            if (sec && clean.length > 3 && /[A-Za-z\u0600-\u06FF]{3,}/.test(clean) && (!sec[1] || /^قسم /.test(sec[1]) || !/[A-Za-z\u0600-\u06FF]{4,}/.test(sec[1]))) sec[1] = clean;
+          }
           out.mark = out.items.length;
         }
         last = null; continue;

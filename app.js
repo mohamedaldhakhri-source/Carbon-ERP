@@ -307,7 +307,7 @@ function vProject(id) {
       const match = x => !bf || (bf === 'none' ? !x.dept : x.dept === bf);
       p.sections.forEach(([sc, sn]) => {
         const it = p.boq.filter(x => x.s === sc && match(x)); if (!it.length) return; const st = it.reduce((a, x) => a + x.t, 0); const ss = it.reduce((a, x) => a + itemSpent(p, x.c), 0);
-        h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td></td><td></td><td></td><td class="n">' + money(st) + '</td><td class="n">' + money(ss) + '</td><td><div class="barrow">' + bar(secProgress(p, sc)) + '<span>' + Math.round(secProgress(p, sc)) + '%</span></div></td></tr>';
+        h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn || 'قسم ' + sc) + (canPrice() ? ' <button class="linkbtn small" data-act="secRename" data-p="' + p.id + '" data-v="' + esc(sc) + '" title="تعديل اسم القسم">✎</button>' : '') + '</td><td></td><td></td><td></td><td class="n">' + money(st) + '</td><td class="n">' + money(ss) + '</td><td><div class="barrow">' + bar(secProgress(p, sc)) + '<span>' + Math.round(secProgress(p, sc)) + '%</span></div></td></tr>';
         it.forEach(x => {
           const isp = itemSpent(p, x.c);
           h += '<tr><td class="num small">' + esc(x.c) + '</td><td>' + esc(x.d) + '</td><td>' + (isAdmin() ? deptSel(x.dept, 'class="dsel" data-bdept="' + x.id + '" aria-label="قسم البند ' + esc(x.c) + '"') : (x.dept ? '<span class="tag">' + DEPTS[x.dept] + '</span>' : '<span class="muted">—</span>')) + '</td><td class="n">' + x.q + ' ' + esc(x.u) + '</td><td class="n">' + money(x.r) + '</td><td class="n">' + money(x.t) + '</td><td class="n"' + (isp > x.t ? ' style="color:var(--bad)" title="تجاوز قيمة البند"' : '') + '>' + money(isp) + '</td><td style="min-width:150px"><div class="barrow">' + bar(x.p, x.p >= 100 ? 'ok' : '') + (canProg ? '<input class="prog-in num" type="number" min="0" max="100" value="' + x.p + '" data-prog="' + x.id + '" aria-label="نسبة إنجاز البند ' + esc(x.c) + '">' : '<span>' + x.p + '%</span>') + '</div></td></tr>';
@@ -922,6 +922,7 @@ const A2 = {
   npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
   schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r })) }; render(); },
   print: () => window.print(),
+  secRename: d => { const p = P(d.p), sec = p.sections.find(x => x[0] === d.v) || [d.v, '']; modal('اسم القسم ' + d.v, '<form class="f" data-form="secRename" data-p="' + p.id + '" data-v="' + esc(d.v) + '"><label class="fld"><span>اسم القسم</span><input id="sr-n" required value="' + esc(sec[1] && !/^قسم /.test(sec[1]) ? sec[1] : '') + '" placeholder="مثال: الأعمال الإنشائية"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   logReload: () => { ui.logRows = null; render(); },
   gcol: d => { ui.gcol = ui.gcol || {}; if (ui.gcol[d.v]) delete ui.gcol[d.v]; else ui.gcol[d.v] = 1; render(); },
   gfold: d => { const p = P(d.v); if (Object.keys(ui.gcol || {}).length) ui.gcol = {}; else { ui.gcol = {}; p.boq.forEach(b => { ui.gcol[b.s] = 1; }); } render(); },
@@ -1132,6 +1133,8 @@ document.addEventListener('submit', async e => {
       const ds = checkedDepts('nu-dept'); if (!ds) { toast('اختر قسم واحد على الأقل أو الكل', true); return; }
       const res = await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: ds[0] || '' }, 'أُضيف الموظف ويقدر يدخل الحين');
       if (res) { if (res.id && (ds.length > 1 || !ds.length)) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
+    } else if (kind === 'secRename') {
+      await run(sb.rpc('rename_section', { p_project: f.dataset.p, p_code: f.dataset.v, p_name: v('sr-n') }), 'تم تعديل اسم القسم'); closeModal(); refresh();
     } else if (kind === 'pcInv') {
       const path = await upload(fileOf('pi-f'), 'petty'); if (!path) return;
       await run(sb.rpc('attach_petty_invoice', { p_id: f.dataset.v, p_path: path }), 'انرفقت الفاتورة وتقفل الطلب'); closeModal(); refresh();
