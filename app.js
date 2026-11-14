@@ -19,8 +19,7 @@ const OMAN = {
 const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', finance: 'المالية', pending: 'بانتظار التفعيل' };
 const STAGES = [
   { k: 'dept', l: 'موافقة رئيس القسم', role: 'head' },
-  { k: 'procurement', l: 'عروض الأسعار', role: 'procurement' },
-  { k: 'finance', l: 'تدقيق الميزانية', role: 'finance' },
+  { k: 'procurement', l: 'تحديد المواد والأسعار', role: 'procurement' },
   { k: 'gm', l: 'اعتماد المدير العام', role: 'gm' },
   { k: 'po', l: 'إصدار أمر الشراء', role: 'procurement' },
   { k: 'done', l: 'أُرسل PO للمورّد' }
@@ -40,7 +39,7 @@ const ico = k => '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 
 /* ---------- state ---------- */
 let session = null, me = null;
-let S = { projects: [], requests: [], petty: [], variations: [], profiles: [] };
+let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [] };
 let ui = { filter: 'all', tab: 'boq', reqFilter: 'mine', authMode: 'login', authErr: '' };
 
 /* ---------- helpers ---------- */
@@ -51,7 +50,10 @@ const fd = s => { if (!s) return '—'; const d = D(s); return String(d.getDate(
 const ftime = s => { if (!s) return ''; const d = new Date(s); return fd(d.toISOString()) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const daysBetween = (a, b) => Math.round((b - a) / 864e5);
-const P = id => S.projects.find(p => p.id === id);
+const P = id => S.projects.find(p => p.id === id) || S.pending.find(p => p.id === id);
+const canApprove = () => me && ['gm', 'owner', 'admin'].includes(me.role);
+const canNewProject = () => isAdmin() || (me && me.role === 'head');
+const DOCK = { contract: 'العقد', boq: 'جدول الكميات BOQ', drawing: 'مخططات', ministry: 'موافقة الوزارة / العميل', other: 'مستند آخر' };
 const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
@@ -69,12 +71,12 @@ const wilOpts = (gov, sel) => '<option value="">اختر الولاية</option>
 const deptSel = (sel, attrs, allowNone) => '<select ' + attrs + '>' + (allowNone || !sel ? '<option value="">' + (allowNone || 'غير محدد') + '</option>' : '') + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
 function nextCode() {
   const d = new Date(), per = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0'), pre = 'CEC-PRJ-' + per + '-';
-  const n = S.projects.map(p => String(p.code || '')).filter(c => c.startsWith(pre)).map(c => parseInt(c.slice(pre.length), 10) || 0);
+  const n = S.projects.concat(S.pending).map(p => String(p.code || '')).filter(c => c.startsWith(pre)).map(c => parseInt(c.slice(pre.length), 10) || 0);
   return pre + String((n.length ? Math.max.apply(null, n) : 0) + 1).padStart(3, '0');
 }
 
 function contract(p) { return p.boq.reduce((a, b) => a + b.t, 0); }
-function varsApproved(p) { return S.variations.filter(v => v.pid === p.id && v.client === 'approved').reduce((a, v) => a + v.amt, 0); }
+function varsApproved(p) { return S.variations.filter(v => v.pid === p.id && v.gm === 'approved').reduce((a, v) => a + v.amt, 0); }
 function budget(p) { return contract(p) + varsApproved(p) || 1; }
 function itemSpent(p, code) {
   const b = itemByCode(p, code); let s = b ? b.sp : 0;
@@ -120,7 +122,9 @@ function myQueue() {
   const reqs = S.requests.filter(canActOn);
   const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
   const sched = canSched() ? S.projects.filter(p => p.status !== 'closed' && planN(p) && p.sched.status !== 'approved') : [];
-  return { reqs, pc, sched, n: reqs.length + pc.length + sched.length };
+  const projs = canApprove() ? S.pending.filter(p => p.approval === 'pending') : [];
+  const vos = canApprove() ? S.variations.filter(v => v.gm === 'pending') : [];
+  return { reqs, pc, sched, projs, vos, n: reqs.length + pc.length + sched.length + projs.length + vos.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
 function boqOptions(p, sel, allowNone) {
@@ -156,12 +160,14 @@ async function loadAll() {
   const q = t => sb.from(t).select('*');
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
-    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at')]);
+    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at')]);
   const bad = res.find(r => r.error); if (bad) throw bad.error;
-  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs] = res.map(r => r.data);
+  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs] = res.map(r => r.data);
+  S.docs = docs.map(d => ({ id: d.id, pid: d.project_id, kind: d.kind, title: d.title, path: d.path, byId: d.uploaded_by, date: d.created_at }));
   S.profiles = profs;
   const codeOf = {}; items.forEach(b => { codeOf[b.id] = b.code; });
-  S.projects = pr.map(p => ({
+  const allP = pr.map(p => ({
+    approval: p.approval || 'approved', reqBy: p.requested_by, apBy: p.approval_by, apAt: p.approval_at, apNote: p.approval_note,
     id: p.id, code: p.code, name: p.name, short: p.short_name, client: p.client, type: p.type, depts: p.depts || [], start: p.start_date, end: p.end_date,
     status: p.status, stopReason: p.stop_reason, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
@@ -169,15 +175,17 @@ async function loadAll() {
     boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept, ps: b.start_date, pe: b.end_date })),
     tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ id: t.id, n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase, dept: t.dept }))
   }));
+  S.projects = allP.filter(p => p.approval === 'approved');
+  S.pending = allP.filter(p => p.approval !== 'approved' && (canApprove() || p.reqBy === me.id));
   S.requests = reqs.map(r => ({
     id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
     date: r.created_at, need: r.need_by, note: r.note, stage: r.stage, po: r.po_no ? { no: r.po_no, date: r.po_date } : null,
-    items: ritems.filter(i => i.request_id === r.id).map(i => ({ d: i.description, q: +i.qty, u: i.unit })),
+    items: ritems.filter(i => i.request_id === r.id).map(i => ({ id: i.id, d: i.description, q: +i.qty, u: i.unit, pr: i.unit_price == null ? null : +i.unit_price })),
     quotes: quotes.filter(x => x.request_id === r.id).map(x => ({ id: x.id, sup: x.supplier, amt: +x.amount, terms: x.terms, days: x.delivery_days, sel: x.selected })),
     hist: hist.filter(h => h.request_id === r.id).map(h => ({ t: h.created_at, by: h.actor_name, role: h.role, a: h.action, note: h.note }))
   }));
   S.petty = petty.map(c => ({ id: c.id, no: c.no, pid: c.project_id, boq: c.boq_item_id ? codeOf[c.boq_item_id] : null, amt: +c.amount, d: c.description, by: nameOf(c.requested_by), date: c.created_at, status: c.status, file: c.receipt_path, note: c.decision_note }));
-  S.variations = vars.map(v => ({ id: v.id, no: v.no, pid: v.project_id, title: v.title, d: v.description, amt: +v.amount, file: v.approval_path, client: v.client_status, date: v.created_at, byId: v.created_by, by: nameOf(v.created_by) }));
+  S.variations = vars.map(v => ({ id: v.id, no: v.no, pid: v.project_id, title: v.title, d: v.description, amt: +v.amount, file: v.approval_path, client: v.client_status, gm: v.gm_status || 'pending', gmBy: v.gm_by, gmAt: v.gm_at, gmNote: v.gm_note, date: v.created_at, byId: v.created_by, by: nameOf(v.created_by) }));
 }
 async function refresh() { try { await loadAll(); render(); } catch (e) { toast(errMsg(e), true); } }
 
@@ -219,7 +227,7 @@ function vDash() {
   const attn = hs.filter(x => x.h.k === 'late' || x.h.k === 'risk');
   const cnt = k => hs.filter(x => x.h.k === k).length;
   const pend = S.requests.filter(r => !['done', 'rejected'].includes(r.stage)).length + S.petty.filter(c => c.status === 'pending').length;
-  let h = '<div class="head"><div class="t"><h1>لوحة متابعة المشاريع</h1><span class="muted">اليوم ' + fd(iso(today)) + '</span></div><div class="actions">' + segFilter() + (isAdmin() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>';
+  let h = '<div class="head"><div class="t"><h1>لوحة متابعة المشاريع</h1><span class="muted">اليوم ' + fd(iso(today)) + '</span></div><div class="actions">' + segFilter() + (canNewProject() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>';
   if (!S.projects.length) return h + '<div class="card empty">لا توجد مشاريع بعد.' + (isAdmin() ? ' ابدأ بإضافة مشروع جديد ولصق جدول الكميات من Excel.' : '') + '</div>';
   h += '<div class="kpis">' +
     '<div class="kpi"><span class="l">قيمة المشاريع الجارية</span><span class="v">' + money(val) + ' <small>ر.ع</small></span><span class="s">' + active.length + ' مشاريع جارية، شاملة الأعمال الإضافية</span></div>' +
@@ -247,7 +255,7 @@ function projTable(list) {
     }).join('') + '</tbody></table></div>';
 }
 function vProjects() {
-  return '<div class="head"><div class="t"><h1>المشاريع</h1><span class="muted">' + S.projects.length + ' مشاريع</span></div><div class="actions">' + segFilter() + (isAdmin() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div><div class="card">' + projTable(S.projects.filter(p => ui.filter === 'all' || p.type === ui.filter)) + '</div>';
+  return '<div class="head"><div class="t"><h1>المشاريع</h1><span class="muted">' + S.projects.length + ' مشاريع</span></div><div class="actions">' + segFilter() + (canNewProject() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>' + (S.pending.length ? '<div class="card"><h2>مشاريع بانتظار موافقة المدير العام</h2><div class="tbl"><table><tbody>' + S.pending.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">طلبه ' + esc(nameOf(p.reqBy)) + '</td><td>' + (p.approval === 'rejected' ? '<span class="pill p-bad">مرفوض</span>' : '<span class="pill p-warn">بانتظار الموافقة</span>') + '</td></tr>').join('') + '</tbody></table></div></div>' : '') + '<div class="card">' + projTable(S.projects.filter(p => ui.filter === 'all' || p.type === ui.filter)) + '</div>';
 }
 function vProject(id) {
   const p = P(id); if (!p) return '<div class="empty">المشروع غير موجود</div>';
@@ -255,14 +263,16 @@ function vProject(id) {
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
   const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'مشروع حكومي' : 'مشروع خاص') + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
-    '<div class="actions">' + (p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
-  if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
+    '<div class="actions">' + (p.approval === 'approved' && p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
+  if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
+  else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
+  else if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
   h += '<div class="kpis">' +
     '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + (va ? '+ ' + money(va) + ' أعمال إضافية معتمدة' : 'لا توجد أعمال إضافية معتمدة') + '</span></div>' +
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (p.status === 'closed' ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
-  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length]];
+  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]];
   const showTime = planN(p) || isAdmin() || canDates(p) || (ui.ted && ui.ted.pid === p.id);
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
   h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
@@ -293,9 +303,8 @@ function vProject(id) {
   } else if (ui.tab === 'time') h += timeTab(p);
   else if (ui.tab === 'req') h += reqTable(reqs, false);
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
-  else if (ui.tab === 'vo') {
-    h += vos.length ? '<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th><th class="n">القيمة</th><th>موافقة العميل</th><th>المرفق</th><th>التاريخ</th></tr></thead><tbody>' + vos.map(v => '<tr><td class="num small">' + esc(v.no) + '</td><td><b>' + esc(v.title) + '</b><div class="muted small">' + esc(v.d) + '</div></td><td class="n">' + money(v.amt) + '</td><td>' + (v.client === 'approved' ? '<span class="pill p-ok">معتمد من العميل</span>' : '<span class="pill p-warn">بانتظار العميل</span>') + '</td><td class="small">' + (v.file ? fileLink(v.file, 'موافقة العميل') : ((v.byId === me.id || isAdmin()) ? '<button class="btn sm" data-act="voApprove" data-v="' + v.id + '">رفع موافقة العميل</button>' : '—')) + '</td><td class="small">' + fd(v.date) + '</td></tr>').join('') + '</tbody></table></div><p class="muted small">الأعمال الإضافية المعتمدة من العميل تُضاف لقيمة المشروع وميزانيته تلقائياً.</p>' : '<div class="empty">لا توجد أعمال إضافية لهذا المشروع.</div>';
-  }
+  else if (ui.tab === 'vo') h += (vos.length ? voTable(vos, false) : '<div class="empty">لا توجد أعمال إضافية لهذا المشروع.</div>') + '<p class="muted small">العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها يعتمده المدير العام ويُضاف لقيمة المشروع وميزانيته.</p>';
+  else if (ui.tab === 'docs') h += docsTab(p);
   h += '</div></div>';
   return h;
 }
@@ -329,7 +338,8 @@ function vRequest(id) {
   h += '<div class="card"><div class="steps">' + STAGES.map((s, i) => { let c = ''; if (r.stage === 'rejected') { c = i < rejIdx ? 'done' : i === rejIdx ? 'rej' : ''; } else if (r.stage === 'done' || i < idx) c = 'done'; else if (i === idx) c = 'cur'; return '<div class="step ' + c + '"><span class="dot">' + (c === 'done' ? '✓' : c === 'rej' ? '✕' : i + 1) + '</span>' + s.l + '</div>'; }).join('') + '</div></div>';
   h += '<div class="grid2"><div style="display:flex;flex-direction:column;gap:18px;min-width:0">';
   h += actionPanel(r, p);
-  h += '<div class="card"><h2>المواد المطلوبة</h2><div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th></tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td></tr>').join('') + '</tbody></table></div>' + (r.note ? '<p class="muted small" style="margin:10px 0 0">ملاحظة: ' + esc(r.note) + '</p>' : '') + '</div>';
+  const priced = r.items.some(it => it.pr != null), itot = r.items.reduce((a, it) => a + (it.pr || 0) * it.q, 0);
+  if (!(r.stage === 'procurement' && canActOn(r))) h += '<div class="card"><h2>المواد المطلوبة</h2><div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th>' + (priced ? '<th class="n">سعر الوحدة</th><th class="n">الإجمالي</th>' : '') + '</tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td>' + (priced ? '<td class="n">' + (it.pr != null ? money(it.pr) : '—') + '</td><td class="n">' + (it.pr != null ? money(it.pr * it.q) : '—') + '</td>' : '') + '</tr>').join('') + (priced ? '<tr class="sec"><td></td><td>إجمالي المواد</td><td></td><td></td><td></td><td class="n">' + money(itot) + '</td></tr>' : '') + '</tbody></table></div>' + (r.note ? '<p class="muted small" style="margin:10px 0 0">ملاحظة: ' + esc(r.note) + '</p>' : '') + '</div>';
   if (r.quotes.length && !(r.stage === 'procurement' && canActOn(r))) h += '<div class="card"><h2>عروض الأسعار</h2>' + quotesTable(r, false) + '</div>';
   if (r.po) h += poDoc(r, p);
   h += '</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a></dd><dt>بند BOQ</dt><dd>' + (bi ? esc(bi.c + ' ' + bi.d) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</dd><dt>القسم</dt><dd>' + DEPTS[r.dept] + '</dd><dt>مقدم الطلب</dt><dd>' + esc(r.by) + '</dd><dt>تاريخ الطلب</dt><dd>' + fd(r.date) + '</dd><dt>مطلوب قبل</dt><dd>' + fd(r.need) + '</dd></dl></div>' +
@@ -365,10 +375,12 @@ function actionPanel(r, p) {
   const noteF = '<label class="fld"><span>ملاحظة (اختياري، وإلزامية عند الرفض)</span><textarea id="actnote" placeholder="سبب الرفض أو أي توجيه"></textarea></label>';
   const btns = (ok) => '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">' + ok + '</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">' + (r.stage === 'procurement' ? 'إلغاء الطلب' : 'رفض') + '</button></div>';
   if (r.stage === 'dept') return '<div class="panel"><h2>موافقة رئيس القسم</h2><span class="small">راجع المواد والكميات. بعد موافقتك يروح الطلب مباشرة للمشتريات.</span>' + noteF + btns('موافقة وإرسال للمشتريات') + '</div>';
-  if (r.stage === 'procurement') return '<div class="panel"><h2>تسجيل عروض الأسعار</h2>' + quotesTable(r, true) +
+  if (r.stage === 'procurement') return '<div class="panel"><h2>تحديد المواد والأسعار</h2><span class="small">اكتب اسم كل مادة بالضبط كما بتنشترى، وسعر الوحدة، ثم سجّل عرض المورّد واختره.</span>' +
+    '<div class="tbl"><table><thead><tr><th>المادة (الاسم الدقيق)</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة (ر.ع)</th></tr></thead><tbody>' + r.items.map(it => '<tr><td><input class="ri" data-ri="' + it.id + '" data-k="d" value="' + esc(it.d) + '" aria-label="اسم المادة"></td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td><td><input class="ri num" type="number" min="0" step="0.001" data-ri="' + it.id + '" data-k="price" value="' + (it.pr != null ? it.pr : '') + '" aria-label="سعر الوحدة"></td></tr>').join('') + '</tbody></table></div>' +
+    '<div class="actions" style="margin:8px 0 14px"><button class="btn" data-act="reqItemsSave" data-v="' + r.id + '">حفظ المواد والأسعار</button>' + (r.items.every(it => it.pr != null) ? '<span class="muted small">إجمالي المواد ' + money(r.items.reduce((a, it) => a + it.pr * it.q, 0)) + ' ر.ع</span>' : '<span class="muted small" style="color:var(--warn)">باقي مواد بدون سعر</span>') + '</div>' +
+    '<h2>عرض المورّد</h2>' + quotesTable(r, true) +
     '<form class="f" data-form="quote" data-v="' + r.id + '"><div class="fr"><label class="fld"><span>المورّد</span><input id="q-sup" required placeholder="اسم المورّد"></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="q-amt" type="number" min="0" step="0.001" required></label></div><div class="fr"><label class="fld"><span>طريقة الدفع</span><select id="q-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label><label class="fld"><span>مدة التوريد (يوم)</span><input id="q-days" type="number" min="0" value="3"></label></div><div><button class="btn" type="submit">+ إضافة العرض</button></div></form>' +
-    noteF + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '" ' + (selQuote(r) ? '' : 'disabled') + '>إرسال العرض المختار للمالية</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">إلغاء الطلب</button></div></div>';
-  if (r.stage === 'finance') return '<div class="panel"><h2>تدقيق الميزانية</h2>' + budgetCheck(r, p) + noteF + btns('ضمن الميزانية، إرسال للمدير العام') + '</div>';
+    noteF + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '" ' + (selQuote(r) && r.items.every(it => it.pr != null) ? '' : 'disabled title="اكتب الأسعار واختر عرض المورّد أولاً"') + '>إرسال للمدير العام</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">إلغاء الطلب</button></div></div>';
   if (r.stage === 'gm') { const q = selQuote(r); return '<div class="panel"><h2>الاعتماد النهائي للشراء</h2><div class="check"><div class="row"><span>المورّد</span><b>' + esc(q.sup) + '</b></div><div class="row"><span>المبلغ</span><b class="num">' + money(q.amt) + ' ر.ع</b></div><div class="row"><span>الدفع</span><b>' + TERMS[q.terms] + '</b></div></div>' + budgetCheck(r, p) + noteF + btns('اعتماد الشراء') + '</div>'; }
   if (r.stage === 'po') { const q = selQuote(r); return '<div class="panel"><h2>إصدار أمر الشراء</h2><span class="small">المدير العام اعتمد الشراء. أصدر أمر الشراء للمورّد <b>' + esc(q.sup) + '</b> بمبلغ <b class="num">' + money(q.amt) + '</b> ر.ع (' + TERMS[q.terms] + ').</span><div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">إصدار PO وإرساله للمورّد</button></div></div>'; }
   return '';
@@ -387,12 +399,29 @@ function vPetty() {
     '<div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><span class="l">بانتظار اعتماد المدير العام</span><span class="v">' + pend.length + '</span><span class="s num">' + money(pend.reduce((a, c) => a + c.amt, 0)) + ' ر.ع</span></div><div class="kpi"><span class="l">إجمالي المعتمد</span><span class="v">' + money(tot) + ' <small>ر.ع</small></span><span class="s">محسوب ضمن مصروفات المشاريع</span></div></div>' +
     '<div class="card">' + pettyTable(S.petty, true) + '</div>';
 }
+function voTable(list, showProj) {
+  return '<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th class="n">القيمة</th><th>موافقة الوزارة / العميل</th><th>اعتماد المدير العام</th><th>التاريخ</th></tr></thead><tbody>' +
+    list.map(v => { const p = P(v.pid);
+      return '<tr><td class="num small">' + esc(v.no) + '</td><td><b>' + esc(v.title) + '</b><div class="muted small">' + esc(v.d) + '</div><div class="muted small">طلبه ' + esc(v.by) + '</div></td>' + (showProj ? '<td class="small"><a href="#p-' + v.pid + '">' + esc(pName(p)) + '</a></td>' : '') + '<td class="n">' + money(v.amt) + '</td>' +
+        '<td class="small">' + (v.file ? fileLink(v.file, 'عرض الموافقة') : ((v.byId === me.id || isAdmin()) ? '<button class="btn sm" data-act="voApprove" data-v="' + v.id + '">إرفاق الموافقة</button>' : '<span class="pill p-warn">ما انرفقت</span>')) + '</td>' +
+        '<td>' + (v.gm === 'approved' ? '<span class="pill p-ok">معتمد' + (v.gmBy ? ' من ' + esc(nameOf(v.gmBy)) : '') + '</span>' : v.gm === 'rejected' ? '<span class="pill p-bad">مرفوض</span>' + (v.gmNote ? '<div class="muted small">' + esc(v.gmNote) + '</div>' : '') :
+          (canApprove() ? (v.file ? '<span class="actions"><button class="btn sm ok" data-act="voOk" data-v="' + v.id + '">اعتماد</button><button class="btn sm bad" data-act="voNo" data-v="' + v.id + '">رفض</button></span>' : '<span class="muted small">بانتظار إرفاق الموافقة</span>') : '<span class="pill p-warn">بانتظار المدير العام</span>')) + '</td>' +
+        '<td class="small">' + fd(v.date) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+}
+function docsTab(p) {
+  const ds = S.docs.filter(x => x.pid === p.id);
+  let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></div>';
+  if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
+  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+}
 function vInbox() {
   const q = myQueue();
   let h = '<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">' + ROLES[me.role] + (me.dept ? ' ' + DEPTS[me.dept] : '') + '</span></div></div>';
   if (!q.n) return h + '<div class="card empty">ما عندك شي ينتظر إجراءك الحين.</div>';
   if (q.reqs.length) h += '<div class="card"><h2>طلبات المواد</h2>' + reqTable(q.reqs, true) + '</div>';
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
+  if (q.projs.length) h += '<div class="card"><h2>مشاريع جديدة بانتظار موافقتك</h2><div class="tbl"><table><tbody>' + q.projs.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">من ' + esc(nameOf(p.reqBy)) + ' · ' + p.boq.length + ' بند · ' + money(contract(p)) + ' ر.ع</td><td><span class="pill p-warn">بانتظار الموافقة</span></td></tr>').join('') + '</tbody></table></div></div>';
+  if (q.vos.length) h += '<div class="card"><h2>أعمال إضافية بانتظار اعتمادك</h2>' + voTable(q.vos, true) + '</div>';
   if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + planN(p) + (p.boq.some(b => b.ps) ? ' بند' : ' مهمة') + ' · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
@@ -494,7 +523,7 @@ function boqReview(n) {
   return h + '</tbody></table></div>';
 }
 function vNewProject() {
-  if (!isAdmin()) return '<div class="empty">إضافة المشاريع لمدير النظام وصاحب الشركة والمدير العام.</div>';
+  if (!canNewProject()) return '<div class="empty">إضافة المشاريع لرؤساء الأقسام والإدارة.</div>';
   const n = npState(), f = n.f;
   const fv = k => esc(f[k] || '');
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويعطي كل بند مدة. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
@@ -686,6 +715,17 @@ const A2 = {
     refresh();
   },
   bdeptFilter: d => { ui.bdept = d.v; render(); },
+  reqItemsSave: async (d, el) => {
+    const items = [...document.querySelectorAll('[data-ri]')].reduce((m, x) => { const o = m[x.dataset.ri] = m[x.dataset.ri] || { id: x.dataset.ri }; o[x.dataset.k] = x.value; return m; }, {});
+    const list = Object.values(items); if (list.some(x => !String(x.d || '').trim())) return toast('اكتب اسم كل مادة', true);
+    el.disabled = true; try { await run(sb.rpc('set_request_items', { p_req: d.v, p_items: list }), 'انحفظت المواد والأسعار'); } catch (e) { el.disabled = false; return; } refresh();
+  },
+  projOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_project', { p_project: d.v, p_ok: true }), 'اعتُمد المشروع وصار ظاهر للجميع'); } catch (e) { el.disabled = false; return; } refresh(); },
+  projNo: d => modal('رفض المشروع', '<form class="f" data-form="projNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="pn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
+  voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد العمل الإضافي وانضاف لقيمة المشروع'); } catch (e) { el.disabled = false; return; } refresh(); },
+  voNo: d => modal('رفض العمل الإضافي', '<form class="f" data-form="voNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="vn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
+  newDoc: d => modal('إضافة مستند للمشروع', '<form class="f" data-form="doc" data-v="' + d.v + '"><div class="fr"><label class="fld"><span>نوع المستند</span><select id="dc-k">' + Object.entries(DOCK).map(([k, l]) => '<option value="' + k + '">' + l + '</option>').join('') + '</select></label><label class="fld"><span>اسم المستند</span><input id="dc-t" required placeholder="مثال: العقد الموقّع"></label></div><label class="fld"><span>الملف</span><input id="dc-f" type="file" required></label><div class="actions"><button class="btn pri" type="submit">رفع</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
+  docDel: async d => { try { await run(sb.from('project_docs').delete().eq('id', d.v), 'انحذف المستند'); } catch (e) { return; } refresh(); },
   projDel: d => {
     const p = P(d.v), n = S.requests.filter(r => r.pid === p.id).length + S.petty.filter(c => c.pid === p.id).length + S.variations.filter(v => v.pid === p.id).length;
     modal('حذف المشروع ' + pName(p), '<p>بيتم حذف المشروع <b>' + esc(p.name) + '</b> نهائياً مع ' + p.boq.length + ' بند BOQ و' + p.tasks.length + ' مهمة' + (n ? ' و<b>' + n + ' طلب ومصروف مرتبط فيه</b>' : '') + '. ما يمكن التراجع عن الحذف.</p><label class="fld"><span>للتأكيد اكتب كود المشروع: <b class="num">' + esc(p.code) + '</b></span><input id="pd-c" dir="ltr" autocomplete="off"></label><div class="actions"><button class="btn bad" data-act="projDelGo" data-v="' + p.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>');
@@ -721,8 +761,8 @@ function newPettyForm(pid) {
 }
 function newVOForm(pid) {
   modal('إضافة عمل إضافي (Variation)', '<form class="f" data-form="vo" data-v="' + pid + '"><label class="fld"><span>عنوان العمل الإضافي</span><input id="vo-t" required placeholder="مثال: غرفة تخزين إضافية"></label><label class="fld"><span>الوصف ونطاق العمل</span><textarea id="vo-d" required></textarea></label>' +
-    '<div class="fr"><label class="fld"><span>القيمة (ر.ع)</span><input id="vo-a" type="number" min="0" step="0.001" required></label><label class="fld"><span>موافقة العميل (PDF أو صورة)</span><input id="vo-f" type="file" accept="image/*,.pdf"></label></div>' +
-    '<span class="muted small">إذا أرفقت موافقة العميل، يُعتمد العمل الإضافي ويُضاف لقيمة المشروع. بدونها يبقى "بانتظار العميل".</span>' +
+    '<div class="fr"><label class="fld"><span>القيمة (ر.ع)</span><input id="vo-a" type="number" min="0" step="0.001" required></label><label class="fld"><span>موافقة الوزارة أو العميل (PDF أو صورة)</span><input id="vo-f" type="file" accept="image/*,.pdf" required></label></div>' +
+    '<span class="muted small">يروح العمل الإضافي للمدير العام للاعتماد، وبعد اعتماده يُضاف لقيمة المشروع وميزانيته.</span>' +
     '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
 function projStatusForm(pid) {
@@ -771,7 +811,7 @@ const A = {
   },
   pcOk: async d => { await run(sb.rpc('decide_petty', { p_id: d.v, p_approve: true }), 'اعتُمد وأُضيف لمصروفات المشروع'); refresh(); },
   pcNo: async d => { await run(sb.rpc('decide_petty', { p_id: d.v, p_approve: false }), 'تم الرفض'); refresh(); },
-  voApprove: d => { const v = S.variations.find(x => x.id === d.v); modal('رفع موافقة العميل - ' + v.title, '<form class="f" data-form="voFile" data-v="' + v.id + '"><label class="fld"><span>ملف الموافقة</span><input id="vf" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع واعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  voApprove: d => { const v = S.variations.find(x => x.id === d.v); modal('إرفاق موافقة الوزارة أو العميل - ' + v.title, '<form class="f" data-form="voFile" data-v="' + v.id + '"><label class="fld"><span>ملف الموافقة</span><input id="vf" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع واعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   resetPass: d => { const u = S.profiles.find(x => x.id === d.v); modal('كلمة مرور جديدة - ' + u.full_name, '<form class="f" data-form="resetPass" data-v="' + u.id + '"><label class="fld"><span>كلمة المرور الجديدة</span><input id="rp" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   delUser: d => { const u = S.profiles.find(x => x.id === d.v); modal('حذف ' + u.full_name, '<p>بيتم حذف حساب <b>' + esc(u.full_name) + '</b> نهائياً وما يقدر يدخل النظام. إذا عنده طلبات مسجلة، الأفضل توقف حسابه بتغيير دوره إلى "موقوف" بدل الحذف.</p><div class="actions"><button class="btn bad" data-act="delUserGo" data-v="' + u.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'); },
   delUserGo: async d => { if (await callFn({ action: 'delete', id: d.v }, 'تم حذف الحساب')) { closeModal(); refresh(); } },
@@ -845,11 +885,11 @@ document.addEventListener('submit', async e => {
       closeModal(); toast('أُرسل ' + c.no + ' للمدير العام'); refresh();
     } else if (kind === 'vo') {
       const path = await upload(fileOf('vo-f'), 'variations');
-      await run(sb.from('variations').insert({ project_id: f.dataset.v, title: v('vo-t'), description: v('vo-d'), amount: +v('vo-a'), approval_path: path, client_status: path ? 'approved' : 'pending', created_by: me.id }), path ? 'أُضيف العمل الإضافي ومعه موافقة العميل' : 'أُضيف العمل الإضافي بانتظار موافقة العميل');
+      await run(sb.from('variations').insert({ project_id: f.dataset.v, title: v('vo-t'), description: v('vo-d'), amount: +v('vo-a'), approval_path: path, client_status: path ? 'approved' : 'pending', created_by: me.id }), 'أُرسل العمل الإضافي للمدير العام للاعتماد');
       ui.tab = 'vo'; closeModal(); refresh();
     } else if (kind === 'voFile') {
       const path = await upload(fileOf('vf'), 'variations');
-      await run(sb.from('variations').update({ approval_path: path, client_status: 'approved' }).eq('id', f.dataset.v), 'اعتُمد العمل الإضافي وأُضيف لقيمة المشروع');
+      await run(sb.from('variations').update({ approval_path: path, client_status: 'approved' }).eq('id', f.dataset.v), 'انرفقت الموافقة، والعمل الإضافي عند المدير العام للاعتماد');
       closeModal(); refresh();
     } else if (kind === 'pstatus') {
       const code = v('ps-c').trim();
@@ -863,12 +903,22 @@ document.addEventListener('submit', async e => {
       if ((pf.code || '').trim() && S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
       const badT = n.items.find(i => (i.start || i.end) && (!i.start || !i.end || i.end < i.start));
       if (badT) { toast('راجع تواريخ البند ' + badT.code + ': النهاية لازم بعد البداية', true); return; }
-      const pr = await run(sb.from('projects').insert(Object.assign((pf.code || '').trim() ? { code: pf.code.trim() } : {}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
+      const pr = await run(sb.from('projects').insert(Object.assign((pf.code || '').trim() ? { code: pf.code.trim() } : {}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));
       const cnt = n.items.length, dated = n.items.some(i => i.start); ui.np = null; ui.tab = dated ? 'time' : 'boq';
-      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (!isAdmin() ? '، وراح للمدير العام للموافقة' : dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+    } else if (kind === 'projNo') {
+      await run(sb.rpc('decide_project', { p_project: f.dataset.v, p_ok: false, p_note: v('pn-n') }), 'انرفض المشروع');
+      closeModal(); refresh();
+    } else if (kind === 'voNo') {
+      await run(sb.rpc('decide_variation', { p_id: f.dataset.v, p_ok: false, p_note: v('vn-n') }), 'انرفض العمل الإضافي');
+      closeModal(); refresh();
+    } else if (kind === 'doc') {
+      const path = await upload(fileOf('dc-f'), 'docs');
+      await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: v('dc-k'), title: v('dc-t'), path, uploaded_by: me.id }), 'انرفع المستند');
+      ui.tab = 'docs'; closeModal(); refresh();
     } else if (kind === 'schedOk') {
       await run(sb.rpc('approve_schedule', { p_project: f.dataset.v, p_note: v('so-n') || null }), 'اعتُمد الجدول الزمني');
       closeModal(); refresh();

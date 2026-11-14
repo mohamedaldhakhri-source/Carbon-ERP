@@ -259,3 +259,5 @@ details summary{margin:4px 0}
 .rv tr.chg td{background:var(--warn-soft)}
 .greet{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 14px}
 .greet b{font-size:1.15rem}
+.ri{font:inherit;font-size:.85rem;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit;width:100%;min-width:120px}
+input.ri.num{max-width:130px}
