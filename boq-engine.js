@@ -85,7 +85,13 @@
       const qty = num(cell(row, 'qty')), rate = num(cell(row, 'rate')), total = num(cell(row, 'total'));
       const joined = row.map(str).join(' ');
       if (!code && SKIP.test(joined)) {
-        if (/grand\s*total|المجموع الكلي|الإجمالي الكلي/i.test(joined) && !isNaN(total)) out.stated = Math.max(out.stated, total);
+        // Totals printed in the file, used to check what was read: sub-total (before VAT), section totals carried to the summary, grand total.
+        const nums = row.map(num).filter(x => !isNaN(x) && x > 0), v = !isNaN(total) ? total : nums[nums.length - 1];
+        if (v) {
+          if (/sub\s*-?\s*total|قبل الضريبة|المجموع الفرعي/i.test(joined)) out.statedSub = Math.max(out.statedSub || 0, v);
+          else if (/grand\s*total|المجموع الكلي|الإجمالي الكلي/i.test(joined)) out.statedGrand = Math.max(out.statedGrand || 0, v);
+          else if (/carried|مرحّل|مرحل/i.test(joined)) out.carried = (out.carried || 0) + v;
+        }
         last = null; continue;
       }
       // A bare "Total" line with no item number is a total row, not an item.
@@ -110,6 +116,7 @@
       last = { code: code || String(out.items.length + 1), desc, qty: q, unit: str(cell(row, 'unit')), rate: Math.round(rt * 1000) / 1000, total: tt, sec, sub: curSub, dept: null };
       out.items.push(last);
     }
+    out.stated = out.statedSub || out.carried || out.statedGrand || out.stated || 0;
     return out;
   }
   function parseText(text) {
