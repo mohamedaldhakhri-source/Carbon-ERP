@@ -58,6 +58,7 @@ const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
 const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
+const KIND = { gov: 'حكومي', company: 'شركات', private: 'قطاع خاص' };
 const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
 const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
@@ -175,7 +176,7 @@ async function loadAll() {
   const codeOf = {}; items.forEach(b => { codeOf[b.id] = b.code; });
   const allP = pr.map(p => ({
     approval: p.approval || 'approved', reqBy: p.requested_by, apBy: p.approval_by, apAt: p.approval_at, apNote: p.approval_note,
-    id: p.id, code: p.code, name: p.name, short: p.short_name, client: p.client, type: p.type, depts: p.depts || [], start: p.start_date, end: p.end_date,
+    id: p.id, code: p.code, name: p.name, short: p.short_name, client: p.client, type: p.type, kind: p.type === 'gov' ? 'gov' : p.client_type === 'company' ? 'company' : 'private', cPhone: p.client_phone, cId: p.client_id_no, cIdFile: p.client_id_path, cCr: p.client_cr, depts: p.depts || [], start: p.start_date, end: p.end_date,
     status: p.status, stopReason: p.stop_reason, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
     sections: secs.filter(s => s.project_id === p.id).map(s => [s.code, s.name]),
@@ -225,10 +226,10 @@ function views() {
   if (h === 'users') return vUsers();
   return vDash();
 }
-const segFilter = () => '<div class="seg" role="group" aria-label="نوع المشروع">' + [['all', 'الكل'], ['gov', 'حكومي'], ['private', 'خاص']].map(([k, l]) => '<button data-act="filter" data-v="' + k + '" class="' + (ui.filter === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+const segFilter = () => '<div class="seg" role="group" aria-label="نوع المشروع">' + [['all', 'الكل'], ['gov', 'حكومي'], ['company', 'شركات'], ['private', 'قطاع خاص']].map(([k, l]) => '<button data-act="filter" data-v="' + k + '" class="' + (ui.filter === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
 
 function vDash() {
-  const all = S.projects.filter(p => ui.filter === 'all' || p.type === ui.filter);
+  const all = S.projects.filter(p => ui.filter === 'all' || p.kind === ui.filter);
   const active = all.filter(p => p.status === 'active');
   const val = active.reduce((a, p) => a + budget(p), 0), sp = active.reduce((a, p) => a + spent(p), 0);
   const hs = all.map(p => ({ p, h: health(p) }));
@@ -254,7 +255,7 @@ function projTable(list) {
     list.map(p => {
       const hh = health(p), pr = progress(p), b = budget(p), s = spent(p), dl = daysLeft(p);
       return '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(p.short) + '</b><div class="muted small"><span class="num">' + esc(p.code || '') + '</span>' + (p.client ? ' · ' + esc(p.client) : '') + (p.wil || p.gov ? ' · ' + esc(p.wil || p.gov) : '') + '</div></td>' +
-        '<td><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'حكومي' : 'خاص') + '</span></td>' +
+        '<td><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + KIND[p.kind] + '</span></td>' +
         '<td style="max-width:200px">' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</td>' +
         '<td style="min-width:150px"><div class="barrow">' + bar(pr, hh.k === 'late' ? 'bad' : hh.k === 'risk' ? 'warn' : '', p.status === 'closed' ? null : timePct(p)) + '<span>' + Math.round(pr) + '%</span></div></td>' +
         '<td style="min-width:170px"><div class="barrow">' + bar(s / b * 100, s > b ? 'bad' : 'ok') + '<span>' + Math.round(s / b * 100) + '%</span></div><div class="muted small num">' + money(s) + ' / ' + money(b) + '</div></td>' +
@@ -263,14 +264,14 @@ function projTable(list) {
     }).join('') + '</tbody></table></div>';
 }
 function vProjects() {
-  return '<div class="head"><div class="t"><h1>المشاريع</h1><span class="muted">' + S.projects.length + ' مشاريع</span></div><div class="actions">' + segFilter() + (canNewProject() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>' + (S.pending.length ? '<div class="card"><h2>مشاريع بانتظار موافقة المدير العام</h2><div class="tbl"><table><tbody>' + S.pending.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">طلبه ' + esc(nameOf(p.reqBy)) + '</td><td>' + (p.approval === 'rejected' ? '<span class="pill p-bad">مرفوض</span>' : '<span class="pill p-warn">بانتظار الموافقة</span>') + '</td></tr>').join('') + '</tbody></table></div></div>' : '') + '<div class="card">' + projTable(S.projects.filter(p => ui.filter === 'all' || p.type === ui.filter)) + '</div>';
+  return '<div class="head"><div class="t"><h1>المشاريع</h1><span class="muted">' + S.projects.length + ' مشاريع</span></div><div class="actions">' + segFilter() + (canNewProject() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>' + (S.pending.length ? '<div class="card"><h2>مشاريع بانتظار موافقة المدير العام</h2><div class="tbl"><table><tbody>' + S.pending.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">طلبه ' + esc(nameOf(p.reqBy)) + '</td><td>' + (p.approval === 'rejected' ? '<span class="pill p-bad">مرفوض</span>' : '<span class="pill p-warn">بانتظار الموافقة</span>') + '</td></tr>').join('') + '</tbody></table></div></div>' : '') + '<div class="card">' + projTable(S.projects.filter(p => ui.filter === 'all' || p.kind === ui.filter)) + '</div>';
 }
 function vProject(id) {
   const p = P(id); if (!p) return '<div class="empty">المشروع غير موجود</div>';
   const hh = health(p), pr = progress(p), c = contract(p), va = varsApproved(p), b = budget(p), s = spent(p), cm = committed(p), dl = daysLeft(p);
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
   const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
-  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + (p.type === 'gov' ? 'مشروع حكومي' : 'مشروع خاص') + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
+  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + 'مشروع ' + KIND[p.kind] + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (p.kind !== 'gov' && (p.cPhone || p.cId || p.cCr) ? ' · <span dir="ltr">' + esc(p.cPhone || '') + '</span>' + (p.cCr ? ' · س.ت ' + esc(p.cCr) : '') + (p.cId ? ' · البطاقة ' + esc(p.cId) : '') : '') + '</span>' + (p.cIdFile ? ' ' + fileLink(p.cIdFile, 'نسخة البطاقة الشخصية') : '') + '<span class="muted small">' + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
     '<div class="actions">' + (p.approval === 'approved' && p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
   if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
   else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
@@ -468,7 +469,7 @@ function vUsers() {
   return h;
 }
 function npState() {
-  if (!ui.np) ui.np = { f: { code: '', type: 'gov', start: iso(today), depts: [] }, sections: [], items: [], tasks: [], notes: '', stated: 0, schedNotes: '', busy: '' };
+  if (!ui.np) ui.np = { f: { code: '', kind: 'gov', start: iso(today), depts: [] }, sections: [], items: [], tasks: [], notes: '', stated: 0, schedNotes: '', busy: '' };
   return ui.np;
 }
 function npSync() {
@@ -560,6 +561,15 @@ function boqReview(n) {
   });
   return h + '</tbody></table></div>';
 }
+// Client details change with the project kind: a government body, a company, or a private person (with civil ID).
+function clientFields(f, n) {
+  const fv = k => esc(f[k] || ''), kind = f.kind || 'gov';
+  if (kind === 'gov') return '<div class="fr"><label class="fld"><span>الجهة الحكومية (العميل)</span><input data-npf="client" id="np-client" value="' + fv('client') + '" placeholder="مثال: وزارة التراث والسياحة"></label></div>';
+  if (kind === 'company') return '<div class="sub-card"><b class="small">بيانات الشركة</b><div class="fr"><label class="fld"><span>اسم الشركة</span><input data-npf="client" id="np-client" required value="' + fv('client') + '"></label><label class="fld"><span>رقم السجل التجاري</span><input data-npf="cCr" id="np-cr" dir="ltr" value="' + fv('cCr') + '"></label></div>' +
+    '<div class="fr"><label class="fld"><span>رقم الهاتف</span><input data-npf="cPhone" id="np-phone" type="tel" dir="ltr" required value="' + fv('cPhone') + '" placeholder="9XXXXXXX"></label></div></div>';
+  return '<div class="sub-card"><b class="small">بيانات العميل (قطاع خاص)</b><div class="fr"><label class="fld"><span>اسم العميل</span><input data-npf="client" id="np-client" required value="' + fv('client') + '"></label><label class="fld"><span>رقم الهاتف</span><input data-npf="cPhone" id="np-phone" type="tel" dir="ltr" required value="' + fv('cPhone') + '" placeholder="9XXXXXXX"></label></div>' +
+    '<div class="fr"><label class="fld"><span>رقم البطاقة الشخصية</span><input data-npf="cId" id="np-cid" dir="ltr" required inputmode="numeric" value="' + fv('cId') + '"></label><label class="fld"><span>نسخة من البطاقة الشخصية' + (n.idFile ? ' ✓ ' + esc(n.idFile.name) : '') + '</span><input id="np-idf" type="file" accept="image/*,.pdf"' + (n.idFile ? '' : ' required') + '></label></div></div>';
+}
 function vNewProject() {
   if (!canNewProject()) return '<div class="empty">إضافة المشاريع لرؤساء الأقسام والإدارة.</div>';
   const n = npState(), f = n.f;
@@ -567,9 +577,10 @@ function vNewProject() {
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويعطي كل بند مدة. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
     '<form class="f" data-form="project">' +
     '<div class="card"><h2>1. بيانات المشروع</h2>' +
-    '<div class="fr"><label class="fld"><span>كود المشروع</span><input id="np-code" value="' + nextCode() + '" dir="ltr" readonly tabindex="-1" class="ro" title="يتولد تلقائياً عند الحفظ"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
+    '<div class="fr"><label class="fld"><span>كود المشروع</span><input id="np-code" value="' + nextCode() + '" dir="ltr" readonly tabindex="-1" class="ro" title="يتولد تلقائياً عند الحفظ"></label><label class="fld"><span>نوع المشروع</span><select data-npf="kind" id="np-kind">' + Object.entries(KIND).map(([k, l]) => '<option value="' + k + '"' + ((f.kind || 'gov') === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label></div>' +
     '<div class="fr"><label class="fld"><span>اسم المشروع الكامل</span><input data-npf="name" id="np-name" required value="' + fv('name') + '"></label><label class="fld"><span>اسم مختصر (يظهر في القوائم)</span><input data-npf="short" id="np-short" required value="' + fv('short') + '"></label></div>' +
-    '<div class="fr"><label class="fld"><span>العميل</span><input data-npf="client" id="np-client" value="' + fv('client') + '"></label><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
+    clientFields(f, n) +
+    '<div class="fr"><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
     '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
     '</div>';
@@ -812,6 +823,7 @@ function newVOForm(pid) {
 function projStatusForm(pid) {
   const p = P(pid);
   modal('بيانات وحالة المشروع', '<form class="f" data-form="pstatus" data-v="' + pid + '"><label class="fld"><span>كود المشروع</span><input id="ps-c" dir="ltr" readonly tabindex="-1" class="ro" value="' + esc(p.code || '') + '"></label>' +
+    (p.kind !== 'gov' ? '<div class="fr"><label class="fld"><span>' + (p.kind === 'company' ? 'اسم الشركة' : 'اسم العميل') + '</span><input id="ps-cn" value="' + esc(p.client || '') + '"></label><label class="fld"><span>رقم الهاتف</span><input id="ps-cp" dir="ltr" value="' + esc(p.cPhone || '') + '"></label></div>' + (p.kind === 'company' ? '<label class="fld"><span>رقم السجل التجاري</span><input id="ps-cr" dir="ltr" value="' + esc(p.cCr || '') + '"></label>' : '<div class="fr"><label class="fld"><span>رقم البطاقة الشخصية</span><input id="ps-ci" dir="ltr" value="' + esc(p.cId || '') + '"></label><label class="fld"><span>نسخة جديدة من البطاقة (اختياري)</span><input id="ps-cf" type="file" accept="image/*,.pdf"></label></div>') : '') +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select id="ps-g">' + govOpts(p.gov) + '</select></label><label class="fld"><span>الولاية</span><select id="ps-w">' + wilOpts(p.gov, p.wil) + '</select></label></div>' +
     '<label class="fld"><span>تفاصيل الموقع</span><input id="ps-l" value="' + esc(p.loc || '') + '"></label><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
     '<label class="fld"><span>سبب التوقف (إن وجد)</span><input id="ps-r" value="' + esc(p.stopReason || '') + '"></label>' +
@@ -879,6 +891,8 @@ document.addEventListener('change', async e => {
   if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
   if (t.dataset.npd != null && ui.np) { npSync(); ui.np.items[+t.dataset.npd][t.dataset.k] = t.value; render(); return; }
   if (t.dataset.ted != null && ui.ted) { ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value; render(); return; }
+  if (t.id === 'np-kind' && ui.np) { npSync(); render(); return; }
+  if (t.id === 'np-idf' && ui.np) { ui.np.idFile = t.files[0] || null; return; }
   if ((t.id === 'np-start' || t.id === 'np-end') && ui.np) { npSync(); if (ui.np.items.length) npPlan(ui.np); render(); return; }
   if (t.id === 'np-gov') { npSync(); ui.np.f.wil = ''; render(); return; }
   if (t.dataset.npi != null && ui.np) { npSync(); ui.np.items[+t.dataset.npi].dept = t.value || null; addDepts(ui.np); render(); return; }
@@ -942,7 +956,9 @@ document.addEventListener('submit', async e => {
       await run(sb.from('variations').update({ approval_path: path, client_status: 'approved' }).eq('id', f.dataset.v), 'انرفقت الموافقة، والعمل الإضافي عند المدير العام للاعتماد');
       closeModal(); refresh();
     } else if (kind === 'pstatus') {
-      await run(sb.from('projects').update({ status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e'), governorate: v('ps-g') || null, wilayat: v('ps-w') || null, location_note: v('ps-l') || null }).eq('id', f.dataset.v), 'تم الحفظ');
+      const pp = P(f.dataset.v), cx = {};
+      if (pp && pp.kind !== 'gov') { cx.client = v('ps-cn'); cx.client_phone = v('ps-cp') || null; if (pp.kind === 'company') cx.client_cr = v('ps-cr') || null; else { cx.client_id_no = v('ps-ci') || null; const nf = fileOf('ps-cf'); if (nf) { const pth = await upload(nf, 'clients'); if (pth) cx.client_id_path = pth; } } }
+      await run(sb.from('projects').update(Object.assign(cx, { status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e'), governorate: v('ps-g') || null, wilayat: v('ps-w') || null, location_note: v('ps-l') || null })).eq('id', f.dataset.v), 'تم الحفظ');
       closeModal(); refresh();
     } else if (kind === 'project') {
       const n = npState(); npSync(); const pf = n.f;
@@ -950,7 +966,11 @@ document.addEventListener('submit', async e => {
       if (pf.end < pf.start) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
       const badT = n.items.find(i => (i.start || i.end) && (!i.start || !i.end || i.end < i.start));
       if (badT) { toast('راجع تواريخ البند ' + badT.code + ': النهاية لازم بعد البداية', true); return; }
-      const pr = await run(sb.from('projects').insert(Object.assign({}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
+      const kind = pf.kind || 'gov';
+      if (kind === 'private' && !n.idFile) { toast('ارفق نسخة من البطاقة الشخصية للعميل', true); return; }
+      const idPath = kind === 'private' ? await upload(n.idFile, 'clients') : null;
+      if (kind === 'private' && !idPath) return;
+      const pr = await run(sb.from('projects').insert(Object.assign({}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: kind === 'gov' ? 'gov' : 'private', client_type: kind === 'gov' ? null : kind === 'company' ? 'company' : 'individual', client_phone: kind === 'gov' ? null : pf.cPhone || null, client_id_no: kind === 'private' ? pf.cId || null : null, client_id_path: idPath, client_cr: kind === 'company' ? pf.cCr || null : null, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));

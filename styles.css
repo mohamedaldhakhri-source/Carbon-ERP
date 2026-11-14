@@ -264,3 +264,4 @@ input.ri.num{max-width:130px}
 input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .dchk{display:flex;flex-wrap:wrap;gap:4px 12px}
 .dchk label{display:inline-flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap}
+.sub-card{border:1px dashed var(--line,#ddd);border-radius:10px;padding:10px 12px;margin:6px 0 10px;display:flex;flex-direction:column;gap:6px}
