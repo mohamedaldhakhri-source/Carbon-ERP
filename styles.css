@@ -337,3 +337,24 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .rep-d table{width:100%}.rep-d td,.rep-d th{padding:6px 10px}
 .rep-sign{display:flex;justify-content:space-between;gap:20px;margin:28px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
 @media (max-width:700px){.rep-vg{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Bigger modals; procurement prices each line and attaches the quotation */
+.modal{max-width:700px}
+.modal.wide{max-width:940px;font-size:1.03rem}
+#nr-lines .line.pr,.line.lh.pr{grid-template-columns:minmax(0,3fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr) auto}
+.line .l-t{align-self:center;text-align:end;font-weight:600}
+.qtot{display:flex;justify-content:space-between;align-items:center;font-weight:600;border-top:1px solid var(--line);padding-top:8px;margin-top:4px}
+@media (max-width:700px){
+  #nr-lines .line.pr{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto}
+  #nr-lines .line.pr .l-d{grid-column:1/-1}
+  .line.lh.pr{display:none}
+}
+.po-logo img{height:84px;width:auto;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.po-sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;border-top:2px solid var(--ink);padding-top:12px}
+.po-sign>div{display:flex;flex-direction:column;gap:3px}
+@page po{size:A4 portrait;margin:12mm}
+@media print{
+  body.print-po *{visibility:hidden}
+  body.print-po .po,body.print-po .po *{visibility:visible}
+  body.print-po .po{position:absolute;top:0;left:0;right:0;page:po;border:0}
+  body.print-po .po .noprint{display:none}
+}
