@@ -61,6 +61,7 @@ const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
 const KIND = { gov: 'حكومي', company: 'شركات', private: 'خاص' };
 const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
+const canPrice = () => me && ['gm', 'owner', 'admin'].includes(me.role);
 const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
 const canDates = p => me && ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status !== 'closed';
 // A user may hold several departments (profiles.depts); none means all departments.
@@ -82,6 +83,8 @@ function nextCode() {
 }
 
 function contract(p) { return p.boq.reduce((a, b) => a + b.t, 0); }
+function voStats(p) { const l = S.variations.filter(v => v.pid === p.id), sum = k => l.filter(v => v.gm === k).reduce((a, v) => a + v.amt, 0); return { n: l.length, ok: sum('approved'), wait: sum('pending'), no: sum('rejected'), nOk: l.filter(v => v.gm === 'approved').length, nWait: l.filter(v => v.gm === 'pending').length }; }
+function voSub(p) { const v = voStats(p); return !v.n ? 'لا توجد VO' : v.nOk + ' معتمد' + (v.nWait ? ' · ' + v.nWait + ' بانتظار الاعتماد (' + money(v.wait) + ' ر.ع)' : '') + ' · منفصلة عن قيمة العقد'; }
 function varsApproved(p) { return S.variations.filter(v => v.pid === p.id && v.gm === 'approved').reduce((a, v) => a + v.amt, 0); }
 function budget(p) { return contract(p) + varsApproved(p) || 1; }
 function itemSpent(p, code) {
@@ -219,6 +222,7 @@ function views() {
   if (h === 'projects') return vProjects();
   if (h === 'new-project') return vNewProject();
   if (h.startsWith('p-')) return vProject(h.slice(2));
+  if (h.startsWith('sr-')) return vSchedReport(h.slice(3));
   if (h === 'requests') return vRequests();
   if (h.startsWith('r-')) return vRequest(h.slice(2));
   if (h === 'petty') return vPetty();
@@ -273,16 +277,17 @@ function vProject(id) {
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
   const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + 'مشروع ' + KIND[p.kind] + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (p.kind !== 'gov' && (p.cPhone || p.cId || p.cCr || p.cEmail) ? ' · <span dir="ltr">' + esc(p.cPhone || '') + (p.cEmail ? ' · ' + esc(p.cEmail) : '') + '</span>' + (p.cCr ? ' · س.ت ' + esc(p.cCr) : '') + (p.cId ? ' · البطاقة ' + esc(p.cId) : '') : '') + '</span>' + (p.cIdFile ? ' ' + fileLink(p.cIdFile, p.kind === 'company' ? 'نسخة السجل التجاري' : 'نسخة البطاقة الشخصية') : '') + '<span class="muted small">' + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
-    '<div class="actions">' + (p.approval === 'approved' && p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ عمل إضافي</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
+    '<div class="actions">' + (p.approval === 'approved' && p.status !== 'closed' ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ Variation Order (VO)</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
   if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
   else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
   else if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
-  h += '<div class="kpis">' +
-    '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + (va ? '+ ' + money(va) + ' أعمال إضافية معتمدة' : 'لا توجد أعمال إضافية معتمدة') + '</span></div>' +
+  h += '<div class="kpis k5">' +
+    '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + 'القيمة الأصلية حسب BOQ' + '</span></div>' +
+    '<div class="kpi vo"><span class="l">Variation Orders (VO) المعتمدة</span><span class="v">' + money(va) + ' <small>ر.ع</small></span><span class="s">' + voSub(p) + '</span></div>' +
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (p.status === 'closed' ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
-  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]];
+  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]];
   const showTime = planN(p) || isAdmin() || canDates(p) || (ui.ted && ui.ted.pid === p.id);
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
   h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
@@ -313,7 +318,7 @@ function vProject(id) {
   } else if (ui.tab === 'time') h += timeTab(p);
   else if (ui.tab === 'req') h += reqTable(reqs, false);
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
-  else if (ui.tab === 'vo') h += (vos.length ? voTable(vos, false) : '<div class="empty">لا توجد أعمال إضافية لهذا المشروع.</div>') + '<p class="muted small">العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها يعتمده المدير العام ويُضاف لقيمة المشروع وميزانيته.</p>';
+  else if (ui.tab === 'vo') h += voTab(p, vos) + (vos.length ? voTable(vos, false) : '<div class="empty">لا توجد Variation Orders لهذا المشروع.</div>') + '<p class="muted small">العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها يعتمده المدير العام ويُضاف لقيمة المشروع وميزانيته.</p>';
   else if (ui.tab === 'docs') h += docsTab(p);
   h += '</div></div>';
   return h;
@@ -423,8 +428,17 @@ function vExpenses() {
   h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(pcs, !pid) + '</div>';
   h += '<div class="card"><h2>أوامر الشراء</h2>' + (reqs.length ? '<div class="tbl"><table><thead><tr><th>أمر الشراء</th>' + (pid ? '' : '<th>المشروع</th>') + '<th>المواد والأسعار</th><th>المورّد</th><th class="n">المبلغ</th></tr></thead><tbody>' +
     reqs.slice().sort((a, b) => String(b.po.date).localeCompare(String(a.po.date))).map(r => { const q = selQuote(r); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.po.no) + '</b><div class="muted">' + fd(r.po.date) + ' · طلب ' + esc(r.no) + '</div></td>' + (pid ? '' : '<td>' + esc(pName(P(r.pid))) + '</td>') + '<td class="small">' + r.items.map(i => esc(i.d) + ' · ' + i.q + ' ' + esc(i.u) + (i.pr != null ? ' × ' + money(i.pr) : '')).join('<br>') + '</td><td class="small">' + (q ? esc(q.sup) : '—') + '</td><td class="n">' + money(reqAmt(r)) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">ما فيه أوامر شراء.</div>') + '</div>';
-  h += '<div class="card"><h2>أعمال إضافية معتمدة</h2>' + (vos.length ? voTable(vos, !pid) : '<div class="empty">ما فيه أعمال إضافية معتمدة.</div>') + '</div>';
+  h += '<div class="card"><h2>Variation Orders المعتمدة (منفصلة عن قيمة العقد)</h2>' + (vos.length ? voTable(vos, !pid) : '<div class="empty">ما فيه أعمال إضافية معتمدة.</div>') + '</div>';
   return h;
+}
+// Variation Orders stay separate from the contract: the original BOQ value and the VO totals are shown side by side, never added.
+function voTab(p, vos) {
+  const v = voStats(p), c = contract(p);
+  return '<div class="ch" style="margin-bottom:10px"><span class="muted small">التغييرات والأعمال الإضافية على المشروع مع قيمتها. تُعرض منفصلة ولا تنضاف لقيمة العقد الأصلية.</span>' + (p.approval === 'approved' && p.status !== 'closed' ? '<div class="actions"><button class="btn pri" data-act="newVO" data-p="' + p.id + '">+ Variation Order</button></div>' : '') + '</div>' +
+    '<div class="kpis vo4"><div class="kpi"><span class="l">قيمة العقد الأصلية</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">بدون تعديل</span></div>' +
+    '<div class="kpi vo"><span class="l">إجمالي VO المعتمدة</span><span class="v">' + money(v.ok) + ' <small>ر.ع</small></span><span class="s">' + v.nOk + ' أمر تغيير' + (c ? ' · ' + (v.ok / c * 100).toFixed(1) + '% من العقد' : '') + '</span></div>' +
+    '<div class="kpi"><span class="l">بانتظار اعتماد المدير العام</span><span class="v">' + money(v.wait) + ' <small>ر.ع</small></span><span class="s">' + v.nWait + ' أمر</span></div>' +
+    '<div class="kpi"><span class="l">المرفوضة</span><span class="v">' + money(v.no) + ' <small>ر.ع</small></span><span class="s">' + (v.n - v.nOk - v.nWait) + ' أمر</span></div></div>';
 }
 function voTable(list, showProj) {
   return '<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th class="n">القيمة</th><th>موافقة الوزارة / العميل</th><th>اعتماد المدير العام</th><th>التاريخ</th></tr></thead><tbody>' +
@@ -449,7 +463,7 @@ function vInbox() {
   if (q.inv.length) h += '<div class="card"><h2>بيتي كاش معتمد: ارفق الفاتورة</h2><span class="hint">وافق المدير العام على طلبك. ارفق فاتورة الشراء حتى يتقفل الطلب وما يبقى عليك شي.</span>' + pettyTable(q.inv, true) + '</div>';
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
   if (q.projs.length) h += '<div class="card"><h2>مشاريع جديدة بانتظار موافقتك</h2><div class="tbl"><table><tbody>' + q.projs.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">من ' + esc(nameOf(p.reqBy)) + ' · ' + p.boq.length + ' بند · ' + money(contract(p)) + ' ر.ع</td><td><span class="pill p-warn">بانتظار الموافقة</span></td></tr>').join('') + '</tbody></table></div></div>';
-  if (q.vos.length) h += '<div class="card"><h2>أعمال إضافية بانتظار اعتمادك</h2>' + voTable(q.vos, true) + '</div>';
+  if (q.vos.length) h += '<div class="card"><h2>Variation Orders بانتظار اعتمادك</h2>' + voTable(q.vos, true) + '</div>';
   if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + planN(p) + (p.boq.some(b => b.ps) ? ' بند' : ' مهمة') + ' · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
@@ -486,31 +500,110 @@ function npSync() {
   if (ds.length) n.f.depts = [...ds].filter(x => x.checked).map(x => x.value);
 }
 // Timeline tab: every BOQ item has its own planned dates, grouped by section. Older projects keep their task list.
+const DCOL = { arch: '#2f6f9f', interior: '#8a5a9e', fitout: '#c27c2c', joinery: '#7a5b3a', contracting: '#3f7f4f', supervision: '#5c6b78' };
+const addDays = (s, n) => { const d = D(s); d.setDate(d.getDate() + n); return iso(d); };
+const durOf = (s, e) => s && e ? daysBetween(D(s), D(e)) + 1 : '';
+// Gantt: a fixed table on the right (number, item, days, dates) and the time chart beside it, with month columns,
+// a today line, progress inside each bar, late items in red, and sections that fold.
 function gantt(p, rows) {
   let a = D(p.start), z = D(p.end);
-  rows.forEach(r => { if (D(r.s) < a) a = D(r.s); if (D(r.e) > z) z = D(r.e); });
-  const span = Math.max(z - a, 864e5), pos = d => (D(d) - a) / span * 100, day = 100 / (span / 864e5), nowPos = (today - a) / span * 100;
-  const months = []; const m = new Date(a.getFullYear(), a.getMonth() + 1, 1); while (m <= z) { months.push([(m - a) / span * 100, m.toLocaleDateString('ar', { month: 'short' })]); m.setMonth(m.getMonth() + 1); }
-  return '<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>' + months.map(([x, l]) => '<span style="inset-inline-start:' + x.toFixed(1) + '%">' + l + '</span>').join('') + '</div></div>' +
-    rows.map(r => { const s0 = Math.max(0, pos(r.s)), e = Math.min(100, Math.max(pos(r.e) + day, s0 + .6)); return '<div class="gr' + (r.ph ? ' ph' : '') + '"><span title="' + esc(r.t || r.n) + ' · ' + fd(r.s) + ' - ' + fd(r.e) + '">' + esc(r.n) + (r.dept && !r.ph ? ' <span class="tag">' + DEPTS[r.dept] + '</span>' : '') + '</span><div class="gt"><i style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%"></i>' + (nowPos >= 0 && nowPos <= 100 ? '<span class="now" style="inset-inline-start:' + nowPos.toFixed(1) + '%"></span>' : '') + '</div></div>'; }).join('') +
-    '</div></div><p class="muted small">' + (nowPos > 100 ? 'تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.' : 'الخط الأحمر يمثل تاريخ اليوم.') + '</p>';
+  rows.forEach(r => { if (r.s && D(r.s) < a) a = D(r.s); if (r.e && D(r.e) > z) z = D(r.e); });
+  a = new Date(a.getFullYear(), a.getMonth(), 1); z = new Date(z.getFullYear(), z.getMonth() + 1, 0);
+  const span = z - a + 864e5, pos = d => (D(d) - a) / span * 100, nowPos = (today - a) / span * 100;
+  const months = []; for (const m = new Date(a); m <= z; m.setMonth(m.getMonth() + 1)) { const nx = new Date(m.getFullYear(), m.getMonth() + 1, 1); months.push({ x: (m - a) / span * 100, w: (Math.min(nx, new Date(z.getTime() + 864e5)) - m) / span * 100, l: m.toLocaleDateString('ar', { month: 'short' }) + ' ' + String(m.getFullYear()).slice(2) }); }
+  const grid = months.map(m => '<i style="inset-inline-start:' + m.x.toFixed(2) + '%"></i>').join('') + (nowPos >= 0 && nowPos <= 100 ? '<b class="gnow" style="inset-inline-start:' + nowPos.toFixed(2) + '%"></b>' : '');
+  const col = ui.gcol || {};
+  let h = '<div class="gx"><div class="g2"><div class="g2h"><div class="g2l"><span>البند</span><span class="n">المدة</span><span>من - إلى</span></div><div class="g2c">' + months.map(m => '<span style="inset-inline-start:' + m.x.toFixed(2) + '%;width:' + m.w.toFixed(2) + '%">' + m.l + '</span>').join('') + '</div></div>';
+  let hide = false;
+  rows.forEach(r => {
+    if (r.ph) hide = !!col[r.sc];
+    else if (hide) return;
+    const late = !r.ph && r.e && D(r.e) < today && (r.p || 0) < 100;
+    const s0 = Math.max(0, pos(r.s)), e = Math.min(100, Math.max(pos(r.e) + 100 / (span / 864e5), s0 + .4));
+    const bar = r.s && r.e ? '<em class="' + (r.ph ? 'ph' : late ? 'late' : '') + '" style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%' + (!r.ph && !late && r.dept ? ';background:' + DCOL[r.dept] : '') + '" title="' + esc((r.t || r.n) + ' · ' + fd(r.s) + ' - ' + fd(r.e) + ' · ' + durOf(r.s, r.e) + ' يوم' + (r.p != null ? ' · إنجاز ' + r.p + '%' : '')) + '">' + (!r.ph && r.p ? '<u style="width:' + Math.min(100, r.p) + '%"></u>' : '') + '</em>' : '';
+    h += '<div class="g2r' + (r.ph ? ' ph' : '') + (late ? ' late' : '') + '"' + (r.ph ? ' data-act="gcol" data-v="' + esc(r.sc) + '" role="button" tabindex="0" aria-expanded="' + !col[r.sc] + '"' : '') + '><div class="g2l"><span class="nm" title="' + esc(r.t || r.n) + '">' + (r.ph ? '<i class="tw">' + (col[r.sc] ? '◂' : '▾') + '</i>' : '') + (r.c ? '<b class="num">' + esc(r.c) + '</b> ' : '') + esc(r.n) + (!r.ph && r.dept ? ' <span class="dot" style="background:' + DCOL[r.dept] + '" title="' + DEPTS[r.dept] + '"></span>' : '') + '</span><span class="n num">' + (durOf(r.s, r.e) !== '' ? durOf(r.s, r.e) + ' ي' : '—') + '</span><span class="small muted num">' + (r.s ? fd(r.s).slice(0, 5) + ' - ' + fd(r.e).slice(0, 5) : '') + '</span></div><div class="g2c">' + grid + bar + '</div></div>';
+  });
+  h += '</div></div>';
+  const used = [...new Set(rows.filter(r => r.dept).map(r => r.dept))];
+  h += '<div class="glg small muted">' + used.map(d => '<span><i style="background:' + DCOL[d] + '"></i>' + DEPTS[d] + '</span>').join('') + '<span><i class="late"></i>متأخر</span><span><i class="nw"></i>اليوم</span><span>الجزء الغامق داخل الشريط = نسبة الإنجاز</span></div>';
+  if (nowPos > 100) h += '<p class="muted small">تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.</p>';
+  return h;
+}
+// Edit-mode cell change: days move the end date, a new start keeps the same number of days.
+function tedSet(i, k, v) {
+  const r = ui.ted.list[i];
+  if (k === 'days') { const n = Math.max(1, Math.round(+v || 1)); if (r.start) r.end = addDays(r.start, n - 1); return; }
+  if (k === 'start' && v) { const n = durOf(r.start, r.end); r.start = v; if (n) r.end = addDays(v, n - 1); return; }
+  r[k] = v;
+}
+// Schedule report: one printable page that answers "where are we": overall status, sections, late items,
+// what is coming in the next two weeks, departments, and the full timeline.
+function itemState(b) {
+  if (!b.ps || !b.pe) return { k: 'none', l: 'بدون تواريخ', c: 'p-idle' };
+  if (b.p >= 100) return { k: 'done', l: 'منجز', c: 'p-ok' };
+  if (D(b.pe) < today) return { k: 'late', l: 'متأخر ' + daysBetween(D(b.pe), today) + ' يوم', c: 'p-bad' };
+  if (D(b.ps) > today) return { k: 'next', l: 'لم يبدأ', c: 'p-idle' };
+  const exp = Math.min(100, (daysBetween(D(b.ps), today) + 1) / durOf(b.ps, b.pe) * 100);
+  return exp - b.p > 25 ? { k: 'risk', l: 'متأخر عن الخطة', c: 'p-warn' } : { k: 'run', l: 'جاري', c: 'p-ok' };
+}
+function vSchedReport(pid) {
+  const p = P(pid); if (!p) return '<div class="empty">المشروع غير موجود.</div>';
+  const items = p.boq.filter(b => b.ps && b.pe), st = items.map(b => [b, itemState(b)]), cnt = k => st.filter(x => x[1].k === k).length;
+  const val = items.reduce((a, b) => a + b.t, 0) || 1, wp = items.reduce((a, b) => a + b.t * b.p, 0) / val, tp = timePct(p), dl = daysLeft(p);
+  const short = t => String(t || '').length > 70 ? String(t).slice(0, 68) + '…' : String(t || '');
+  const secs = p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i));
+  let h = '<div class="head noprint"><div class="t"><span class="crumb"><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a> / تقرير الجدول الزمني</span></div><div class="actions"><button class="btn pri" data-act="print">🖨 طباعة أو حفظ PDF</button><a class="btn" href="#p-' + p.id + '">رجوع للمشروع</a></div></div>';
+  h += '<div class="card rep"><div class="rep-h"><div><h1>تقرير الجدول الزمني</h1><b>' + esc(p.name) + '</b><div class="muted small">' + esc(p.code || '') + (p.client ? ' · العميل ' + esc(p.client) : '') + ' · ' + KIND[p.kind] + (locText(p) ? ' · ' + esc(locText(p)) : '') + '</div></div><div class="small muted" style="text-align:end">CARBON Engineering Consultancy<br>تاريخ التقرير ' + fd(iso(today)) + '<br>' + (p.sched.status === 'approved' ? 'الجدول معتمد' + (p.sched.by ? ' من ' + esc(nameOf(p.sched.by)) : '') : 'الجدول مسودة غير معتمدة') + '</div></div>';
+  const verdict = wp + 5 >= tp ? ['ok', 'المشروع ماشي حسب الخطة'] : wp + 15 >= tp ? ['warn', 'المشروع متأخر قليلاً عن الخطة'] : ['bad', 'المشروع متأخر عن الخطة'];
+  h += '<div class="flag ' + verdict[0] + '"><b>' + verdict[1] + '.</b> الإنجاز الفعلي ' + Math.round(wp) + '% مقابل ' + Math.round(tp) + '% من الوقت منقضي. ' + (dl >= 0 ? 'باقي ' + dl + ' يوم على التسليم (' + fd(p.end) + ').' : 'تجاوز موعد التسليم (' + fd(p.end) + ') بـ ' + (-dl) + ' يوم.') + '</div>';
+  h += '<div class="kpis"><div class="kpi"><span class="l">مدة المشروع</span><span class="v">' + durOf(p.start, p.end) + ' <small>يوم</small></span><span class="s">' + fd(p.start) + ' إلى ' + fd(p.end) + '</span></div>' +
+    '<div class="kpi"><span class="l">الإنجاز الفعلي</span><span class="v">' + Math.round(wp) + '%</span><span class="s">الوقت المنقضي ' + Math.round(tp) + '%</span></div>' +
+    '<div class="kpi"><span class="l">البنود</span><span class="v">' + items.length + '</span><span class="s">منجز ' + cnt('done') + ' · جاري ' + (cnt('run') + cnt('risk')) + ' · لم يبدأ ' + cnt('next') + '</span></div>' +
+    '<div class="kpi' + (cnt('late') ? ' alert' : '') + '"><span class="l">بنود متأخرة</span><span class="v">' + cnt('late') + '</span><span class="s">وبنود متأخرة عن الخطة ' + cnt('risk') + '</span></div></div>';
+  // Sections
+  h += '<h2>ملخص الأقسام</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th>من</th><th>إلى</th><th class="n">الأيام</th><th class="n">الإنجاز</th><th>الحالة</th></tr></thead><tbody>';
+  secs.forEach(([sc, sn]) => { const it = items.filter(b => b.s === sc); if (!it.length) return;
+    const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe), v = it.reduce((a, b) => a + b.t, 0) || 1, pr = it.reduce((a, b) => a + b.t * b.p, 0) / v;
+    const late = it.filter(b => itemState(b).k === 'late').length, ss = itemState({ ps: s0, pe: e0, p: pr });
+    h += '<tr><td><b>' + esc(sc) + '</b> ' + esc(sn) + '</td><td class="n">' + it.length + '</td><td class="small">' + fd(s0) + '</td><td class="small">' + fd(e0) + '</td><td class="n">' + durOf(s0, e0) + '</td><td class="n">' + Math.round(pr) + '%</td><td><span class="pill ' + ss.c + '">' + ss.l + '</span>' + (late ? ' <span class="small" style="color:var(--bad)">' + late + ' بند متأخر</span>' : '') + '</td></tr>'; });
+  h += '</tbody></table></div>';
+  // Late and at-risk items
+  const lateL = st.filter(x => x[1].k === 'late' || x[1].k === 'risk').sort((a, b) => a[0].pe.localeCompare(b[0].pe));
+  h += '<h2>البنود المتأخرة والتي تحتاج متابعة</h2>' + (lateL.length ? '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th>النهاية المخططة</th><th class="n">الإنجاز</th><th>الحالة</th></tr></thead><tbody>' + lateL.map(([b, s]) => '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="small">' + fd(b.pe) + '</td><td class="n">' + b.p + '%</td><td><span class="pill ' + s.c + '">' + s.l + '</span></td></tr>').join('') + '</tbody></table></div>' : '<div class="flag ok">ما في بنود متأخرة.</div>');
+  // Next 14 days
+  const lim = iso(new Date(today.getTime() + 14 * 864e5)), t0 = iso(today);
+  const soon = items.filter(b => (b.ps >= t0 && b.ps <= lim) || (b.pe >= t0 && b.pe <= lim && b.p < 100)).sort((a, b) => (a.ps >= t0 ? a.ps : a.pe).localeCompare(b.ps >= t0 ? b.ps : b.pe));
+  h += '<h2>خلال الأسبوعين القادمين</h2>' + (soon.length ? '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th>الحدث</th></tr></thead><tbody>' + soon.map(b => '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="small">' + (b.ps >= t0 && b.ps <= lim ? 'يبدأ ' + fd(b.ps) : '') + (b.pe >= t0 && b.pe <= lim && b.p < 100 ? (b.ps >= t0 && b.ps <= lim ? ' · ' : '') + 'لازم يخلص ' + fd(b.pe) : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted small">ما في بنود تبدأ أو تنتهي خلال الأسبوعين القادمين.</p>');
+  // Departments
+  const ds = [...new Set(items.map(b => b.dept).filter(Boolean))];
+  if (ds.length) { h += '<h2>حسب القسم</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th class="n">الإنجاز</th><th class="n">متأخر</th><th>آخر موعد</th></tr></thead><tbody>' + ds.map(d => { const it = items.filter(b => b.dept === d), v = it.reduce((a, b) => a + b.t, 0) || 1; return '<tr><td><span class="dot" style="background:' + DCOL[d] + '"></span> ' + DEPTS[d] + '</td><td class="n">' + it.length + '</td><td class="n">' + Math.round(it.reduce((a, b) => a + b.t * b.p, 0) / v) + '%</td><td class="n">' + it.filter(b => itemState(b).k === 'late').length + '</td><td class="small">' + fd(it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe)) + '</td></tr>'; }).join('') + '</tbody></table></div>'; }
+  // Full timeline (all sections open)
+  const rows = []; secs.forEach(([sc, sn]) => { const it = items.filter(b => b.s === sc); if (!it.length) return; rows.push({ c: sc, n: sn || 'قسم ' + sc, sc, ph: true, s: it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e: it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe) }); it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p })); });
+  const keep = ui.gcol; ui.gcol = {}; h += '<h2 class="pb">المخطط الزمني الكامل</h2>' + gantt(p, rows); ui.gcol = keep;
+  return h + '</div>';
 }
 function timeTab(p) {
   const st = p.sched, dated = p.boq.filter(b => b.ps && b.pe), short = t => String(t || '').length > 60 ? String(t).slice(0, 58) + '…' : String(t || '');
   let h = '';
   if (ui.ted && ui.ted.pid === p.id) {
     const idx = {}; ui.ted.list.forEach((r, i) => { idx[r.id] = i; });
-    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0).length;
-    h += '<div class="flag warn">وضع التعديل: غيّر بداية ونهاية أي بند ثم اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
-      '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
-      '<div class="tbl"><table class="rv"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th class="n">القيمة</th><th>البداية</th><th>النهاية</th><th class="n">المدة</th></tr></thead><tbody>';
+    const chg = r => r.start !== r.s0 || r.end !== r.e0 || +r.q !== +r.q0 || +r.r !== +r.r0;
+    const ch = ui.ted.list.filter(chg).length, pr = canPrice();
+    const tot = ui.ted.list.reduce((a, r) => a + (+r.q || 0) * (+r.r || 0), 0), tot0 = p.boq.reduce((a, b) => a + b.t, 0);
+    h += '<div class="flag warn">وضع التعديل: غيّر البداية أو عدد الأيام' + (pr ? ' أو الكمية والسعر' : '') + ' لأي بند، والنهاية تنحسب تلقائياً. بعدها اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
+      '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + (pr && Math.abs(tot - tot0) > .001 ? ' · قيمة المشروع ' + money(tot0) + ' ← <b>' + money(tot) + '</b> ر.ع' : '') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
+      '<div class="tbl"><table class="rv ted"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th>' + (pr ? '<th class="n">الكمية</th><th class="n">سعر الوحدة</th>' : '') + '<th class="n">القيمة</th><th>البداية</th><th class="n">الأيام</th><th>النهاية</th></tr></thead><tbody>';
     p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i)).forEach(([sc, sn]) => {
       const it = p.boq.filter(b => b.s === sc); if (!it.length) return;
-      h += '<tr class="sec"><td>' + esc(sc) + '</td><td colspan="6">' + esc(sn) + '</td></tr>';
+      h += '<tr class="sec"><td>' + esc(sc) + '</td><td colspan="' + (pr ? 8 : 6) + '">' + esc(sn) + '</td></tr>';
       it.forEach(b => {
-        const i = idx[b.id], r = ui.ted.list[i], ok = myItem(b), dis = ok ? '' : ' disabled', days = r.start && r.end ? daysBetween(D(r.start), D(r.end)) + 1 : '';
-        h += '<tr' + (r.start !== r.s0 || r.end !== r.e0 ? ' class="chg"' : '') + '><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td>' + (b.dept ? '<span class="tag">' + DEPTS[b.dept] + '</span>' : '<span class="muted">—</span>') + '</td><td class="n small">' + money(b.t) + '</td>' +
-          '<td><input type="date" class="dt" data-ted="' + i + '" data-k="start" value="' + esc(r.start) + '"' + dis + ' aria-label="بداية البند ' + esc(b.c) + '"></td><td><input type="date" class="dt" data-ted="' + i + '" data-k="end" value="' + esc(r.end) + '"' + dis + ' aria-label="نهاية البند ' + esc(b.c) + '"></td><td class="n small"' + (days !== '' && days < 1 ? ' style="color:var(--bad)"' : '') + '>' + (days !== '' ? days + ' يوم' : '—') + '</td></tr>';
+        const i = idx[b.id], r = ui.ted.list[i], ok = myItem(b), dis = ok ? '' : ' disabled', days = durOf(r.start, r.end);
+        h += '<tr' + (chg(r) ? ' class="chg"' : '') + '><td class="num small">' + esc(b.c) + '</td><td class="small" title="' + esc(b.d) + '">' + esc(short(b.d)) + '</td><td>' + (b.dept ? '<span class="tag">' + DEPTS[b.dept] + '</span>' : '<span class="muted">—</span>') + '</td>' +
+          (pr ? '<td><input type="number" class="nm-in" min="0" step="any" data-ted="' + i + '" data-k="q" value="' + esc(r.q) + '" aria-label="كمية البند ' + esc(b.c) + '"> <span class="muted small">' + esc(b.u || '') + '</span></td><td><input type="number" class="nm-in" min="0" step="any" data-ted="' + i + '" data-k="r" value="' + esc(r.r) + '" aria-label="سعر البند ' + esc(b.c) + '"></td>' : '') +
+          '<td class="n small">' + money((+r.q || 0) * (+r.r || 0)) + '</td>' +
+          '<td><input type="date" class="dt" data-ted="' + i + '" data-k="start" value="' + esc(r.start) + '"' + dis + ' aria-label="بداية البند ' + esc(b.c) + '"></td>' +
+          '<td><input type="number" class="nm-in d" min="1" step="1" data-ted="' + i + '" data-k="days" value="' + days + '"' + dis + ' aria-label="أيام البند ' + esc(b.c) + '"></td>' +
+          '<td><input type="date" class="dt" data-ted="' + i + '" data-k="end" value="' + esc(r.end) + '"' + dis + ' aria-label="نهاية البند ' + esc(b.c) + '"></td></tr>';
       });
     });
     return h + '</tbody></table></div>';
@@ -518,7 +611,9 @@ function timeTab(p) {
   const has = dated.length || p.tasks.length;
   h += '<div class="ch" style="margin-bottom:8px">' + (!has ? '<span class="muted small">' + (p.boq.length ? 'ما انحسبت مدد البنود بعد.' : 'لا توجد بنود BOQ لهذا المشروع.') + '</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
     '<div class="actions">' + (canSched() && has && st.status !== 'approved' ? '<button class="btn ok" data-act="schedApprove" data-v="' + p.id + '">اعتماد الجدول</button>' : '') +
-    (canDates(p) && p.boq.length && dated.length ? '<button class="btn" data-act="schedEdit" data-v="' + p.id + '">تعديل مدد البنود</button>' : '') +
+ (dated.length ? '<a class="btn" href="#sr-' + p.id + '">📄 تقرير الجدول الزمني</a>' : '') +
+    (dated.length ? '<button class="btn" data-act="gfold" data-v="' + p.id + '">' + (Object.keys(ui.gcol || {}).length ? 'فتح كل الأقسام' : 'طي كل الأقسام') + '</button>' : '') +
+    (canDates(p) && p.boq.length && dated.length ? '<button class="btn pri" data-act="schedEdit" data-v="' + p.id + '">✎ تعديل' + (canPrice() ? ' المدد والأسعار' : ' المدد') + '</button>' : '') +
     (isAdmin() && p.boq.length && !dated.length ? '<button class="btn pri" data-act="schedAuto" data-v="' + p.id + '">احسب مدة كل بند تلقائياً</button>' : '') + '</div></div>';
   if (dated.length) {
     const rows = [];
@@ -526,12 +621,12 @@ function timeTab(p) {
     secs.forEach(([sc, sn]) => {
       const it = dated.filter(b => b.s === sc); if (!it.length) return;
       const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe);
-      rows.push({ n: sc + ' ' + sn, s: s0, e: e0, ph: true });
-      it.forEach(b => rows.push({ n: b.c + ' ' + short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept }));
+      rows.push({ c: sc, n: sn || 'قسم ' + sc, sc, s: s0, e: e0, ph: true });
+      it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p }));
     });
     h += gantt(p, rows);
     if (dated.length < p.boq.length) h += '<p class="muted small">' + (p.boq.length - dated.length) + ' بند بدون تواريخ. اضغط "تعديل مدد البنود" لإضافتها.</p>';
-  } else if (p.tasks.length) h += gantt(p, p.tasks.map(t => ({ n: t.n, s: t.s, e: t.e, ph: t.ph, dept: t.dept })));
+  } else if (p.tasks.length) h += gantt(p, p.tasks.map(t => ({ n: t.n, s: t.s, e: t.e, ph: t.ph, sc: t.id, dept: t.dept })));
   return h;
 }
 function boqReview(n) {
@@ -746,21 +841,30 @@ const A2 = {
   },
   npClassify: () => { const n = npState(); npSync(); n.items.forEach(i => { i.dept = null; }); BOQ.classify(n.sections, n.items); addDepts(n); npPlan(n); render(); toast('تم توزيع البنود على الأقسام'); },
   npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
-  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '' })) }; render(); },
+  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r })) }; render(); },
+  print: () => window.print(),
+  gcol: d => { ui.gcol = ui.gcol || {}; if (ui.gcol[d.v]) delete ui.gcol[d.v]; else ui.gcol[d.v] = 1; render(); },
+  gfold: d => { const p = P(d.v); if (Object.keys(ui.gcol || {}).length) ui.gcol = {}; else { ui.gcol = {}; p.boq.forEach(b => { ui.gcol[b.s] = 1; }); } render(); },
   schedCancel: () => { ui.ted = null; render(); },
   schedAuto: d => {
     const p = P(d.v); const items = p.boq.map(b => ({ id: b.id, code: b.c, desc: b.d, total: b.t, dept: b.dept, sec: b.s }));
     BOQ.classify(p.sections, items, true); BOQ.schedule(items, p.start, p.end);
-    ui.ted = { pid: p.id, list: items.map(i => { const b = p.boq.find(x => x.id === i.id); return { id: i.id, start: i.start, end: i.end, s0: b.ps || '', e0: b.pe || '' }; }) };
+    ui.ted = { pid: p.id, list: items.map(i => { const b = p.boq.find(x => x.id === i.id); return { id: i.id, start: i.start, end: i.end, s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r }; }) };
     render(); toast('انحسبت المدد من جديد. راجعها واضغط حفظ');
   },
   schedSave: async (d, el) => {
-    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0);
-    if (!ch.length) { ui.ted = null; render(); return; }
+    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0), chp = ui.ted.list.filter(r => +r.q !== +r.q0 || +r.r !== +r.r0);
+    if (!ch.length && !chp.length) { ui.ted = null; render(); return; }
     const bad = ch.find(r => !r.start || !r.end || r.end < r.start);
     if (bad) { const b = P(ui.ted.pid).boq.find(x => x.id === bad.id); return toast('راجع تواريخ البند ' + (b ? b.c : ''), true); }
+    const badP = chp.find(r => r.q === '' || r.r === '' || +r.q < 0 || +r.r < 0);
+    if (badP) { const b = P(ui.ted.pid).boq.find(x => x.id === badP.id); return toast('راجع كمية وسعر البند ' + (b ? b.c : ''), true); }
     el.disabled = true;
-    try { await run(sb.rpc('set_item_dates', { p_items: ch.map(r => ({ id: r.id, start: r.start, end: r.end })) }), 'تم حفظ ' + ch.length + ' تعديل'); ui.ted = null; refresh(); } catch (e) { el.disabled = false; }
+    try {
+      if (ch.length) await run(sb.rpc('set_item_dates', { p_items: ch.map(r => ({ id: r.id, start: r.start, end: r.end })) }));
+      if (chp.length) await run(sb.rpc('set_item_prices', { p_items: chp.map(r => ({ id: r.id, qty: +r.q, rate: +r.r })) }));
+      toast('تم حفظ ' + (ch.length + chp.length) + ' تعديل'); ui.ted = null; refresh();
+    } catch (e) { el.disabled = false; }
   },
   schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">مدد ' + p.boq.filter(b => b.ps).length + ' بند من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. مهندس الموقع يقدر يحدّث التواريخ بعد الاعتماد حسب سير العمل.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   boqClassify: async (d, el) => {
@@ -784,7 +888,7 @@ const A2 = {
   },
   projOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_project', { p_project: d.v, p_ok: true }), 'اعتُمد المشروع وصار ظاهر للجميع'); } catch (e) { el.disabled = false; return; } refresh(); },
   projNo: d => modal('رفض المشروع', '<form class="f" data-form="projNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="pn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
-  voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد العمل الإضافي وانضاف لقيمة المشروع'); } catch (e) { el.disabled = false; return; } refresh(); },
+  voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد أمر التغيير VO (منفصل عن قيمة العقد)'); } catch (e) { el.disabled = false; return; } refresh(); },
   voNo: d => modal('رفض العمل الإضافي', '<form class="f" data-form="voNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="vn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   newDoc: d => modal('إضافة مستند للمشروع', '<form class="f" data-form="doc" data-v="' + d.v + '"><div class="fr"><label class="fld"><span>نوع المستند</span><select id="dc-k">' + Object.entries(DOCK).map(([k, l]) => '<option value="' + k + '">' + l + '</option>').join('') + '</select></label><label class="fld"><span>اسم المستند</span><input id="dc-t" required placeholder="مثال: العقد الموقّع"></label></div><label class="fld"><span>الملف</span><input id="dc-f" type="file" required></label><div class="actions"><button class="btn pri" type="submit">رفع</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   docDel: async d => { try { await run(sb.from('project_docs').delete().eq('id', d.v), 'انحذف المستند'); } catch (e) { return; } refresh(); },
@@ -822,9 +926,9 @@ function newPettyForm(pid) {
     '<div class="actions"><button class="btn pri" type="submit">إرسال للمدير العام</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
 function newVOForm(pid) {
-  modal('إضافة عمل إضافي (Variation)', '<form class="f" data-form="vo" data-v="' + pid + '"><label class="fld"><span>عنوان العمل الإضافي</span><input id="vo-t" required placeholder="مثال: غرفة تخزين إضافية"></label><label class="fld"><span>الوصف ونطاق العمل</span><textarea id="vo-d" required></textarea></label>' +
+  modal('Variation Order جديد (أمر تغيير / عمل إضافي)', '<form class="f" data-form="vo" data-v="' + pid + '"><label class="fld"><span>عنوان التغيير أو العمل الإضافي</span><input id="vo-t" required placeholder="مثال: غرفة تخزين إضافية"></label><label class="fld"><span>الوصف ونطاق العمل</span><textarea id="vo-d" required></textarea></label>' +
     '<div class="fr"><label class="fld"><span>القيمة (ر.ع)</span><input id="vo-a" type="number" min="0" step="0.001" required></label><label class="fld"><span>موافقة الوزارة أو العميل (PDF أو صورة)</span><input id="vo-f" type="file" accept="image/*,.pdf" required></label></div>' +
-    '<span class="muted small">يروح العمل الإضافي للمدير العام للاعتماد، وبعد اعتماده يُضاف لقيمة المشروع وميزانيته.</span>' +
+    '<span class="muted small">يروح للمدير العام للاعتماد. بعد الاعتماد تظهر قيمته في إجمالي الـ VO بشكل منفصل، وقيمة العقد الأصلية ما تتغير.</span>' +
     '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
 function projStatusForm(pid) {
@@ -904,7 +1008,7 @@ document.addEventListener('change', async e => {
   if (t.id === 'pc-p') document.getElementById('pc-b').innerHTML = boqOptions(P(t.value), '', true);
   if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
   if (t.dataset.npd != null && ui.np) { npSync(); ui.np.items[+t.dataset.npd][t.dataset.k] = t.value; render(); return; }
-  if (t.dataset.ted != null && ui.ted) { ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value; render(); return; }
+  if (t.dataset.ted != null && ui.ted) { tedSet(+t.dataset.ted, t.dataset.k, t.value); setTimeout(render, 0); return; }
   if (t.id === 'np-kind' && ui.np) { npSync(); ui.np.idFile = null; render(); return; }
   if (t.id === 'np-idf' && ui.np) { ui.np.idFile = t.files[0] || null; return; }
   if ((t.id === 'np-start' || t.id === 'np-end') && ui.np) { npSync(); if (ui.np.items.length) npPlan(ui.np); render(); return; }
@@ -923,7 +1027,7 @@ document.addEventListener('change', async e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.npd != null && ui.np && t.value) ui.np.items[+t.dataset.npd][t.dataset.k] = t.value;
-  if (t.dataset.ted != null && ui.ted && t.value) ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value;
+  if (t.dataset.ted != null && ui.ted && t.value && t.dataset.k !== 'days') tedSet(+t.dataset.ted, t.dataset.k, t.value);
 });
 document.addEventListener('submit', async e => {
   const f = e.target; e.preventDefault(); const v = id => document.getElementById(id).value;
@@ -1017,7 +1121,7 @@ function render() {
   if (!me) { root.innerHTML = '<div class="loading">جاري التحميل...</div>'; return; }
   if (me.role === 'pending') { root.innerHTML = vPending(); return; }
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
-  const sec = h.startsWith('p-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
+  const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
