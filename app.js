@@ -505,13 +505,13 @@ function vNewProject() {
     '<div class="fr"><label class="fld"><span>العميل</span><input data-npf="client" id="np-client" value="' + fv('client') + '"></label><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
     '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
-    '<div class="fld"><span>الأقسام المشاركة (تتحدد تلقائياً من توزيع البنود، وتقدر تعدلها)</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
+    '</div>';
   h += '<div class="card"><h2>2. جدول الكميات BOQ والمدد</h2>' +
     '<div class="fr"><label class="fld"><span>ملف BOQ (Excel هو الأفضل، أو PDF أو صورة)</span><input id="np-file" type="file" accept=".xlsx,.xls,.csv,.pdf,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy ? esc(n.busy) : 'اقرأ الملف') + '</button></div></div>' +
-    '<span class="hint">ملف Excel ينقرأ فوراً. ملف PDF المصدّر من Excel أو Word ينقرأ فوراً بعد، أما PDF المصوّر أو الصورة فتنقرأ بالذكاء الاصطناعي وتاخذ وقت أطول.</span>' +
+    '<span class="hint">ملف Excel أو PDF المصدّر من Excel ينقرأ فوراً. PDF المصوّر أو الصورة ينقرأ داخل البرنامج بعد، بس ياخذ حوالي 20 ثانية لكل صفحة.</span>' +
     '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="رقم البند\tالوصف\tالكمية\tالوحدة\tسعر الوحدة\tالإجمالي\n2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
     '<span class="hint">انسخ الجدول من Excel مع سطر العناوين. النظام يتعرف على الأعمدة بنفسه.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
-    boqReview(n) + '</div>';
+    boqReview(n) + '<div class="fld" style="margin-top:14px"><span>' + (n.items.length ? 'الأقسام المشاركة: تحددت تلقائياً من توزيع البنود، وتقدر تعدلها' : 'الأقسام المشاركة: تتحدد تلقائياً بعد قراءة ملف BOQ، أو اخترها بنفسك') + '</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
   return h + '<div class="actions"><button class="btn pri" type="submit">حفظ المشروع</button><a class="btn" href="#projects">إلغاء</a></div></form>';
 }
 function parseNum(s) { if (s == null) return NaN; s = String(s).replace(/[,\s]/g, '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)); return s === '' ? NaN : +s; }
@@ -545,10 +545,13 @@ async function readSheets(f) {
   return res;
 }
 // Text PDFs (exported from Excel/Word): rebuild table rows from text positions. Scanned PDFs return null.
-async function readPdfText(f) {
+async function pdfDoc(f) {
   const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib');
   L.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const doc = await L.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+  return L.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+}
+async function readPdfText(f) {
+  const doc = await pdfDoc(f);
   const lines = []; let chars = 0;
   for (let p = 1; p <= doc.numPages; p++) {
     const tc = await (await doc.getPage(p)).getTextContent(); const rows = {};
@@ -619,13 +622,21 @@ async function npAnalyze() {
       try { res = await readPdfText(file); } catch (e) { res = null; }
       if (res) npTake(n, res, 'انقرأ من نص ملف PDF في ' + ((Date.now() - t0) / 1000).toFixed(1) + ' ثانية');
       else {
-        busy('الملف مصوّر، جاري القراءة بالذكاء الاصطناعي…');
+        // Scanned PDF: read it inside the app first (free); Claude is only the fallback.
+        let rows = null;
+        try { const doc = await pdfDoc(file); busy('الملف مصوّر، جاري قراءة الصور…'); rows = await BOQOCR.readPdf(doc, (p, t) => busy('قراءة الصفحة ' + p + ' من ' + t + '…')); } catch (e) { console.warn(e); }
+        const ocr = rows ? BOQ.parseRows(rows) : null;
+        if (ocr && ocr.items.length) { npTake(n, ocr, 'الملف مصوّر وانقرأ داخل البرنامج في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام قبل الحفظ'); toast('تمت قراءة ' + n.items.length + ' بند'); n.busy = ''; render(); return; }
+        busy('القراءة بالذكاء الاصطناعي…');
         const bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
         busy('القراءة بالذكاء الاصطناعي… 0 من ' + bodies.length);
         const r = await readWithAI(bodies, (d, t) => busy('القراءة بالذكاء الاصطناعي… ' + d + ' من ' + t));
         npTake(n, r, 'الملف مصوّر فانقرأ بالذكاء الاصطناعي في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام');
       }
     } else if (/^image\//.test(file.type)) {
+      busy('جاري قراءة الصورة…');
+      let ocr = null; try { ocr = BOQ.parseRows(await BOQOCR.readImage(file)); } catch (e) { console.warn(e); }
+      if (ocr && ocr.items.length) { npTake(n, ocr, 'انقرأت الصورة داخل البرنامج. راجع الأرقام قبل الحفظ'); toast('تمت قراءة ' + n.items.length + ' بند'); n.busy = ''; render(); return; }
       busy('القراءة بالذكاء الاصطناعي…');
       const r = await readWithAI([{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }], () => {});
       npTake(n, r, 'انقرأت الصورة بالذكاء الاصطناعي. راجع الأرقام');
