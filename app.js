@@ -397,7 +397,7 @@ function vInbox() {
   return h;
 }
 function vUsers() {
-  if (!isAdmin()) return '<div class="empty">هذه الصفحة لمدير النظام وصاحب الشركة والمدير العام.</div>';
+  if (me.role !== 'admin') return '<div class="empty">صفحة المستخدمين لمدير النظام فقط.</div>';
   const sysAdmin = me.role === 'admin';
   const roleOpts = sel => Object.entries(ROLES).filter(([k]) => k !== 'pending' || sel === 'pending').map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + (k === 'pending' ? 'موقوف' : l) + '</option>').join('');
   const deptOpts = sel => '<option value="">—</option>' + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + l + '</option>').join('');
@@ -876,16 +876,20 @@ function render() {
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
   const sec = h.startsWith('p-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
-  if (isAdmin()) items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
-  const pendUsers = isAdmin() ? S.profiles.filter(u => u.role === 'pending').length : 0;
+  if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
+  const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
   root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
     items.map(([k, l, i]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + l + badge(k) + '</a>').join('') +
     '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
-    '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + views() + '</div></main>' +
+    '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + greet() + views() + '</div></main>' +
     '<nav class="bnav">' + items.filter(x => x[0] !== 'users').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
 }
 
+function greet() {
+  const hr = new Date().getHours(), first = String(me.full_name || '').trim().split(/\s+/)[0] || '';
+  return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' ' + esc(first) : '') + '</b><span class="muted small">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + ' · ' + new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
+}
 async function boot(sess) {
   session = sess; me = null; render();
   if (!session) return;

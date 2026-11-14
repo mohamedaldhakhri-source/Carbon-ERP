@@ -257,3 +257,5 @@ details summary{margin:4px 0}
 .dt:disabled{opacity:.45}
 .rv td{vertical-align:middle}
 .rv tr.chg td{background:var(--warn-soft)}
+.greet{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 14px}
+.greet b{font-size:1.15rem}
