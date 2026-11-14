@@ -625,40 +625,54 @@ function itemState(b) {
   const exp = Math.min(100, (daysBetween(D(b.ps), today) + 1) / durOf(b.ps, b.pe) * 100);
   return exp - b.p > 25 ? { k: 'risk', l: 'متأخر عن الخطة', c: 'p-warn' } : { k: 'run', l: 'جاري', c: 'p-ok' };
 }
+const planPct = b => !b.ps || !b.pe ? 0 : D(b.ps) > today ? 0 : D(b.pe) <= today ? 100 : Math.min(100, (daysBetween(D(b.ps), today) + 1) / durOf(b.ps, b.pe) * 100);
+const deptHeads = d => S.profiles.filter(u => u.role === 'head' && (!myDepts(u).length || myDepts(u).includes(d))).map(u => u.full_name).join('، ');
+const pbar = (plan, act) => '<div class="pp" title="المخطط ' + Math.round(plan) + '% · الفعلي ' + Math.round(act) + '%"><i class="pl" style="width:' + Math.min(100, plan) + '%"></i><i class="ac' + (act + 10 < plan ? ' bad' : '') + '" style="width:' + Math.min(100, act) + '%"></i></div>';
 function vSchedReport(pid) {
   const p = P(pid); if (!p) return '<div class="empty">المشروع غير موجود.</div>';
   const items = p.boq.filter(b => b.ps && b.pe), st = items.map(b => [b, itemState(b)]), cnt = k => st.filter(x => x[1].k === k).length;
-  const val = items.reduce((a, b) => a + b.t, 0) || 1, wp = items.reduce((a, b) => a + b.t * b.p, 0) / val, tp = timePct(p), dl = daysLeft(p);
-  const short = t => String(t || '').length > 70 ? String(t).slice(0, 68) + '…' : String(t || '');
+  const val = items.reduce((a, b) => a + b.t, 0) || 1, act = items.reduce((a, b) => a + b.t * b.p, 0) / val, plan = items.reduce((a, b) => a + b.t * planPct(b), 0) / val, dl = daysLeft(p), gap = act - plan;
+  const short = t => { const x = String(t || '').replace(/\s+/g, ' '); return x.length > 70 ? x.slice(0, 68) + '…' : x; };
   const secs = p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i));
+  const secName = sc => { const x = secs.find(y => y[0] === sc); return x && x[1] ? x[1] : 'قسم ' + sc; };
+  let verdict = gap >= -5 ? ['ok', '✅ المشروع ماشي حسب الخطة'] : gap >= -15 ? ['warn', '⚠️ المشروع متأخر قليلاً عن الخطة'] : ['bad', '⛔ المشروع متأخر عن الخطة ويحتاج تدخل'];
+  if (verdict[0] === 'ok' && cnt('late')) verdict = ['warn', '⚠️ المشروع ماشي حسب الخطة، لكن فيه ' + cnt('late') + ' بند متأخر لازم يخلص'];
+  if (dl < 0 && act < 100) verdict = ['bad', '⛔ تجاوزنا موعد التسليم والمشروع ما خلص'];
   let h = '<div class="head noprint"><div class="t"><span class="crumb"><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a> / تقرير الجدول الزمني</span></div><div class="actions"><button class="btn pri" data-act="print">🖨 طباعة أو حفظ PDF</button><a class="btn" href="#p-' + p.id + '">رجوع للمشروع</a></div></div>';
-  h += '<div class="card rep"><div class="rep-h"><div><h1>تقرير الجدول الزمني</h1><b>' + esc(p.name) + '</b><div class="muted small">' + esc(p.code || '') + (p.client ? ' · العميل ' + esc(p.client) : '') + ' · ' + KIND[p.kind] + (locText(p) ? ' · ' + esc(locText(p)) : '') + '</div></div><div class="small muted" style="text-align:end">CARBON Engineering Consultancy<br>تاريخ التقرير ' + fd(iso(today)) + '<br>' + (p.sched.status === 'approved' ? 'الجدول معتمد' + (p.sched.by ? ' من ' + esc(nameOf(p.sched.by)) : '') : 'الجدول مسودة غير معتمدة') + '</div></div>';
-  const verdict = wp + 5 >= tp ? ['ok', 'المشروع ماشي حسب الخطة'] : wp + 15 >= tp ? ['warn', 'المشروع متأخر قليلاً عن الخطة'] : ['bad', 'المشروع متأخر عن الخطة'];
-  h += '<div class="flag ' + verdict[0] + '"><b>' + verdict[1] + '.</b> الإنجاز الفعلي ' + Math.round(wp) + '% مقابل ' + Math.round(tp) + '% من الوقت منقضي. ' + (dl >= 0 ? 'باقي ' + dl + ' يوم على التسليم (' + fd(p.end) + ').' : 'تجاوز موعد التسليم (' + fd(p.end) + ') بـ ' + (-dl) + ' يوم.') + '</div>';
-  h += '<div class="kpis"><div class="kpi"><span class="l">مدة المشروع</span><span class="v">' + durOf(p.start, p.end) + ' <small>يوم</small></span><span class="s">' + fd(p.start) + ' إلى ' + fd(p.end) + '</span></div>' +
-    '<div class="kpi"><span class="l">الإنجاز الفعلي</span><span class="v">' + Math.round(wp) + '%</span><span class="s">الوقت المنقضي ' + Math.round(tp) + '%</span></div>' +
-    '<div class="kpi"><span class="l">البنود</span><span class="v">' + items.length + '</span><span class="s">منجز ' + cnt('done') + ' · جاري ' + (cnt('run') + cnt('risk')) + ' · لم يبدأ ' + cnt('next') + '</span></div>' +
-    '<div class="kpi' + (cnt('late') ? ' alert' : '') + '"><span class="l">بنود متأخرة</span><span class="v">' + cnt('late') + '</span><span class="s">وبنود متأخرة عن الخطة ' + cnt('risk') + '</span></div></div>';
-  // Sections
-  h += '<h2>ملخص الأقسام</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th>من</th><th>إلى</th><th class="n">الأيام</th><th class="n">الإنجاز</th><th>الحالة</th></tr></thead><tbody>';
-  secs.forEach(([sc, sn]) => { const it = items.filter(b => b.s === sc); if (!it.length) return;
-    const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe), v = it.reduce((a, b) => a + b.t, 0) || 1, pr = it.reduce((a, b) => a + b.t * b.p, 0) / v;
-    const late = it.filter(b => itemState(b).k === 'late').length, ss = itemState({ ps: s0, pe: e0, p: pr });
-    h += '<tr><td><b>' + esc(sc) + '</b> ' + esc(sn) + '</td><td class="n">' + it.length + '</td><td class="small">' + fd(s0) + '</td><td class="small">' + fd(e0) + '</td><td class="n">' + durOf(s0, e0) + '</td><td class="n">' + Math.round(pr) + '%</td><td><span class="pill ' + ss.c + '">' + ss.l + '</span>' + (late ? ' <span class="small" style="color:var(--bad)">' + late + ' بند متأخر</span>' : '') + '</td></tr>'; });
-  h += '</tbody></table></div>';
-  // Late and at-risk items
-  const lateL = st.filter(x => x[1].k === 'late' || x[1].k === 'risk').sort((a, b) => a[0].pe.localeCompare(b[0].pe));
-  h += '<h2>البنود المتأخرة والتي تحتاج متابعة</h2>' + (lateL.length ? '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th>النهاية المخططة</th><th class="n">الإنجاز</th><th>الحالة</th></tr></thead><tbody>' + lateL.map(([b, s]) => '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="small">' + fd(b.pe) + '</td><td class="n">' + b.p + '%</td><td><span class="pill ' + s.c + '">' + s.l + '</span></td></tr>').join('') + '</tbody></table></div>' : '<div class="flag ok">ما في بنود متأخرة.</div>');
-  // Next 14 days
+  h += '<div class="card rep"><div class="rep-h"><div><h1>تقرير الجدول الزمني</h1><b>' + esc(p.name) + '</b><div class="muted small">' + esc(p.code || '') + (p.client ? ' · العميل ' + esc(p.client) : '') + ' · ' + KIND[p.kind] + (locText(p) ? ' · ' + esc(locText(p)) : '') + '</div></div><div class="small muted" style="text-align:end">CARBON Engineering Consultancy<br>تاريخ التقرير <b>' + fd(iso(today)) + '</b><br>' + (p.sched.status === 'approved' ? 'الجدول معتمد' + (p.sched.by ? ' من ' + esc(nameOf(p.sched.by)) : '') : 'الجدول مسودة غير معتمدة') + '</div></div>';
+  // 1. The answer in one box
+  h += '<div class="rep-v ' + verdict[0] + '"><div class="big">' + verdict[1] + '</div><div class="rep-vg">' +
+    '<div><span>المفروض ننجز لين اليوم</span><b>' + Math.round(plan) + '%</b></div><div><span>المنجز فعلياً</span><b>' + Math.round(act) + '%</b></div>' +
+    '<div><span>الفرق</span><b>' + (gap >= 0 ? '+' : '') + Math.round(gap) + '%</b></div><div><span>' + (dl >= 0 ? 'باقي على التسليم' : 'تجاوزنا التسليم') + '</span><b>' + Math.abs(dl) + ' يوم</b></div></div>' + pbar(plan, act) +
+    '<div class="small">' + fd(p.start) + ' ← ' + fd(p.end) + ' · ' + items.length + ' بند: منجز ' + cnt('done') + '، جاري ' + (cnt('run') + cnt('risk')) + '، لم يبدأ ' + cnt('next') + '، <b>متأخر ' + cnt('late') + '</b></div></div>';
+  // 2. What each department must do now
+  const now = items.filter(b => b.p < 100 && D(b.ps) <= today);
+  const byD = {}; now.forEach(b => { (byD[b.dept || ''] = byD[b.dept || ''] || []).push(b); });
+  h += '<h2>١. المطلوب الحين من كل قسم</h2><p class="muted small">البنود اللي وقتها بدأ وما خلصت، مرتبة من الأكثر تأخير. الشريط الرمادي = المفروض، الملوّن = المنجز.</p>';
+  const dKeys = Object.keys(byD).sort((a, b) => byD[b].length - byD[a].length);
+  if (!dKeys.length) h += '<div class="flag ok">ما في بنود جارية أو متأخرة الحين.</div>';
+  dKeys.forEach(d => {
+    const list = byD[d].sort((a, b) => (planPct(b) - b.p) - (planPct(a) - a.p)), hd = d ? deptHeads(d) : '';
+    h += '<div class="rep-d"><div class="rep-dh"><span><span class="dot" style="background:' + (DCOL[d] || '#999') + '"></span> <b>' + (d ? DEPTS[d] : 'بدون قسم') + '</b>' + (hd ? ' · المسؤول: ' + esc(hd) : '') + '</span><span class="small">' + list.length + ' بند · متأخر ' + list.filter(b => itemState(b).k === 'late').length + '</span></div>' +
+      '<table><thead><tr><th>البند</th><th>العمل</th><th>لازم يخلص</th><th style="width:150px">المخطط / المنجز</th><th>الحالة</th></tr></thead><tbody>' +
+      list.map(b => { const s2 = itemState(b); return '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '<div class="muted">' + esc(secName(b.s)) + '</div></td><td class="small">' + fd(b.pe) + '</td><td>' + pbar(planPct(b), b.p) + '<div class="small muted">' + Math.round(planPct(b)) + '% / ' + b.p + '%</div></td><td><span class="pill ' + s2.c + '">' + s2.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
+  });
+  // 3. Next two weeks
   const lim = iso(new Date(today.getTime() + 14 * 864e5)), t0 = iso(today);
-  const soon = items.filter(b => (b.ps >= t0 && b.ps <= lim) || (b.pe >= t0 && b.pe <= lim && b.p < 100)).sort((a, b) => (a.ps >= t0 ? a.ps : a.pe).localeCompare(b.ps >= t0 ? b.ps : b.pe));
-  h += '<h2>خلال الأسبوعين القادمين</h2>' + (soon.length ? '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th>الحدث</th></tr></thead><tbody>' + soon.map(b => '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="small">' + (b.ps >= t0 && b.ps <= lim ? 'يبدأ ' + fd(b.ps) : '') + (b.pe >= t0 && b.pe <= lim && b.p < 100 ? (b.ps >= t0 && b.ps <= lim ? ' · ' : '') + 'لازم يخلص ' + fd(b.pe) : '') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted small">ما في بنود تبدأ أو تنتهي خلال الأسبوعين القادمين.</p>');
-  // Departments
-  const ds = [...new Set(items.map(b => b.dept).filter(Boolean))];
-  if (ds.length) { h += '<h2>حسب القسم</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th class="n">الإنجاز</th><th class="n">متأخر</th><th>آخر موعد</th></tr></thead><tbody>' + ds.map(d => { const it = items.filter(b => b.dept === d), v = it.reduce((a, b) => a + b.t, 0) || 1; return '<tr><td><span class="dot" style="background:' + DCOL[d] + '"></span> ' + DEPTS[d] + '</td><td class="n">' + it.length + '</td><td class="n">' + Math.round(it.reduce((a, b) => a + b.t * b.p, 0) / v) + '%</td><td class="n">' + it.filter(b => itemState(b).k === 'late').length + '</td><td class="small">' + fd(it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe)) + '</td></tr>'; }).join('') + '</tbody></table></div>'; }
-  // Full timeline (all sections open)
-  const rows = []; secs.forEach(([sc, sn]) => { const it = items.filter(b => b.s === sc); if (!it.length) return; rows.push({ c: sc, n: sn || 'قسم ' + sc, sc, ph: true, s: it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e: it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe) }); it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p })); });
-  const keep = ui.gcol; ui.gcol = {}; h += '<h2 class="pb">المخطط الزمني الكامل</h2>' + gantt(p, rows); ui.gcol = keep;
+  const soon = items.filter(b => b.ps > t0 && b.ps <= lim).sort((a, b) => a.ps.localeCompare(b.ps));
+  h += '<h2>٢. يبدأ خلال الأسبوعين القادمين (جهّزوا له)</h2>' + (soon.length ? '<div class="tbl"><table><thead><tr><th>يبدأ</th><th>البند</th><th>العمل</th><th>القسم</th><th class="n">المدة</th></tr></thead><tbody>' + soon.map(b => '<tr><td class="small"><b>' + fd(b.ps) + '</b></td><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="n small">' + durOf(b.ps, b.pe) + ' يوم</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted small">ما في بنود تبدأ خلال الأسبوعين القادمين.</p>');
+  // 4. Sections
+  h += '<h2>٣. وضع كل قسم من أقسام الـ BOQ</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th>الفترة</th><th style="width:170px">المخطط / المنجز</th><th>الحالة</th></tr></thead><tbody>';
+  secs.forEach(([sc]) => { const it = items.filter(b => b.s === sc); if (!it.length) return;
+    const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe), v = it.reduce((a, b) => a + b.t, 0) || 1, pr = it.reduce((a, b) => a + b.t * b.p, 0) / v, pl = it.reduce((a, b) => a + b.t * planPct(b), 0) / v;
+    const late = it.filter(b => itemState(b).k === 'late').length, ss = pr >= 100 ? ['منجز', 'p-ok'] : pl === 0 ? ['لم يبدأ', 'p-idle'] : late ? [late + ' بند متأخر', 'p-bad'] : pr + 10 < pl ? ['متأخر عن الخطة', 'p-warn'] : ['حسب الخطة', 'p-ok'];
+    h += '<tr><td><b>' + esc(sc) + '</b> ' + esc(secName(sc)) + '</td><td class="n">' + it.length + '</td><td class="small">' + fd(s0) + ' ← ' + fd(e0) + '</td><td>' + pbar(pl, pr) + '<div class="small muted">' + Math.round(pl) + '% / ' + Math.round(pr) + '%</div></td><td><span class="pill ' + ss[1] + '">' + ss[0] + '</span></td></tr>'; });
+  h += '</tbody></table></div>';
+  // 5. Timeline
+  const rows = []; secs.forEach(([sc]) => { const it = items.filter(b => b.s === sc); if (!it.length) return; rows.push({ c: sc, n: secName(sc), sc, ph: true, s: it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e: it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe) }); it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p })); });
+  const keep = ui.gcol; ui.gcol = {}; h += '<h2 class="pb">٤. المخطط الزمني الكامل</h2>' + gantt(p, rows); ui.gcol = keep;
+  h += '<div class="rep-sign"><div>أعدّه: ' + esc(me.full_name) + '<br><span class="muted small">' + ROLES[me.role] + '</span></div><div>اعتماد المدير العام: ____________________<br><span class="muted small">التاريخ: ____ / ____ / ______</span></div></div>';
+  h += '<p class="muted small">كيف نقرأ التقرير: "المفروض" = النسبة اللي كان لازم تنجز لين اليوم حسب الجدول (موزونة بقيمة البنود). "المنجز" = نسبة الإنجاز اللي يدخلها مهندس الموقع لكل بند. البند المتأخر = مر موعد نهايته وما وصل 100%.</p>';
   return h + '</div>';
 }
 function timeTab(p) {
