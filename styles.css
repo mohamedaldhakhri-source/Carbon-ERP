@@ -303,6 +303,7 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .rep h1{font-size:1.3rem;margin:0 0 4px}
 .rep h2{font-size:1rem;margin:18px 0 8px}
 .rep-h{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:12px}
+.rep-logo{display:flex;align-items:center;gap:12px;text-align:end}.rep-logo img{height:84px;width:auto;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .rep .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle}
 @media print{
   .noprint,.greet{display:none!important}
