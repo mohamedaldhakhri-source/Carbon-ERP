@@ -252,3 +252,8 @@ textarea{min-height:70px;resize:vertical}
 .tked tr.sec input{font-weight:600}
 .dot-w{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);margin-inline-start:5px;vertical-align:middle}
 details summary{margin:4px 0}
+/* BOQ item dates */
+.dt{font:inherit;font-size:.8rem;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit;min-width:128px}
+.dt:disabled{opacity:.45}
+.rv td{vertical-align:middle}
+.rv tr.chg td{background:var(--warn-soft)}

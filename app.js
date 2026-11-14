@@ -59,6 +59,9 @@ const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
 const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
 const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
+const canDates = p => me && ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status !== 'closed';
+const myItem = b => me.role !== 'head' || !me.dept || b.dept === me.dept;
+const planN = p => p.boq.filter(b => b.ps && b.pe).length || p.tasks.length;
 const locText = p => [p.wil, p.gov].filter(Boolean).join('، ') + (p.loc ? (p.wil || p.gov ? ' - ' : '') + p.loc : '');
 const pName = p => p ? (p.code ? p.code + ' · ' : '') + p.short : '';
 const govOpts = sel => '<option value="">اختر المحافظة</option>' + Object.keys(OMAN).map(g => '<option' + (g === sel ? ' selected' : '') + '>' + g + '</option>').join('');
@@ -116,7 +119,7 @@ function canActOn(r) {
 function myQueue() {
   const reqs = S.requests.filter(canActOn);
   const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
-  const sched = canSched() ? S.projects.filter(p => p.status !== 'closed' && p.tasks.length && p.sched.status !== 'approved') : [];
+  const sched = canSched() ? S.projects.filter(p => p.status !== 'closed' && planN(p) && p.sched.status !== 'approved') : [];
   return { reqs, pc, sched, n: reqs.length + pc.length + sched.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
@@ -163,7 +166,7 @@ async function loadAll() {
     status: p.status, stopReason: p.stop_reason, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
     sections: secs.filter(s => s.project_id === p.id).map(s => [s.code, s.name]),
-    boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept })),
+    boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept, ps: b.start_date, pe: b.end_date })),
     tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ id: t.id, n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase, dept: t.dept }))
   }));
   S.requests = reqs.map(r => ({
@@ -259,10 +262,10 @@ function vProject(id) {
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (p.status === 'closed' ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
-  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', p.tasks.length], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length]];
-  const showTime = p.tasks.length || isAdmin() || (ui.ted && ui.ted.pid === p.id);
+  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'الأعمال الإضافية', vos.length]];
+  const showTime = planN(p) || isAdmin() || canDates(p) || (ui.ted && ui.ted.pid === p.id);
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
-  h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && p.tasks.length && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
+  h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
   if (ui.tab === 'boq') {
     if (!p.boq.length) h += '<div class="empty">لا توجد بنود BOQ لهذا المشروع.</div>';
     else {
@@ -287,24 +290,8 @@ function vProject(id) {
         h += '<tr><td></td><td class="muted">ضريبة القيمة المضافة ' + p.vat + '%</td><td></td><td></td><td></td><td class="n muted">' + money(c * p.vat / 100) + '</td><td></td><td></td></tr><tr><td></td><td><b>الإجمالي الكلي</b></td><td></td><td></td><td></td><td class="n"><b>' + money(c * (1 + p.vat / 100)) + '</b></td><td></td><td></td></tr></tbody></table></div>';
       }
     }
-  } else if (ui.tab === 'time') {
-    if (ui.ted && ui.ted.pid === p.id) {
-      h += '<div class="flag warn">وضع التعديل: عدّل المهام ثم احفظ. ' + (canSched() ? 'بعد الحفظ اعتمد الجدول.' : 'بعد الحفظ يروح للمدير العام للاعتماد.') + '</div>' + (ui.ted.notes ? '<div class="flag warn">ملاحظات: ' + esc(ui.ted.notes) + '</div>' : '') +
-        taskEditor(ui.ted.list, p.id) + '<div class="actions" style="margin-top:10px"><button class="btn pri" data-act="schedSave">حفظ الجدول</button><button class="btn" data-act="schedCancel">إلغاء</button></div>';
-    } else {
-      const st = p.sched;
-      h += '<div class="ch" style="margin-bottom:8px">' + (!p.tasks.length ? '<span class="muted small">لا يوجد جدول زمني بعد.</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
-        '<div class="actions">' + (canSched() && p.tasks.length && st.status !== 'approved' ? '<button class="btn ok" data-act="schedApprove" data-v="' + p.id + '">اعتماد الجدول</button>' : '') + (isAdmin() ? '<button class="btn" data-act="schedEdit" data-v="' + p.id + '">' + (p.tasks.length ? 'تعديل الجدول' : 'إضافة جدول') + '</button>' + (!p.tasks.length ? '<button class="btn pri" data-act="aiSched" data-v="' + p.id + '">اقترح جدول زمني ذكي</button>' : '') : '') + '</div></div>';
-      if (p.tasks.length) {
-        const a = D(p.start), z = D(p.end); const span = z - a; const pos = d => ((D(d) - a) / span * 100);
-        const nowPos = (today - a) / span * 100;
-        const months = []; const m = new Date(a.getFullYear(), a.getMonth() + 1, 1); while (m <= z) { months.push([((m - a) / span * 100), m.toLocaleDateString('ar', { month: 'short' })]); m.setMonth(m.getMonth() + 1); }
-        h += '<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>' + months.map(([x, l]) => '<span style="inset-inline-start:' + x.toFixed(1) + '%">' + l + '</span>').join('') + '</div></div>' +
-          p.tasks.map(t => { const s0 = Math.max(0, pos(t.s)), e = Math.min(100, Math.max(pos(t.e) + (100 / (span / 864e5)), s0 + .6)); return '<div class="gr' + (t.ph ? ' ph' : '') + '"><span title="' + fd(t.s) + ' - ' + fd(t.e) + '">' + esc(t.n) + (t.dept && !t.ph ? ' <span class="tag">' + DEPTS[t.dept] + '</span>' : '') + '</span><div class="gt"><i style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%"></i>' + (nowPos <= 100 ? '<span class="now" style="inset-inline-start:' + nowPos.toFixed(1) + '%"></span>' : '') + '</div></div>'; }).join('') +
-          '</div></div><p class="muted small">' + (nowPos > 100 ? 'تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.' : 'الخط الأحمر يمثل تاريخ اليوم.') + '</p>';
-      }
-    }
-  } else if (ui.tab === 'req') h += reqTable(reqs, false);
+  } else if (ui.tab === 'time') h += timeTab(p);
+  else if (ui.tab === 'req') h += reqTable(reqs, false);
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
   else if (ui.tab === 'vo') {
     h += vos.length ? '<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th><th class="n">القيمة</th><th>موافقة العميل</th><th>المرفق</th><th>التاريخ</th></tr></thead><tbody>' + vos.map(v => '<tr><td class="num small">' + esc(v.no) + '</td><td><b>' + esc(v.title) + '</b><div class="muted small">' + esc(v.d) + '</div></td><td class="n">' + money(v.amt) + '</td><td>' + (v.client === 'approved' ? '<span class="pill p-ok">معتمد من العميل</span>' : '<span class="pill p-warn">بانتظار العميل</span>') + '</td><td class="small">' + (v.file ? fileLink(v.file, 'موافقة العميل') : ((v.byId === me.id || isAdmin()) ? '<button class="btn sm" data-act="voApprove" data-v="' + v.id + '">رفع موافقة العميل</button>' : '—')) + '</td><td class="small">' + fd(v.date) + '</td></tr>').join('') + '</tbody></table></div><p class="muted small">الأعمال الإضافية المعتمدة من العميل تُضاف لقيمة المشروع وميزانيته تلقائياً.</p>' : '<div class="empty">لا توجد أعمال إضافية لهذا المشروع.</div>';
@@ -406,7 +393,7 @@ function vInbox() {
   if (!q.n) return h + '<div class="card empty">ما عندك شي ينتظر إجراءك الحين.</div>';
   if (q.reqs.length) h += '<div class="card"><h2>طلبات المواد</h2>' + reqTable(q.reqs, true) + '</div>';
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
-  if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + p.tasks.length + ' مهمة · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
+  if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + planN(p) + (p.boq.some(b => b.ps) ? ' بند' : ' مهمة') + ' · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
 function vUsers() {
@@ -434,37 +421,83 @@ function npSync() {
   const ds = document.querySelectorAll('[name=np-dept]');
   if (ds.length) n.f.depts = [...ds].filter(x => x.checked).map(x => x.value);
 }
+// Timeline tab: every BOQ item has its own planned dates, grouped by section. Older projects keep their task list.
+function gantt(p, rows) {
+  let a = D(p.start), z = D(p.end);
+  rows.forEach(r => { if (D(r.s) < a) a = D(r.s); if (D(r.e) > z) z = D(r.e); });
+  const span = Math.max(z - a, 864e5), pos = d => (D(d) - a) / span * 100, day = 100 / (span / 864e5), nowPos = (today - a) / span * 100;
+  const months = []; const m = new Date(a.getFullYear(), a.getMonth() + 1, 1); while (m <= z) { months.push([(m - a) / span * 100, m.toLocaleDateString('ar', { month: 'short' })]); m.setMonth(m.getMonth() + 1); }
+  return '<div class="tbl"><div class="gantt"><div class="gmon"><span></span><div>' + months.map(([x, l]) => '<span style="inset-inline-start:' + x.toFixed(1) + '%">' + l + '</span>').join('') + '</div></div>' +
+    rows.map(r => { const s0 = Math.max(0, pos(r.s)), e = Math.min(100, Math.max(pos(r.e) + day, s0 + .6)); return '<div class="gr' + (r.ph ? ' ph' : '') + '"><span title="' + esc(r.t || r.n) + ' · ' + fd(r.s) + ' - ' + fd(r.e) + '">' + esc(r.n) + (r.dept && !r.ph ? ' <span class="tag">' + DEPTS[r.dept] + '</span>' : '') + '</span><div class="gt"><i style="inset-inline-start:' + s0.toFixed(2) + '%;width:' + (e - s0).toFixed(2) + '%"></i>' + (nowPos >= 0 && nowPos <= 100 ? '<span class="now" style="inset-inline-start:' + nowPos.toFixed(1) + '%"></span>' : '') + '</div></div>'; }).join('') +
+    '</div></div><p class="muted small">' + (nowPos > 100 ? 'تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.' : 'الخط الأحمر يمثل تاريخ اليوم.') + '</p>';
+}
+function timeTab(p) {
+  const st = p.sched, dated = p.boq.filter(b => b.ps && b.pe), short = t => String(t || '').length > 60 ? String(t).slice(0, 58) + '…' : String(t || '');
+  let h = '';
+  if (ui.ted && ui.ted.pid === p.id) {
+    const idx = {}; ui.ted.list.forEach((r, i) => { idx[r.id] = i; });
+    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0).length;
+    h += '<div class="flag warn">وضع التعديل: غيّر بداية ونهاية أي بند ثم اضغط حفظ.' + (me.role === 'head' && me.dept ? ' تقدر تعدّل بنود قسم ' + DEPTS[me.dept] + ' فقط.' : '') + '</div>' +
+      '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
+      '<div class="tbl"><table class="rv"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th class="n">القيمة</th><th>البداية</th><th>النهاية</th><th class="n">المدة</th></tr></thead><tbody>';
+    p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i)).forEach(([sc, sn]) => {
+      const it = p.boq.filter(b => b.s === sc); if (!it.length) return;
+      h += '<tr class="sec"><td>' + esc(sc) + '</td><td colspan="6">' + esc(sn) + '</td></tr>';
+      it.forEach(b => {
+        const i = idx[b.id], r = ui.ted.list[i], ok = myItem(b), dis = ok ? '' : ' disabled', days = r.start && r.end ? daysBetween(D(r.start), D(r.end)) + 1 : '';
+        h += '<tr' + (r.start !== r.s0 || r.end !== r.e0 ? ' class="chg"' : '') + '><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td>' + (b.dept ? '<span class="tag">' + DEPTS[b.dept] + '</span>' : '<span class="muted">—</span>') + '</td><td class="n small">' + money(b.t) + '</td>' +
+          '<td><input type="date" class="dt" data-ted="' + i + '" data-k="start" value="' + esc(r.start) + '"' + dis + ' aria-label="بداية البند ' + esc(b.c) + '"></td><td><input type="date" class="dt" data-ted="' + i + '" data-k="end" value="' + esc(r.end) + '"' + dis + ' aria-label="نهاية البند ' + esc(b.c) + '"></td><td class="n small"' + (days !== '' && days < 1 ? ' style="color:var(--bad)"' : '') + '>' + (days !== '' ? days + ' يوم' : '—') + '</td></tr>';
+      });
+    });
+    return h + '</tbody></table></div>';
+  }
+  const has = dated.length || p.tasks.length;
+  h += '<div class="ch" style="margin-bottom:8px">' + (!has ? '<span class="muted small">' + (p.boq.length ? 'ما انحسبت مدد البنود بعد.' : 'لا توجد بنود BOQ لهذا المشروع.') + '</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
+    '<div class="actions">' + (canSched() && has && st.status !== 'approved' ? '<button class="btn ok" data-act="schedApprove" data-v="' + p.id + '">اعتماد الجدول</button>' : '') +
+    (canDates(p) && p.boq.length && dated.length ? '<button class="btn" data-act="schedEdit" data-v="' + p.id + '">تعديل مدد البنود</button>' : '') +
+    (isAdmin() && p.boq.length && !dated.length ? '<button class="btn pri" data-act="schedAuto" data-v="' + p.id + '">احسب مدة كل بند تلقائياً</button>' : '') + '</div></div>';
+  if (dated.length) {
+    const rows = [];
+    const secs = p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i));
+    secs.forEach(([sc, sn]) => {
+      const it = dated.filter(b => b.s === sc); if (!it.length) return;
+      const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe);
+      rows.push({ n: sc + ' ' + sn, s: s0, e: e0, ph: true });
+      it.forEach(b => rows.push({ n: b.c + ' ' + short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept }));
+    });
+    h += gantt(p, rows);
+    if (dated.length < p.boq.length) h += '<p class="muted small">' + (p.boq.length - dated.length) + ' بند بدون تواريخ. اضغط "تعديل مدد البنود" لإضافتها.</p>';
+  } else if (p.tasks.length) h += gantt(p, p.tasks.map(t => ({ n: t.n, s: t.s, e: t.e, ph: t.ph, dept: t.dept })));
+  return h;
+}
 function boqReview(n) {
   if (!n.items.length) return '';
   const sum = n.items.reduce((a, i) => a + (+i.total || 0), 0);
-  const noDept = n.items.filter(i => !i.dept).length;
-  let h = '<div class="ch" style="margin-top:6px"><b>' + n.sections.length + ' أقسام · ' + n.items.length + ' بند · الإجمالي ' + money(sum) + ' ر.ع</b>' +
-    (n.items.length ? '<button type="button" class="btn sm" data-act="npClassify">' + (noDept ? 'وزّع البنود على الأقسام بالذكاء' : 'أعد التوزيع بالذكاء') + '</button>' : '') + '</div>';
-  if (n.stated && Math.abs(n.stated - sum) > 1) h += '<div class="flag warn">إجمالي الملف المكتوب ' + money(n.stated) + ' ر.ع، ومجموع البنود المقروءة ' + money(sum) + ' ر.ع. راجع البنود قبل الحفظ.</div>';
-  if (n.notes) h += '<div class="flag warn">ملاحظات التحليل: ' + esc(n.notes) + '</div>';
-  if (noDept) h += '<span class="hint">' + noDept + ' بند بدون قسم.</span>';
-  h += '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">القيمة</th><th>القسم المسؤول</th></tr></thead><tbody>';
-  const secs = n.sections.length ? n.sections : [];
-  const order = secs.map(s => s[0]); n.items.forEach(i => { if (!order.includes(i.sec)) order.push(i.sec); });
+  let h = '<div class="ch" style="margin-top:6px"><b>' + n.sections.length + ' أقسام · ' + n.items.length + ' بند · الإجمالي ' + money(sum) + ' ر.ع</b><div class="actions"><button type="button" class="btn sm" data-act="npClassify">أعد توزيع الأقسام تلقائياً</button><button type="button" class="btn sm" data-act="npSchedule">احسب المدد تلقائياً</button></div></div>';
+  if (n.via) h += '<span class="hint">' + esc(n.via) + '</span>';
+  if (n.stated && Math.abs(n.stated - sum) > 1) h += '<div class="flag warn">الإجمالي المكتوب في الملف ' + money(n.stated) + ' ر.ع، ومجموع البنود المقروءة ' + money(sum) + ' ر.ع. راجع البنود قبل الحفظ.</div>';
+  if (n.warnings && n.warnings.length) h += '<details><summary class="hint" style="cursor:pointer">' + n.warnings.length + ' ملاحظة على الأرقام</summary><div class="hint">' + n.warnings.map(esc).join('<br>') + '</div></details>';
+  if (n.notes) h += '<div class="flag warn">ملاحظات القراءة: ' + esc(n.notes) + '</div>';
+  if (!n.f.start || !n.f.end) h += '<div class="flag warn">حدد تاريخ البداية وموعد التسليم فوق عشان تنحسب مدة كل بند.</div>';
+  h += '<div class="tbl"><table class="rv"><thead><tr><th>البند</th><th>الوصف</th><th class="n">القيمة</th><th>القسم المسؤول</th><th>البداية</th><th>النهاية</th><th class="n">المدة</th></tr></thead><tbody>';
+  const order = n.sections.map(s => s[0]); n.items.forEach(i => { if (!order.includes(i.sec)) order.push(i.sec); });
   order.forEach(sc => {
     const it = n.items.map((x, k) => [x, k]).filter(([x]) => x.sec === sc); if (!it.length) return;
-    const sn = (secs.find(s => s[0] === sc) || [sc, 'قسم ' + sc])[1];
-    h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td></td><td class="n">' + money(it.reduce((a, [x]) => a + (+x.total || 0), 0)) + '</td><td>' + deptSel('', 'data-nps="' + esc(sc) + '" aria-label="قسم كل بنود ' + esc(sn) + '"', 'غيّر الكل…') + '</td></tr>';
-    it.forEach(([x, k]) => { h += '<tr><td class="num small">' + esc(x.code) + '</td><td>' + esc(x.desc) + '</td><td class="n">' + x.qty + ' ' + esc(x.unit) + '</td><td class="n">' + money(x.total) + '</td><td>' + deptSel(x.dept, 'data-npi="' + k + '" aria-label="قسم البند ' + esc(x.code) + '"') + '</td></tr>'; });
+    const sn = (n.sections.find(s => s[0] === sc) || [sc, 'قسم ' + sc])[1];
+    h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn) + '</td><td class="n">' + money(it.reduce((a, [x]) => a + (+x.total || 0), 0)) + '</td><td>' + deptSel('', 'data-nps="' + esc(sc) + '" aria-label="قسم كل بنود ' + esc(sn) + '"', 'غيّر الكل…') + '</td><td></td><td></td><td></td></tr>';
+    it.forEach(([x, k]) => {
+      const days = x.start && x.end ? daysBetween(D(x.start), D(x.end)) + 1 : '';
+      h += '<tr><td class="num small">' + esc(x.code) + '</td><td>' + esc(x.desc) + '<div class="muted small">' + x.qty + ' ' + esc(x.unit) + (x.rate ? ' × ' + money(x.rate) : '') + '</div></td><td class="n">' + money(x.total) + '</td><td>' + deptSel(x.dept, 'class="dsel" data-npi="' + k + '" aria-label="قسم البند ' + esc(x.code) + '"') + '</td>' +
+        '<td><input type="date" class="dt" data-npd="' + k + '" data-k="start" value="' + esc(x.start || '') + '" aria-label="بداية البند ' + esc(x.code) + '"></td><td><input type="date" class="dt" data-npd="' + k + '" data-k="end" value="' + esc(x.end || '') + '" aria-label="نهاية البند ' + esc(x.code) + '"></td><td class="n small">' + (days ? days + ' يوم' : '—') + '</td></tr>';
+    });
   });
   return h + '</tbody></table></div>';
-}
-function taskEditor(list, ctx) {
-  ui.tlist = list;
-  let h = '<div class="tbl"><table class="tked"><thead><tr><th>مرحلة</th><th>المهمة</th><th>القسم</th><th>البداية</th><th>النهاية</th><th></th></tr></thead><tbody>';
-  h += list.map((t, i) => '<tr' + (t.is_phase ? ' class="sec"' : '') + '><td><input type="checkbox" data-tk="' + i + '" data-k="is_phase"' + (t.is_phase ? ' checked' : '') + ' aria-label="مرحلة رئيسية"></td><td><input data-tk="' + i + '" data-k="name" value="' + esc(t.name) + '" aria-label="اسم المهمة"></td><td>' + deptSel(t.dept, 'data-tk="' + i + '" data-k="dept" aria-label="القسم"', 'عام') + '</td><td><input type="date" data-tk="' + i + '" data-k="start_date" value="' + esc(t.start_date) + '" aria-label="البداية"></td><td><input type="date" data-tk="' + i + '" data-k="end_date" value="' + esc(t.end_date) + '" aria-label="النهاية"></td><td><button type="button" class="x" data-act="tkDel" data-v="' + i + '" aria-label="حذف">×</button></td></tr>').join('');
-  return h + '</tbody></table></div><div class="actions"><button type="button" class="btn sm" data-act="tkAdd">+ مهمة</button><button type="button" class="btn sm" data-act="aiSched" data-v="' + ctx + '">' + (list.length ? 'أعد اقتراح الجدول بالذكاء' : 'اقترح جدول زمني ذكي') + '</button></div>';
 }
 function vNewProject() {
   if (!isAdmin()) return '<div class="empty">إضافة المشاريع لمدير النظام وصاحب الشركة والمدير العام.</div>';
   const n = npState(), f = n.f;
   const fv = k => esc(f[k] || '');
-  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويقترح الجدول الزمني. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
+  let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويعطي كل بند مدة. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
     '<form class="f" data-form="project">' +
     '<div class="card"><h2>1. بيانات المشروع</h2>' +
     '<div class="fr"><label class="fld"><span>كود المشروع</span><input data-npf="code" id="np-code" value="' + fv('code') + '" dir="ltr" placeholder="يتولد تلقائياً مثل ' + nextCode() + '"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
@@ -473,32 +506,15 @@ function vNewProject() {
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
     '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
     '<div class="fld"><span>الأقسام المشاركة (تتحدد تلقائياً من توزيع البنود، وتقدر تعدلها)</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
-  h += '<div class="card"><h2>2. جدول الكميات BOQ</h2>' +
-    '<div class="fr"><label class="fld"><span>ملف BOQ (PDF أو Excel أو صورة)</span><input id="np-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy === 'boq' ? 'جاري التحليل…' : 'حلّل الملف بالذكاء الاصطناعي') + '</button></div></div>' +
-    '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
-    '<span class="hint">الأعمدة بالترتيب: رقم البند، الوصف، الكمية، الوحدة، سعر الوحدة، الإجمالي. السطر اللي فيه رقم ووصف فقط يُعتبر عنوان قسم.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
+  h += '<div class="card"><h2>2. جدول الكميات BOQ والمدد</h2>' +
+    '<div class="fr"><label class="fld"><span>ملف BOQ (Excel هو الأفضل، أو PDF أو صورة)</span><input id="np-file" type="file" accept=".xlsx,.xls,.csv,.pdf,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy ? esc(n.busy) : 'اقرأ الملف') + '</button></div></div>' +
+    '<span class="hint">ملف Excel ينقرأ فوراً. ملف PDF المصدّر من Excel أو Word ينقرأ فوراً بعد، أما PDF المصوّر أو الصورة فتنقرأ بالذكاء الاصطناعي وتاخذ وقت أطول.</span>' +
+    '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="رقم البند\tالوصف\tالكمية\tالوحدة\tسعر الوحدة\tالإجمالي\n2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
+    '<span class="hint">انسخ الجدول من Excel مع سطر العناوين. النظام يتعرف على الأعمدة بنفسه.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
     boqReview(n) + '</div>';
-  h += '<div class="card"><h2>3. الجدول الزمني</h2><span class="hint">النظام يقترح الجدول من بنود BOQ والتواريخ. تقدر تعدل أي مهمة الحين، والمدير العام يراجعه ويعتمده بعد الحفظ من صفحة المشروع.</span>' +
-    (n.busy === 'sched' ? '<div class="flag warn">جاري إعداد الجدول الزمني… (حتى دقيقتين)</div>' : '') +
-    (n.schedNotes ? '<div class="flag warn">ملاحظات: ' + esc(n.schedNotes) + '</div>' : '') + taskEditor(n.tasks, 'np') + '</div>';
   return h + '<div class="actions"><button class="btn pri" type="submit">حفظ المشروع</button><a class="btn" href="#projects">إلغاء</a></div></form>';
 }
 function parseNum(s) { if (s == null) return NaN; s = String(s).replace(/[,\s]/g, '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)); return s === '' ? NaN : +s; }
-function parseBoq(text) {
-  const sections = [], items = []; let cur = null;
-  text.split(/\r?\n/).forEach(line => {
-    if (!line.trim()) return;
-    const c = line.split('\t').map(x => x.trim());
-    const code = c[0], desc = c[1] || '';
-    const qty = parseNum(c[2]), rate = parseNum(c[4]), total = parseNum(c[5]);
-    if (!code && !desc) return;
-    if (isNaN(qty) && isNaN(total)) { if (code && desc) { cur = code.split('.')[0] === code ? code : code; sections.push([code, desc]); } return; }
-    const sec = cur || code.split('.')[0];
-    if (!sections.find(s => s[0] === sec)) sections.push([sec, 'قسم ' + sec]);
-    items.push({ code, desc, qty: isNaN(qty) ? 1 : qty, unit: c[3] || '', rate: isNaN(rate) ? 0 : rate, total: isNaN(total) ? (isNaN(qty) ? 0 : qty) * (isNaN(rate) ? 0 : rate) : total, sec });
-  });
-  return { sections, items };
-}
 function parseDate(s) {
   s = (s || '').trim(); let m;
   if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
@@ -515,33 +531,38 @@ async function callFn(body, okMsg) {
   return true;
 }
 
-/* ---------- smart BOQ (Claude via the analyze-boq function) ---------- */
-async function ai(body) {
-  const { data, error } = await sb.functions.invoke('analyze-boq', { body });
-  let msg = data && data.error;
-  if (error && !msg) { try { const j = await error.context.json(); msg = j.error; } catch (e) { msg = errMsg(error); } }
-  if (msg) { toast(msg, true); throw new Error(msg); }
-  return data;
-}
+/* ---------- BOQ reading: built-in engine first, AI only for scanned PDFs and images ---------- */
 const fileB64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = () => no(r.error); r.readAsDataURL(f); });
-function loadXLSX() {
-  if (window.XLSX) return Promise.resolve(window.XLSX);
-  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = () => ok(window.XLSX); s.onerror = () => no(new Error('تعذّر تحميل قارئ Excel')); document.head.appendChild(s); });
-}
-async function sheetText(f) {
-  const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer());
-  return wb.SheetNames.map(n => '## ' + n + '\n' + X.utils.sheet_to_csv(wb.Sheets[n], { FS: '\t', blankrows: false })).join('\n\n');
-}
-function rerender() { npSync(); render(); }
-function addDepts(n) { n.items.forEach(i => { if (i.dept && !n.f.depts.includes(i.dept)) n.f.depts.push(i.dept); }); }
-function secSummary(sections, items) {
-  const order = sections.map(s => s[0]); items.forEach(i => { if (!order.includes(i.sec)) order.push(i.sec); });
-  return order.map(sc => { const it = items.filter(i => i.sec === sc); const s = sections.find(x => x[0] === sc); return { code: sc, name: s ? s[1] : sc, items: it.length, total: it.reduce((a, i) => a + (+i.total || 0), 0), depts: [...new Set(it.map(i => i.dept).filter(Boolean))] }; }).filter(s => s.items);
-}
-const aiTasks = list => list.map(t => ({ name: t.name, start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase }));
 function loadScript(src, name) {
   if (window[name]) return Promise.resolve(window[name]);
-  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window[name]); s.onerror = () => no(new Error('تعذّر تحميل مكتبة القراءة')); document.head.appendChild(s); });
+  return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = () => ok(window[name]); s.onerror = () => no(new Error('تعذّر تحميل مكتبة القراءة، تأكد من الإنترنت')); document.head.appendChild(s); });
+}
+const loadXLSX = () => loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', 'XLSX');
+async function readSheets(f) {
+  const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer(), { cellDates: false });
+  let res = null;
+  wb.SheetNames.forEach(n => { const aoa = X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '', blankrows: false }); const before = res ? res.items.length : 0; res = BOQ.parseRows(aoa, res || undefined); if (res.items.length === before && !before) res.sections = []; });
+  return res;
+}
+// Text PDFs (exported from Excel/Word): rebuild table rows from text positions. Scanned PDFs return null.
+async function readPdfText(f) {
+  const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib');
+  L.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const doc = await L.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+  const lines = []; let chars = 0;
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent(); const rows = {};
+    tc.items.forEach(t => { const s = (t.str || '').trim(); if (!s) return; chars += s.length; const y = Math.round(t.transform[5] / 4); (rows[y] = rows[y] || []).push({ x: t.transform[4], w: t.width || 0, s }); });
+    Object.keys(rows).map(Number).sort((a, b) => b - a).forEach(y => lines.push(rows[y]));
+  }
+  if (chars < 40 * doc.numPages) return null;
+  // Column positions come from the header row; every other text piece goes to the nearest column.
+  const hdr = lines.find(r => { const t = r.map(c => c.s).join(' '); return /(qty|quantity|الكمية)/i.test(t) && /(desc|الوصف|البيان)/i.test(t); });
+  if (!hdr) return null;
+  const cols = hdr.slice().sort((a, b) => a.x - b.x).map(c => c.x + c.w / 2);
+  const aoa = lines.map(r => { const row = cols.map(() => ''); r.forEach(c => { const cx = c.x + c.w / 2; let bi = 0; cols.forEach((x, i) => { if (Math.abs(x - cx) < Math.abs(cols[bi] - cx)) bi = i; }); row[bi] = (row[bi] ? row[bi] + ' ' : '') + c.s; }); return row; });
+  const res = BOQ.parseRows(aoa);
+  return res.items.length ? res : null;
 }
 async function pdfParts(file, per) {
   const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js', 'PDFLib');
@@ -550,19 +571,11 @@ async function pdfParts(file, per) {
   if (n <= per) return [await fileB64(file)];
   for (let i = 0; i < n; i += per) {
     const d = await L.PDFDocument.create();
-    const pages = await d.copyPages(src, Array.from({ length: Math.min(per, n - i) }, (_, k) => i + k));
-    pages.forEach(pg => d.addPage(pg));
+    (await d.copyPages(src, Array.from({ length: Math.min(per, n - i) }, (_, k) => i + k))).forEach(pg => d.addPage(pg));
     out.push(await d.saveAsBase64());
   }
   return out;
 }
-function textParts(text, per) {
-  const lines = text.split('\n'); if (lines.length <= per) return [text];
-  const head = lines.slice(0, 4).join('\n'), out = [];
-  for (let i = 0; i < lines.length; i += per) out.push((i ? head + '\n...\n' : '') + lines.slice(i, i + per).join('\n'));
-  return out;
-}
-// Runs jobs a few at a time; each part retries once before giving up.
 async function pool(jobs, size, onDone) {
   const res = new Array(jobs.length); let next = 0, done = 0;
   async function worker() { while (next < jobs.length) { const i = next++; try { res[i] = await jobs[i](); } catch (e) { res[i] = await jobs[i](); } onDone(++done, jobs.length); } }
@@ -570,100 +583,95 @@ async function pool(jobs, size, onDone) {
   return res;
 }
 const quietAi = async body => { const { data, error } = await sb.functions.invoke('analyze-boq', { body }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
-function setBusyText(t) { const b = document.querySelector('[data-act=npAnalyze]'); if (b) b.textContent = t; }
+async function readWithAI(bodies, progress) {
+  const parts = await pool(bodies.map((b, i) => () => quietAi(Object.assign({ mode: 'extract', part: { n: i + 1, of: bodies.length } }, b))), 4, progress);
+  const res = { sections: [], items: [], stated: 0, warnings: [], notes: [] };
+  parts.forEach(d => {
+    (d.sections || []).forEach(x => { if (!res.sections.find(y => y[0] === x.code)) res.sections.push([x.code, x.name]); });
+    (d.items || []).forEach(i => { if (!res.items.find(y => y.code === i.code)) res.items.push({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], sub: '', dept: i.dept || null }); });
+    if (+d.stated_total > res.stated) res.stated = +d.stated_total;
+    if (d.notes && d.notes.trim()) res.notes.push(d.notes.trim());
+  });
+  res.notes = res.notes.join(' · ');
+  return res;
+}
+function rerender() { npSync(); render(); }
+function addDepts(n) { n.items.forEach(i => { if (i.dept && !n.f.depts.includes(i.dept)) n.f.depts.push(i.dept); }); }
+function npPlan(n) { if (n.f.start && n.f.end && n.f.end >= n.f.start && n.items.length) { BOQ.schedule(n.items, n.f.start, n.f.end); n.planFor = n.f.start + '|' + n.f.end; } }
+function npTake(n, res, via) {
+  n.sections = res.sections; n.items = res.items; n.stated = res.stated || 0; n.warnings = res.warnings || []; n.notes = res.notes || ''; n.via = via;
+  BOQ.classify(n.sections, n.items, true); addDepts(n); npPlan(n);
+}
 async function npAnalyze() {
   const n = npState(); npSync();
   const f = (document.getElementById('np-file') || {}).files; const file = f && f[0];
   if (!file) return toast('اختر ملف BOQ أولاً', true);
   if (file.size > 20 * 1024 * 1024) return toast('حجم الملف أكبر من 20 ميجا', true);
-  const name = file.name.toLowerCase(); let bodies;
+  const name = file.name.toLowerCase(), t0 = Date.now();
+  const busy = t => { n.busy = t; const b = document.querySelector('[data-act=npAnalyze]'); if (b) { b.textContent = t; b.disabled = true; } };
   try {
-    if (/\.(xlsx|xls|csv)$/.test(name)) bodies = textParts(await sheetText(file), 120).map(t => ({ text: t }));
-    else if (name.endsWith('.pdf') || file.type === 'application/pdf') bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
-    else bodies = [{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }];
-  } catch (e) { return toast(errMsg(e), true); }
-  n.busy = 'boq'; render(); setBusyText('جاري التحليل… 0 من ' + bodies.length + ' أجزاء');
-  try {
-    const parts = await pool(bodies.map((b, i) => () => quietAi(Object.assign({ mode: 'extract', part: { n: i + 1, of: bodies.length } }, b))), 4, (d, t) => setBusyText('جاري التحليل… ' + d + ' من ' + t + ' أجزاء'));
-    const secs = [], items = [], notes = []; let stated = 0;
-    parts.forEach(d => {
-      (d.sections || []).forEach(x => { if (!secs.find(y => y[0] === x.code)) secs.push([x.code, x.name]); });
-      (d.items || []).forEach(i => { if (!items.find(y => y.code === i.code)) items.push({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], dept: i.dept || null }); });
-      if (+d.stated_total > stated) stated = +d.stated_total;
-      if (d.notes && d.notes.trim()) notes.push(d.notes.trim());
-    });
-    n.sections = secs; n.items = items; n.stated = stated; n.notes = notes.join(' · '); addDepts(n);
-    toast('تمت قراءة ' + items.length + ' بند وتوزيعها على الأقسام. راجعها تحت');
-  } catch (e) { toast(errMsg(e), true); } finally { n.busy = ''; render(); }
-}
-async function classifyItems(items) {
-  const chunks = []; for (let i = 0; i < items.length; i += 100) chunks.push(items.slice(i, i + 100));
-  const res = await pool(chunks.map(c => () => quietAi({ mode: 'classify', items: c.map(i => ({ code: i.code, description: i.desc, section: i.secName || i.sec })) })), 4, () => {});
-  const m = {}; res.forEach(d => (d.items || []).forEach(x => { m[x.code] = x.dept; })); return m;
+    if (/\.(xlsx|xls|xlsm|csv)$/.test(name)) {
+      busy('جاري القراءة…'); const res = await readSheets(file);
+      if (!res || !res.items.length) throw new Error('ما لقيت بنود في ملف Excel. تأكد إن فيه أعمدة الوصف والكمية أو الإجمالي');
+      npTake(n, res, 'انقرأ من Excel في ' + ((Date.now() - t0) / 1000).toFixed(1) + ' ثانية');
+    } else if (name.endsWith('.pdf') || file.type === 'application/pdf') {
+      busy('جاري القراءة…'); let res = null;
+      try { res = await readPdfText(file); } catch (e) { res = null; }
+      if (res) npTake(n, res, 'انقرأ من نص ملف PDF في ' + ((Date.now() - t0) / 1000).toFixed(1) + ' ثانية');
+      else {
+        busy('الملف مصوّر، جاري القراءة بالذكاء الاصطناعي…');
+        const bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
+        busy('القراءة بالذكاء الاصطناعي… 0 من ' + bodies.length);
+        const r = await readWithAI(bodies, (d, t) => busy('القراءة بالذكاء الاصطناعي… ' + d + ' من ' + t));
+        npTake(n, r, 'الملف مصوّر فانقرأ بالذكاء الاصطناعي في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام');
+      }
+    } else if (/^image\//.test(file.type)) {
+      busy('القراءة بالذكاء الاصطناعي…');
+      const r = await readWithAI([{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }], () => {});
+      npTake(n, r, 'انقرأت الصورة بالذكاء الاصطناعي. راجع الأرقام');
+    } else throw new Error('نوع الملف غير مدعوم. ارفع Excel أو PDF أو صورة');
+    toast('تمت قراءة ' + n.items.length + ' بند');
+  } catch (e) { toast(errMsg(e), true); }
+  n.busy = ''; render();
 }
 const A2 = {
   npReset: () => { ui.np = null; render(); },
   npAnalyze: () => npAnalyze(),
   npPaste: () => {
-    const n = npState(); npSync(); const r = parseBoq(n.f.paste || '');
-    if (!r.items.length) return toast('ما قدرت أقرأ بنود من النص الملصق', true);
-    n.sections = r.sections; n.items = r.items.map(i => Object.assign({ dept: null }, i)); n.stated = 0; n.notes = ''; render();
+    const n = npState(); npSync(); const r = BOQ.parseText(n.f.paste || '');
+    if (!r.items.length) return toast('ما قدرت أقرأ بنود من النص الملصق. انسخ الجدول مع سطر العناوين', true);
+    npTake(n, r, 'انقرأ من النص الملصق'); render();
   },
-  npClassify: async (d, el) => {
-    const n = npState(); npSync(); el.disabled = true; el.textContent = 'جاري التوزيع…';
-    try { const m = await classifyItems(n.items.map(i => Object.assign({ secName: (n.sections.find(s => s[0] === i.sec) || [])[1] }, i))); n.items.forEach(i => { if (m[i.code]) i.dept = m[i.code]; }); addDepts(n); toast('تم توزيع البنود على الأقسام'); } catch (e) { toast(errMsg(e), true); }
-    render();
-  },
-  aiSched: async (d, el) => {
-    let proj, secs;
-    if (d.v === 'np') {
-      const n = npState(); npSync(); const f = n.f;
-      if (!f.start || !f.end || f.end < f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true);
-      proj = { name: f.name, type: f.type, start_date: f.start, end_date: f.end, depts: f.depts, location: [f.wil, f.gov, f.loc].filter(Boolean).join('، ') };
-      secs = secSummary(n.sections, n.items); n.busy = 'sched'; render();
-    } else {
-      const p = P(d.v);
-      proj = { name: p.name, type: p.type, start_date: p.start, end_date: p.end, depts: p.depts, location: locText(p) };
-      secs = secSummary(p.sections, p.boq.map(b => ({ sec: b.s, total: b.t, dept: b.dept })));
-      el.disabled = true; el.textContent = 'جاري إعداد الجدول… (حتى دقيقتين)';
-    }
-    try {
-      const r = await ai({ mode: 'schedule', project: proj, sections: secs });
-      if (d.v === 'np') { ui.np.tasks = aiTasks(r.tasks || []); ui.np.schedNotes = r.notes || ''; }
-      else { ui.ted = { pid: d.v, list: aiTasks(r.tasks || []), notes: r.notes || '' }; }
-      toast('جاهز. راجع الجدول وعدّل اللي تبيه');
-    } catch (e) { }
-    if (ui.np) ui.np.busy = ''; render();
-  },
-  tkAdd: () => { const l = ui.tlist; const last = l[l.length - 1]; const p = ui.ted ? P(ui.ted.pid) : null; const s = last ? last.end_date : (p ? p.start : (ui.np && ui.np.f.start) || iso(today)); l.push({ name: '', start_date: s, end_date: s, dept: null, is_phase: false }); rerender(); },
-  tkDel: d => { ui.tlist.splice(+d.v, 1); rerender(); },
-  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.tasks.map(t => ({ name: t.n, start_date: t.s, end_date: t.e, dept: t.dept || null, is_phase: !!t.ph })), notes: '' }; render(); },
+  npClassify: () => { const n = npState(); npSync(); n.items.forEach(i => { i.dept = null; }); BOQ.classify(n.sections, n.items); addDepts(n); npPlan(n); render(); toast('تم توزيع البنود على الأقسام'); },
+  npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
+  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '' })) }; render(); },
   schedCancel: () => { ui.ted = null; render(); },
+  schedAuto: d => {
+    const p = P(d.v); const items = p.boq.map(b => ({ id: b.id, code: b.c, desc: b.d, total: b.t, dept: b.dept, sec: b.s }));
+    BOQ.classify(p.sections, items, true); BOQ.schedule(items, p.start, p.end);
+    ui.ted = { pid: p.id, list: items.map(i => { const b = p.boq.find(x => x.id === i.id); return { id: i.id, start: i.start, end: i.end, s0: b.ps || '', e0: b.pe || '' }; }) };
+    render(); toast('انحسبت المدد من جديد. راجعها واضغط حفظ');
+  },
   schedSave: async (d, el) => {
-    const p = P(ui.ted.pid), list = ui.ted.list;
-    const bad = list.find(t => !String(t.name).trim() || !t.start_date || !t.end_date || t.end_date < t.start_date);
-    if (bad) return toast('كل مهمة تحتاج اسم وتاريخ بداية ونهاية صحيحين' + (bad.name ? ': ' + bad.name : ''), true);
+    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0);
+    if (!ch.length) { ui.ted = null; render(); return; }
+    const bad = ch.find(r => !r.start || !r.end || r.end < r.start);
+    if (bad) { const b = P(ui.ted.pid).boq.find(x => x.id === bad.id); return toast('راجع تواريخ البند ' + (b ? b.c : ''), true); }
+    el.disabled = true;
+    try { await run(sb.rpc('set_item_dates', { p_items: ch.map(r => ({ id: r.id, start: r.start, end: r.end })) }), 'تم حفظ ' + ch.length + ' تعديل'); ui.ted = null; refresh(); } catch (e) { el.disabled = false; }
+  },
+  schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">مدد ' + p.boq.filter(b => b.ps).length + ' بند من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. مهندس الموقع يقدر يحدّث التواريخ بعد الاعتماد حسب سير العمل.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  boqClassify: async (d, el) => {
+    const p = P(d.v); const todo = p.boq.filter(b => !b.dept).map(b => ({ id: b.id, code: b.c, desc: b.d, total: b.t, sec: b.s, dept: null })); if (!todo.length) return;
     el.disabled = true;
     try {
-      await run(sb.from('tasks').delete().eq('project_id', p.id));
-      if (list.length) await run(sb.from('tasks').insert(list.map((t, i) => ({ project_id: p.id, name: t.name.trim(), start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase, sort: i }))));
-      toast(canSched() ? 'تم حفظ الجدول. اعتمده إذا كان جاهز' : 'تم حفظ الجدول وأُرسل للمدير العام للاعتماد');
-      ui.ted = null; refresh();
-    } catch (e) { el.disabled = false; }
-  },
-  schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">' + p.tasks.length + ' مهمة من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. بعد الاعتماد أي تعديل على الجدول يرجعه مسودة لين تعتمده مرة ثانية.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
-  boqClassify: async (d, el) => {
-    const p = P(d.v); const todo = p.boq.filter(b => !b.dept); if (!todo.length) return;
-    el.disabled = true; el.textContent = 'جاري التوزيع…';
-    try {
-      const secName = c => (p.sections.find(s => s[0] === c) || [])[1];
-      const m = await classifyItems(todo.map(b => ({ code: b.c, desc: b.d, sec: b.s, secName: secName(b.s) })));
-      const groups = {}; todo.forEach(b => { const k = m[b.c]; if (k) (groups[k] = groups[k] || []).push(b.id); });
+      BOQ.classify(p.sections, todo);
+      const groups = {}; todo.forEach(b => (groups[b.dept] = groups[b.dept] || []).push(b.id));
       for (const k of Object.keys(groups)) await run(sb.from('boq_items').update({ dept: k }).in('id', groups[k]));
       const ds = [...new Set(p.depts.concat(Object.keys(groups)))];
       if (ds.length !== p.depts.length) await run(sb.from('projects').update({ depts: ds }).eq('id', p.id));
-      toast('تم توزيع ' + Object.values(groups).reduce((a, g) => a + g.length, 0) + ' بند على الأقسام');
-    } catch (e) { toast(errMsg(e), true); }
+      toast('تم توزيع ' + todo.length + ' بند على الأقسام');
+    } catch (e) { }
     refresh();
   },
   bdeptFilter: d => { ui.bdept = d.v; render(); },
@@ -772,7 +780,9 @@ document.addEventListener('change', async e => {
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-b').innerHTML = boqOptions(p, '', true); document.getElementById('nr-d').innerHTML = deptOptions(p); }
   if (t.id === 'pc-p') document.getElementById('pc-b').innerHTML = boqOptions(P(t.value), '', true);
   if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
-  if (t.dataset.tk && ui.tlist) { const row = ui.tlist[+t.dataset.tk]; if (t.type === 'checkbox') { row.is_phase = t.checked; rerender(); } else row[t.dataset.k] = t.dataset.k === 'dept' ? (t.value || null) : t.value; return; }
+  if (t.dataset.npd != null && ui.np) { npSync(); ui.np.items[+t.dataset.npd][t.dataset.k] = t.value; render(); return; }
+  if (t.dataset.ted != null && ui.ted) { ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value; render(); return; }
+  if ((t.id === 'np-start' || t.id === 'np-end') && ui.np && ui.np.items.length) { npSync(); npPlan(ui.np); render(); return; }
   if (t.id === 'np-gov') { npSync(); ui.np.f.wil = ''; render(); return; }
   if (t.dataset.npi != null && ui.np) { npSync(); ui.np.items[+t.dataset.npi].dept = t.value || null; addDepts(ui.np); render(); return; }
   if (t.dataset.nps != null && ui.np && t.value) { npSync(); ui.np.items.forEach(i => { if (i.sec === t.dataset.nps) i.dept = t.value; }); addDepts(ui.np); render(); return; }
@@ -787,7 +797,8 @@ document.addEventListener('change', async e => {
 });
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.dataset.tk && ui.tlist && t.type !== 'checkbox') ui.tlist[+t.dataset.tk][t.dataset.k] = t.value;
+  if (t.dataset.npd != null && ui.np && t.value) ui.np.items[+t.dataset.npd][t.dataset.k] = t.value;
+  if (t.dataset.ted != null && ui.ted && t.value) ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value;
 });
 document.addEventListener('submit', async e => {
   const f = e.target; e.preventDefault(); const v = id => document.getElementById(id).value;
@@ -839,15 +850,14 @@ document.addEventListener('submit', async e => {
       if (!pf.depts.length) { toast('اختر قسم واحد على الأقل', true); return; }
       if (pf.end < pf.start) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
       if ((pf.code || '').trim() && S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
-      const badT = n.tasks.find(t => !String(t.name).trim() || !t.start_date || !t.end_date || t.end_date < t.start_date);
-      if (badT) { toast('راجع الجدول الزمني: كل مهمة تحتاج اسم وتواريخ صحيحة', true); return; }
+      const badT = n.items.find(i => (i.start || i.end) && (!i.start || !i.end || i.end < i.start));
+      if (badT) { toast('راجع تواريخ البند ' + badT.code + ': النهاية لازم بعد البداية', true); return; }
       const pr = await run(sb.from('projects').insert(Object.assign((pf.code || '').trim() ? { code: pf.code.trim() } : {}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
-      if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, sort: i }))));
-      if (n.tasks.length) await run(sb.from('tasks').insert(n.tasks.map((t, i) => ({ project_id: pr.id, name: t.name.trim(), start_date: t.start_date, end_date: t.end_date, dept: t.dept || null, is_phase: !!t.is_phase, sort: i }))));
-      const cnt = n.items.length; ui.np = null; ui.tab = n.tasks.length ? 'time' : 'boq';
-      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (n.tasks.length && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+      if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));
+      const cnt = n.items.length, dated = n.items.some(i => i.start); ui.np = null; ui.tab = dated ? 'time' : 'boq';
+      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
     } else if (kind === 'schedOk') {
       await run(sb.rpc('approve_schedule', { p_project: f.dataset.v, p_note: v('so-n') || null }), 'اعتُمد الجدول الزمني');
       closeModal(); refresh();
