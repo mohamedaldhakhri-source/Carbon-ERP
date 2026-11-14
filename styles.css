@@ -262,3 +262,5 @@ details summary{margin:4px 0}
 .ri{font:inherit;font-size:.85rem;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit;width:100%;min-width:120px}
 input.ri.num{max-width:130px}
 input.ro{background:var(--sunk);color:var(--muted);cursor:default}
+.dchk{display:flex;flex-wrap:wrap;gap:4px 12px}
+.dchk label{display:inline-flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap}

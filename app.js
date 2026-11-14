@@ -62,7 +62,12 @@ const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
 const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
 const canDates = p => me && ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status !== 'closed';
-const myItem = b => me.role !== 'head' || !me.dept || b.dept === me.dept;
+// A user may hold several departments (profiles.depts); none means all departments.
+const myDepts = (u = me) => u && u.depts && u.depts.length ? u.depts : u && u.dept ? [u.dept] : [];
+const deptNames = (u = me) => myDepts(u).map(d => DEPTS[d]).join('، ');
+const inMyDept = d => !myDepts().length || myDepts().includes(d);
+const canFinance = () => me && ['finance', 'admin', 'gm', 'owner'].includes(me.role);
+const myItem = b => me.role !== 'head' || inMyDept(b.dept);
 const planN = p => p.boq.filter(b => b.ps && b.pe).length || p.tasks.length;
 const locText = p => [p.wil, p.gov].filter(Boolean).join('، ') + (p.loc ? (p.wil || p.gov ? ' - ' : '') + p.loc : '');
 const pName = p => p ? (p.code ? p.code + ' · ' : '') + p.short : '';
@@ -115,7 +120,7 @@ function canActOn(r) {
   const s = STAGES.find(x => x.k === r.stage); if (!s || !s.role || !me) return false;
   if (me.role === 'admin') return true;
   if (s.role !== me.role) return false;
-  if (s.role === 'head' && me.dept && me.dept !== r.dept) return false;
+  if (s.role === 'head' && !inMyDept(r.dept)) return false;
   return true;
 }
 function myQueue() {
@@ -124,7 +129,8 @@ function myQueue() {
   const sched = canSched() ? S.projects.filter(p => p.status !== 'closed' && planN(p) && p.sched.status !== 'approved') : [];
   const projs = canApprove() ? S.pending.filter(p => p.approval === 'pending') : [];
   const vos = canApprove() ? S.variations.filter(v => v.gm === 'pending') : [];
-  return { reqs, pc, sched, projs, vos, n: reqs.length + pc.length + sched.length + projs.length + vos.length };
+  const inv = me ? S.petty.filter(c => c.status === 'approved' && !c.inv && c.byId === me.id) : [];
+  return { reqs, pc, sched, projs, vos, inv, n: reqs.length + pc.length + sched.length + projs.length + vos.length + inv.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
 function boqOptions(p, sel, allowNone) {
@@ -153,6 +159,7 @@ async function openFile(path) {
   if (error) return toast(errMsg(error), true);
   window.open(data.signedUrl, '_blank', 'noopener');
 }
+const checkedDepts = id => [...document.querySelectorAll('#' + id + ' input:checked')].map(x => x.value);
 const fileLink = (path, label) => path ? '<button class="linkbtn small" data-act="file" data-v="' + esc(path) + '">📎 ' + esc(label || 'عرض المرفق') + '</button>' : '';
 
 /* ---------- data ---------- */
@@ -184,7 +191,7 @@ async function loadAll() {
     quotes: quotes.filter(x => x.request_id === r.id).map(x => ({ id: x.id, sup: x.supplier, amt: +x.amount, terms: x.terms, days: x.delivery_days, sel: x.selected })),
     hist: hist.filter(h => h.request_id === r.id).map(h => ({ t: h.created_at, by: h.actor_name, role: h.role, a: h.action, note: h.note }))
   }));
-  S.petty = petty.map(c => ({ id: c.id, no: c.no, pid: c.project_id, boq: c.boq_item_id ? codeOf[c.boq_item_id] : null, amt: +c.amount, d: c.description, by: nameOf(c.requested_by), date: c.created_at, status: c.status, file: c.receipt_path, note: c.decision_note }));
+  S.petty = petty.map(c => ({ id: c.id, no: c.no, pid: c.project_id, boq: c.boq_item_id ? codeOf[c.boq_item_id] : null, amt: +c.amount, d: c.description, by: nameOf(c.requested_by), date: c.created_at, status: c.status, file: c.receipt_path, note: c.decision_note, byId: c.requested_by, inv: c.invoice_path, invAt: c.invoice_at, decAt: c.decided_at }));
   S.variations = vars.map(v => ({ id: v.id, no: v.no, pid: v.project_id, title: v.title, d: v.description, amt: +v.amount, file: v.approval_path, client: v.client_status, gm: v.gm_status || 'pending', gmBy: v.gm_by, gmAt: v.gm_at, gmNote: v.gm_note, date: v.created_at, byId: v.created_by, by: nameOf(v.created_by) }));
 }
 async function refresh() { try { await loadAll(); render(); } catch (e) { toast(errMsg(e), true); } }
@@ -213,6 +220,7 @@ function views() {
   if (h === 'requests') return vRequests();
   if (h.startsWith('r-')) return vRequest(h.slice(2));
   if (h === 'petty') return vPetty();
+  if (h === 'expenses') return vExpenses();
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
   return vDash();
@@ -317,8 +325,8 @@ function pettyTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
   const gm = me.role === 'gm' || me.role === 'admin';
   return '<div class="tbl"><table><thead><tr><th>الرقم</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التفاصيل</th><th class="n">المبلغ</th><th>مقدم الطلب</th><th>الحالة</th></tr></thead><tbody>' +
-    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(pName(P(c.pid))) + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'الفاتورة') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
-      (c.status === 'pending' ? (gm ? '<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="' + c.id + '">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="' + c.id + '">رفض</button></div>' : '<span class="pill p-warn">بانتظار المدير العام</span>') : c.status === 'approved' ? '<span class="pill p-ok">معتمد</span>' : '<span class="pill p-bad">مرفوض</span>') + '</td></tr>').join('') + '</tbody></table></div>';
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(pName(P(c.pid))) + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'مرفق الطلب') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
+      (c.status === 'pending' ? (gm ? '<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="' + c.id + '">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="' + c.id + '">رفض</button></div>' : '<span class="pill p-warn">بانتظار المدير العام</span>') : c.status === 'approved' ? (c.inv ? '<span class="pill p-ok">معتمد · الفاتورة مرفقة</span>' + fileLink(c.inv, 'الفاتورة') : c.byId === me.id || me.role === 'admin' ? '<span class="pill p-warn">معتمد · بانتظار الفاتورة</span><div class="actions" style="margin-top:6px"><button class="btn sm pri" data-act="pcInv" data-v="' + c.id + '">ارفق الفاتورة</button></div>' : '<span class="pill p-warn">معتمد · بانتظار فاتورة ' + esc(c.by) + '</span>') : '<span class="pill p-bad">مرفوض</span>') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 function vRequests() {
   const f = ui.reqFilter; const q = myQueue();
@@ -399,6 +407,23 @@ function vPetty() {
     '<div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div class="kpi"><span class="l">بانتظار اعتماد المدير العام</span><span class="v">' + pend.length + '</span><span class="s num">' + money(pend.reduce((a, c) => a + c.amt, 0)) + ' ر.ع</span></div><div class="kpi"><span class="l">إجمالي المعتمد</span><span class="v">' + money(tot) + ' <small>ر.ع</small></span><span class="s">محسوب ضمن مصروفات المشاريع</span></div></div>' +
     '<div class="card">' + pettyTable(S.petty, true) + '</div>';
 }
+// Accountant view: every expense per project with its attachments (petty cash, purchase orders, approved extra works).
+function vExpenses() {
+  if (!canFinance()) return '<div class="empty">صفحة المصروفات للمحاسب والإدارة.</div>';
+  const pid = ui.expP || '', inP = x => !pid || x.pid === pid;
+  const pcs = S.petty.filter(c => inP(c) && c.status === 'approved'), reqs = S.requests.filter(r => inP(r) && r.po), vos = S.variations.filter(v => inP(v) && v.gm === 'approved');
+  const sumPc = pcs.reduce((a, c) => a + c.amt, 0), sumPo = reqs.reduce((a, r) => a + reqAmt(r), 0), noInv = pcs.filter(c => !c.inv);
+  let h = '<div class="head"><div class="t"><h1>المصروفات</h1><span class="muted">كل مصروفات المشاريع ومرفقاتها</span></div><div class="actions"><select id="exp-p" aria-label="المشروع"><option value="">كل المشاريع</option>' + S.projects.map(p => '<option value="' + p.id + '"' + (p.id === pid ? ' selected' : '') + '>' + esc(pName(p)) + '</option>').join('') + '</select></div></div>';
+  h += '<div class="kpis"><div class="kpi"><span class="l">أوامر الشراء</span><span class="v">' + money(sumPo) + ' <small>ر.ع</small></span><span class="s">' + reqs.length + ' أمر شراء</span></div>' +
+    '<div class="kpi"><span class="l">بيتي كاش معتمد</span><span class="v">' + money(sumPc) + ' <small>ر.ع</small></span><span class="s">' + pcs.length + ' طلب</span></div>' +
+    '<div class="kpi' + (noInv.length ? ' alert' : '') + '"><span class="l">بيتي كاش بدون فاتورة</span><span class="v">' + noInv.length + '</span><span class="s">' + money(noInv.reduce((a, c) => a + c.amt, 0)) + ' ر.ع</span></div>' +
+    '<div class="kpi"><span class="l">إجمالي المصروف</span><span class="v">' + money(sumPo + sumPc) + ' <small>ر.ع</small></span><span class="s">&nbsp;</span></div></div>';
+  h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(pcs, !pid) + '</div>';
+  h += '<div class="card"><h2>أوامر الشراء</h2>' + (reqs.length ? '<div class="tbl"><table><thead><tr><th>أمر الشراء</th>' + (pid ? '' : '<th>المشروع</th>') + '<th>المواد والأسعار</th><th>المورّد</th><th class="n">المبلغ</th></tr></thead><tbody>' +
+    reqs.slice().sort((a, b) => String(b.po.date).localeCompare(String(a.po.date))).map(r => { const q = selQuote(r); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.po.no) + '</b><div class="muted">' + fd(r.po.date) + ' · طلب ' + esc(r.no) + '</div></td>' + (pid ? '' : '<td>' + esc(pName(P(r.pid))) + '</td>') + '<td class="small">' + r.items.map(i => esc(i.d) + ' · ' + i.q + ' ' + esc(i.u) + (i.pr != null ? ' × ' + money(i.pr) : '')).join('<br>') + '</td><td class="small">' + (q ? esc(q.sup) : '—') + '</td><td class="n">' + money(reqAmt(r)) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="empty">ما فيه أوامر شراء.</div>') + '</div>';
+  h += '<div class="card"><h2>أعمال إضافية معتمدة</h2>' + (vos.length ? voTable(vos, !pid) : '<div class="empty">ما فيه أعمال إضافية معتمدة.</div>') + '</div>';
+  return h;
+}
 function voTable(list, showProj) {
   return '<div class="tbl"><table><thead><tr><th>الرقم</th><th>العمل الإضافي</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th class="n">القيمة</th><th>موافقة الوزارة / العميل</th><th>اعتماد المدير العام</th><th>التاريخ</th></tr></thead><tbody>' +
     list.map(v => { const p = P(v.pid);
@@ -416,9 +441,10 @@ function docsTab(p) {
 }
 function vInbox() {
   const q = myQueue();
-  let h = '<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">' + ROLES[me.role] + (me.dept ? ' ' + DEPTS[me.dept] : '') + '</span></div></div>';
+  let h = '<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div></div>';
   if (!q.n) return h + '<div class="card empty">ما عندك شي ينتظر إجراءك الحين.</div>';
   if (q.reqs.length) h += '<div class="card"><h2>طلبات المواد</h2>' + reqTable(q.reqs, true) + '</div>';
+  if (q.inv.length) h += '<div class="card"><h2>بيتي كاش معتمد: ارفق الفاتورة</h2><span class="hint">وافق المدير العام على طلبك. ارفق فاتورة الشراء حتى يتقفل الطلب وما يبقى عليك شي.</span>' + pettyTable(q.inv, true) + '</div>';
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
   if (q.projs.length) h += '<div class="card"><h2>مشاريع جديدة بانتظار موافقتك</h2><div class="tbl"><table><tbody>' + q.projs.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">من ' + esc(nameOf(p.reqBy)) + ' · ' + p.boq.length + ' بند · ' + money(contract(p)) + ' ر.ع</td><td><span class="pill p-warn">بانتظار الموافقة</span></td></tr>').join('') + '</tbody></table></div></div>';
   if (q.vos.length) h += '<div class="card"><h2>أعمال إضافية بانتظار اعتمادك</h2>' + voTable(q.vos, true) + '</div>';
@@ -429,14 +455,15 @@ function vUsers() {
   if (me.role !== 'admin') return '<div class="empty">صفحة المستخدمين لمدير النظام فقط.</div>';
   const sysAdmin = me.role === 'admin';
   const roleOpts = sel => Object.entries(ROLES).filter(([k]) => k !== 'pending' || sel === 'pending').map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + (k === 'pending' ? 'موقوف' : l) + '</option>').join('');
-  const deptOpts = sel => '<option value="">—</option>' + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + l + '</option>').join('');
+  // Several departments per person: ticked boxes; none ticked = all departments.
+  const deptChecks = (id, sel) => '<div class="dchk" id="' + id + '">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
   let h = '<div class="head"><div class="t"><h1>المستخدمين</h1><span class="muted">' + S.profiles.length + ' مستخدم</span></div></div>';
   if (sysAdmin) h += '<div class="card"><h2>إضافة موظف</h2><form class="f" data-form="newUser"><div class="fr"><label class="fld"><span>الاسم الكامل</span><input id="nu-name" required></label><label class="fld"><span>البريد الإلكتروني (للدخول)</span><input id="nu-email" type="email" required dir="ltr"></label></div>' +
     '<div class="fr"><label class="fld"><span>كلمة المرور</span><input id="nu-pass" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><label class="fld"><span>الدور</span><select id="nu-role" required>' + roleOpts('site') + '</select></label></div>' +
-    '<div class="fr"><label class="fld"><span>القسم</span><select id="nu-dept">' + deptOpts('') + '</select></label><div class="fld" style="justify-content:flex-end"><button class="btn pri" type="submit">إضافة الموظف</button></div></div>' +
-    '<span class="hint">أعطِ الموظف بريده وكلمة المرور، ويقدر يدخل مباشرة. رئيس القسم يعتمد طلبات قسمه فقط، واتركه بدون قسم إذا يعتمد كل الأقسام.</span></form></div>';
-  h += '<div class="card"><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>القسم</th><th></th></tr></thead><tbody>' +
-    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-idle">موقوف</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور"' + (u.id === me.id ? ' disabled' : '') + '>' + roleOpts(u.role) + '</select></td><td><select id="ud-' + u.id + '" aria-label="القسم">' + deptOpts(u.dept) + '</select></td><td><div class="actions"><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button>' +
+    '<div class="fld"><span>الأقسام اللي يمسكها (تقدر تختار أكثر من قسم)</span>' + deptChecks('nu-dept', []) + '</div><div class="fr"><div class="fld" style="justify-content:flex-end"><button class="btn pri" type="submit">إضافة الموظف</button></div></div>' +
+    '<span class="hint">أعطِ الموظف بريده وكلمة المرور، ويقدر يدخل مباشرة. رئيس القسم يعتمد طلبات أقسامه فقط، واتركه بدون أقسام إذا يعتمد كل الأقسام.</span></form></div>';
+  h += '<div class="card"><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الأقسام</th><th></th></tr></thead><tbody>' +
+    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-idle">موقوف</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور"' + (u.id === me.id ? ' disabled' : '') + '>' + roleOpts(u.role) + '</select></td><td>' + deptChecks('ud-' + u.id, myDepts(u)) + '</td><td><div class="actions"><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button>' +
       (sysAdmin ? '<button class="btn sm" data-act="resetPass" data-v="' + u.id + '">كلمة مرور جديدة</button>' + (u.id !== me.id ? '<button class="btn sm bad" data-act="delUser" data-v="' + u.id + '">حذف</button>' : '') : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
@@ -466,7 +493,7 @@ function timeTab(p) {
   if (ui.ted && ui.ted.pid === p.id) {
     const idx = {}; ui.ted.list.forEach((r, i) => { idx[r.id] = i; });
     const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0).length;
-    h += '<div class="flag warn">وضع التعديل: غيّر بداية ونهاية أي بند ثم اضغط حفظ.' + (me.role === 'head' && me.dept ? ' تقدر تعدّل بنود قسم ' + DEPTS[me.dept] + ' فقط.' : '') + '</div>' +
+    h += '<div class="flag warn">وضع التعديل: غيّر بداية ونهاية أي بند ثم اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
       '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
       '<div class="tbl"><table class="rv"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th class="n">القيمة</th><th>البداية</th><th>النهاية</th><th class="n">المدة</th></tr></thead><tbody>';
     p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i)).forEach(([sc, sn]) => {
@@ -568,7 +595,7 @@ async function callFn(body, okMsg) {
   if (error && !msg) { try { const j = await error.context.json(); msg = j.error; } catch (e) { msg = errMsg(error); } }
   if (msg) { toast(msg, true); return false; }
   if (okMsg) toast(okMsg);
-  return true;
+  return data || true;
 }
 
 /* ---------- BOQ reading: built-in engine first, AI only for scanned PDFs and images ---------- */
@@ -759,7 +786,7 @@ const A2 = {
 function modal(title, body) { document.getElementById('layer').innerHTML = '<div class="ov" data-act="closeOv"><div class="modal" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><div class="mh"><h2>' + esc(title) + '</h2><button class="x" data-act="close" aria-label="إغلاق">×</button></div>' + body + '</div></div>'; const f = document.querySelector('.modal input,.modal select'); if (f) f.focus(); }
 function closeModal() { document.getElementById('layer').innerHTML = ''; }
 function curProject(pid) { pid = pid || (location.hash.startsWith('#p-') ? location.hash.slice(3) : null); return P(pid) || S.projects.find(p => p.status !== 'closed'); }
-function deptOptions(p) { const ds = p.depts.length ? p.depts : Object.keys(DEPTS); const def = me.dept && ds.includes(me.dept) ? me.dept : ds[0]; return ds.map(d => '<option value="' + d + '"' + (d === def ? ' selected' : '') + '>' + DEPTS[d] + '</option>').join(''); }
+function deptOptions(p) { const ds = p.depts.length ? p.depts : Object.keys(DEPTS); const def = ds.find(d => myDepts().includes(d)) || ds[0]; return ds.map(d => '<option value="' + d + '"' + (d === def ? ' selected' : '') + '>' + DEPTS[d] + '</option>').join(''); }
 function newReqForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   modal('طلب مواد جديد', '<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>القسم</span><select id="nr-d">' + deptOptions(p) + '</select></label></div>' +
@@ -773,7 +800,7 @@ function newPettyForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   modal('طلب بيتي كاش', '<form class="f" data-form="petty"><div class="fr"><label class="fld"><span>المشروع</span><select id="pc-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="pc-a" type="number" min="0.001" step="0.001" required></label></div>' +
     '<label class="fld"><span>التفاصيل</span><textarea id="pc-d" required placeholder="وش اشتريت أو وش تحتاج، ولماذا كان عاجلاً"></textarea></label>' +
-    '<div class="fr"><label class="fld"><span>بند BOQ (اختياري)</span><select id="pc-b">' + boqOptions(p, '', true) + '</select></label><label class="fld"><span>صورة الفاتورة (اختياري)</span><input id="pc-f" type="file" accept="image/*,.pdf"></label></div>' +
+    '<div class="fr"><label class="fld"><span>بند BOQ (اختياري)</span><select id="pc-b">' + boqOptions(p, '', true) + '</select></label><label class="fld"><span>مرفق (اختياري)</span><input id="pc-f" type="file" accept="image/*,.pdf"></label></div>' +
     '<div class="actions"><button class="btn pri" type="submit">إرسال للمدير العام</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
 function newVOForm(pid) {
@@ -833,7 +860,8 @@ const A = {
   delUser: d => { const u = S.profiles.find(x => x.id === d.v); modal('حذف ' + u.full_name, '<p>بيتم حذف حساب <b>' + esc(u.full_name) + '</b> نهائياً وما يقدر يدخل النظام. إذا عنده طلبات مسجلة، الأفضل توقف حسابه بتغيير دوره إلى "موقوف" بدل الحذف.</p><div class="actions"><button class="btn bad" data-act="delUserGo" data-v="' + u.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'); },
   delUserGo: async d => { if (await callFn({ action: 'delete', id: d.v }, 'تم حذف الحساب')) { closeModal(); refresh(); } },
   ...A2,
-  saveUser: async d => { await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: document.getElementById('ud-' + d.v).value }), 'تم الحفظ'); refresh(); }
+  saveUser: async d => { const ds = checkedDepts('ud-' + d.v); await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: ds[0] || '' })); await run(sb.rpc('set_user_depts', { p_user: d.v, p_depts: ds }), 'تم الحفظ'); refresh(); },
+  pcInv: d => { const c = S.petty.find(x => x.id === d.v); modal('إرفاق فاتورة ' + c.no, '<form class="f" data-form="pcInv" data-v="' + c.id + '"><p class="muted">' + esc(c.d) + ' · ' + money(c.amt) + ' ر.ع</p><label class="fld"><span>الفاتورة (صورة أو PDF)</span><input id="pi-f" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">إرفاق</button></div></form>'); }
 };
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-go]');
@@ -843,6 +871,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); if (e.key === 'Enter') { const g = e.target.closest && e.target.closest('[data-go]'); if (g && g.tagName === 'DIV') location.hash = g.dataset.go; } });
 document.addEventListener('change', async e => {
+  if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   const t = e.target;
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-b').innerHTML = boqOptions(p, '', true); document.getElementById('nr-d').innerHTML = deptOptions(p); }
@@ -882,7 +911,11 @@ document.addEventListener('submit', async e => {
       if (error) { ui.authErr = error.message; render(); }
       else if (!data.session) { ui.authMode = 'login'; ui.authErr = ''; render(); toast('أرسلنا رسالة تأكيد لبريدك. أكّده ثم سجّل دخول.'); }
     } else if (kind === 'newUser') {
-      if (await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: v('nu-dept') }, 'أُضيف الموظف ويقدر يدخل الحين')) { f.reset(); refresh(); }
+      const ds = checkedDepts('nu-dept'), res = await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: ds[0] || '' }, 'أُضيف الموظف ويقدر يدخل الحين');
+      if (res) { if (res.id && ds.length > 1) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
+    } else if (kind === 'pcInv') {
+      const path = await upload(fileOf('pi-f'), 'petty'); if (!path) return;
+      await run(sb.rpc('attach_petty_invoice', { p_id: f.dataset.v, p_path: path }), 'انرفقت الفاتورة وتقفل الطلب'); closeModal(); refresh();
     } else if (kind === 'resetPass') {
       if (await callFn({ action: 'password', id: f.dataset.v, password: v('rp') }, 'تم تغيير كلمة المرور')) closeModal();
     } else if (kind === 'req') {
@@ -951,19 +984,20 @@ function render() {
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
   const sec = h.startsWith('p-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
+  if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
   root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
     items.map(([k, l, i]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + l + badge(k) + '</a>').join('') +
-    '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
+    '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
     '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + greet() + views() + '</div></main>' +
     '<nav class="bnav">' + items.filter(x => x[0] !== 'users').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
 }
 
 function greet() {
   const hr = new Date().getHours(), first = String(me.full_name || '').trim().split(/\s+/)[0] || '';
-  return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' ' + esc(first) : '') + '</b><span class="muted small">' + ROLES[me.role] + (me.dept ? ' · ' + DEPTS[me.dept] : '') + ' · ' + new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
+  return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' ' + esc(first) : '') + '</b><span class="muted small">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + ' · ' + new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
 }
 async function boot(sess) {
   session = sess; me = null; render();
