@@ -137,9 +137,12 @@ function myQueue() {
   return { reqs, pc, sched, projs, vos, inv, n: reqs.length + pc.length + sched.length + projs.length + vos.length + inv.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
+// One short line per item so the native dropdown stays narrow and readable: "2.3 · Structural design and anal… (600 ر.ع)".
 function boqOptions(p, sel, allowNone) {
+  const one = t => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 55 ? x.slice(0, 53) + '…' : x; };
   let h = allowNone ? '<option value="">خارج BOQ / غير محدد</option>' : '';
-  p.sections.forEach(([s, n]) => { const it = p.boq.filter(b => b.s === s); if (!it.length) return; h += '<optgroup label="' + esc(s + ' - ' + n) + '">'; it.forEach(b => { h += '<option value="' + esc(b.id) + '"' + (b.id === sel ? ' selected' : '') + '>' + esc(b.c + ' ' + b.d) + '</option>'; }); h += '</optgroup>'; });
+  const secs = p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i));
+  secs.forEach(([s, n]) => { const it = p.boq.filter(b => b.s === s); if (!it.length) return; h += '<optgroup label="' + esc(one(s + ' · ' + (n || 'قسم ' + s))) + '">'; it.forEach(b => { h += '<option value="' + esc(b.id) + '"' + (b.id === sel ? ' selected' : '') + ' title="' + esc(b.d) + '">' + esc(b.c + ' · ' + one(b.d)) + '</option>'; }); h += '</optgroup>'; });
   return h;
 }
 function projOptions(sel) { return S.projects.filter(p => p.status !== 'closed').map(p => '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(pName(p)) + '</option>').join(''); }

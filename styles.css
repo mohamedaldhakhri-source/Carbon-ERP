@@ -318,3 +318,4 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .logf .fld{min-width:140px;flex:1}
 .logt td{vertical-align:top}
 .logt s{text-decoration:line-through}
+.fld select{max-width:100%;text-overflow:ellipsis}
