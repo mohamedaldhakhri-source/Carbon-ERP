@@ -36,7 +36,14 @@
           }
         }
       });
-      if (map.desc != null && (map.qty != null || map.total != null)) return { row: r, map };
+      if (map.desc != null && (map.qty != null || map.total != null)) {
+        // A garbled "Unit Rate" heading (scans): the unnamed column just before the total is the rate.
+        if (map.rate == null && map.total != null) {
+          const used = Object.values(map), after = Math.max(map.qty == null ? -1 : map.qty, map.unit == null ? -1 : map.unit);
+          for (let i = map.total - 1; i > after; i--) if (!used.includes(i)) { map.rate = i; break; }
+        }
+        return { row: r, map };
+      }
     }
     return null;
   }

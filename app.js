@@ -535,9 +535,9 @@ function vNewProject() {
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
     '<div class="fr"><label class="fld"><span>تاريخ البداية</span><input data-npf="start" id="np-start" type="date" required value="' + fv('start') + '"></label><label class="fld"><span>موعد التسليم المتفق عليه</span><input data-npf="end" id="np-end" type="date" required value="' + fv('end') + '"></label></div>' +
     '</div>';
-  h += '<div class="card"><h2>2. جدول الكميات BOQ والمدد</h2>' +
+  h += '<div class="card"><h2>2. جدول الكميات BOQ والمدد</h2>' + (!f.start || !f.end ? '<div class="flag warn">اكتب تاريخ البداية وموعد التسليم في بيانات المشروع فوق قبل ما ترفع الملف، عشان النظام يعطي كل بند مدته الصحيحة.</div>' : '') +
     '<div class="fr"><label class="fld"><span>ملف BOQ (Excel هو الأفضل، أو PDF أو صورة)</span><input id="np-file" type="file" accept=".xlsx,.xls,.csv,.pdf,image/*"></label><div class="fld"><span>&nbsp;</span><button type="button" class="btn pri" data-act="npAnalyze"' + (n.busy ? ' disabled' : '') + '>' + (n.busy ? esc(n.busy) : 'اقرأ الملف') + '</button></div></div>' +
-    '<span class="hint">ملف Excel أو PDF المصدّر من Excel ينقرأ فوراً. PDF المصوّر أو الصورة ينقرأ داخل البرنامج بعد، بس ياخذ حوالي 20 ثانية لكل صفحة.</span>' +
+    '<span class="hint">ملف Excel أو PDF المصدّر من Excel ينقرأ فوراً. PDF المصوّر أو الصورة ينقرأ داخل البرنامج بعد، بس ياخذ وقت أطول (تقريباً 5 إلى 15 ثانية للصفحة حسب جهازك).</span>' +
     '<details' + (f.paste ? ' open' : '') + '><summary class="hint" style="cursor:pointer">أو الصق الجدول من Excel</summary><textarea data-npf="paste" id="np-boq" class="paste" placeholder="رقم البند\tالوصف\tالكمية\tالوحدة\tسعر الوحدة\tالإجمالي\n2\tأعمال التصميم\n2.1\tالتصميم المعماري المبدئي\t1\tمقطوعية\t3000\t3000">' + fv('paste') + '</textarea>' +
     '<span class="hint">انسخ الجدول من Excel مع سطر العناوين. النظام يتعرف على الأعمدة بنفسه.</span><div><button type="button" class="btn sm" data-act="npPaste">اقرأ الملصق</button></div></details>' +
     boqReview(n) + '<div class="fld" style="margin-top:14px"><span>' + (n.items.length ? 'الأقسام المشاركة: تحددت تلقائياً من توزيع البنود، وتقدر تعدلها' : 'الأقسام المشاركة: تتحدد تلقائياً بعد قراءة ملف BOQ، أو اخترها بنفسك') + '</span><div class="chk">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" name="np-dept" value="' + k + '"' + (f.depts.includes(k) ? ' checked' : '') + '>' + l + '</label>').join('') + '</div></div></div>';
@@ -634,8 +634,14 @@ function npTake(n, res, via) {
   n.sections = res.sections; n.items = res.items; n.stated = res.stated || 0; n.warnings = res.warnings || []; n.notes = res.notes || ''; n.via = via;
   BOQ.classify(n.sections, n.items, true); addDepts(n); npPlan(n);
 }
+function npDatesOk(n) {
+  if (!n.f.start || !n.f.end) { toast('اكتب تاريخ البداية وموعد التسليم فوق أولاً، عشان تتوزع مدد البنود صح', true); const el = document.getElementById(n.f.start ? 'np-end' : 'np-start'); if (el) el.focus(); return false; }
+  if (n.f.end < n.f.start) { toast('موعد التسليم قبل تاريخ البداية', true); return false; }
+  return true;
+}
 async function npAnalyze() {
   const n = npState(); npSync();
+  if (!npDatesOk(n)) return;
   const f = (document.getElementById('np-file') || {}).files; const file = f && f[0];
   if (!file) return toast('اختر ملف BOQ أولاً', true);
   if (file.size > 20 * 1024 * 1024) return toast('حجم الملف أكبر من 20 ميجا', true);
@@ -653,7 +659,7 @@ async function npAnalyze() {
       else {
         // Scanned PDF: read it inside the app first (free); Claude is only the fallback.
         let rows = null;
-        try { const doc = await pdfDoc(file); busy('الملف مصوّر، جاري قراءة الصور…'); rows = await BOQOCR.readPdf(doc, (p, t) => busy('قراءة الصفحة ' + p + ' من ' + t + '…')); } catch (e) { console.warn(e); }
+        try { const doc = await pdfDoc(file); busy('الملف مصوّر، جاري قراءة الصور…'); rows = await BOQOCR.readPdf(doc, (p, t) => busy('قُرئت ' + p + ' من ' + t + ' صفحات…')); } catch (e) { console.warn(e); }
         const ocr = rows ? BOQ.parseRows(rows) : null;
         if (ocr && ocr.items.length) { npTake(n, ocr, 'الملف مصوّر وانقرأ داخل البرنامج في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام قبل الحفظ'); toast('تمت قراءة ' + n.items.length + ' بند'); n.busy = ''; render(); return; }
         busy('القراءة بالذكاء الاصطناعي…');
@@ -678,7 +684,7 @@ const A2 = {
   npReset: () => { ui.np = null; render(); },
   npAnalyze: () => npAnalyze(),
   npPaste: () => {
-    const n = npState(); npSync(); const r = BOQ.parseText(n.f.paste || '');
+    const n = npState(); npSync(); if (!npDatesOk(n)) return; const r = BOQ.parseText(n.f.paste || '');
     if (!r.items.length) return toast('ما قدرت أقرأ بنود من النص الملصق. انسخ الجدول مع سطر العناوين', true);
     npTake(n, r, 'انقرأ من النص الملصق'); render();
   },
@@ -833,7 +839,7 @@ document.addEventListener('change', async e => {
   if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
   if (t.dataset.npd != null && ui.np) { npSync(); ui.np.items[+t.dataset.npd][t.dataset.k] = t.value; render(); return; }
   if (t.dataset.ted != null && ui.ted) { ui.ted.list[+t.dataset.ted][t.dataset.k] = t.value; render(); return; }
-  if ((t.id === 'np-start' || t.id === 'np-end') && ui.np && ui.np.items.length) { npSync(); npPlan(ui.np); render(); return; }
+  if ((t.id === 'np-start' || t.id === 'np-end') && ui.np) { npSync(); if (ui.np.items.length) npPlan(ui.np); render(); return; }
   if (t.id === 'np-gov') { npSync(); ui.np.f.wil = ''; render(); return; }
   if (t.dataset.npi != null && ui.np) { npSync(); ui.np.items[+t.dataset.npi].dept = t.value || null; addDepts(ui.np); render(); return; }
   if (t.dataset.nps != null && ui.np && t.value) { npSync(); ui.np.items.forEach(i => { if (i.sec === t.dataset.nps) i.dept = t.value; }); addDepts(ui.np); render(); return; }

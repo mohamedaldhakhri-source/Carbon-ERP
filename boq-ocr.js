@@ -8,15 +8,18 @@
   const TARGET_W = 2600; // page width in pixels for OCR: big enough for small table text
   const AR = /[؀-ۿ]/;
 
-  let workerP = null;
+  // Workers by language. English-only reading is about twice as fast, so Arabic is added only when the file has Arabic.
+  const pools = {};
   function loadTess() {
     if (root.Tesseract) return Promise.resolve(root.Tesseract);
     return new Promise((ok, bad) => { const s = document.createElement('script'); s.src = TESS; s.onload = () => ok(root.Tesseract); s.onerror = () => bad(new Error('ما قدرت أحمّل قارئ الصور. تأكد من الإنترنت')); document.head.appendChild(s); });
   }
-  async function worker() {
-    if (!workerP) workerP = loadTess().then(T => T.createWorker(['eng', 'ara'], 1, { logger: () => {} })).then(async w => { await w.setParameters({ preserve_interword_spaces: '1' }); return w; });
-    try { return await workerP; } catch (e) { workerP = null; throw e; }
+  function workers(langs, n) {
+    const key = langs.join('+'), list = pools[key] = pools[key] || [];
+    while (list.length < n) list.push(loadTess().then(T => T.createWorker(langs, 1, { logger: () => {} })).then(async w => { await w.setParameters({ preserve_interword_spaces: '1' }); return w; }));
+    return Promise.all(list.slice(0, n)).catch(e => { delete pools[key]; throw e; });
   }
+  const cores = () => Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
 
   // Ruled lines: rows of pixels that are mostly dark are horizontal lines, columns are vertical lines.
   function grid(ctx, W, Hh) {
@@ -90,10 +93,9 @@
     return { rows, cols: null };
   }
 
-  async function readCanvas(canvas, prevCols) {
+  async function readCanvas(canvas, prevCols, w) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const g = grid(ctx, canvas.width, canvas.height);
-    const w = await worker();
     const { data } = await w.recognize(canvas);
     let words = data.words || [];
     let out = rowsOf(words, g, prevCols), fixedN = 0;
@@ -122,6 +124,7 @@
     }
     out.fixed = fixedN;
     root.BOQOCR.last = { w: canvas.width, h: canvas.height, hs: g && g.hs.length, vs: g && g.vs && g.vs.map(Math.round), words: (data.words || []).length, sample: (data.text || '').slice(0, 300), rows: out.rows.length, fixed: out.fixed };
+    out.arabic = (data.words || []).filter(x => x.confidence > 60 && AR.test(x.text)).length / Math.max(1, (data.words || []).filter(x => x.confidence > 60).length);
     return out;
   }
 
@@ -167,19 +170,30 @@
     return rows;
   }
 
+  async function pageCanvas(pdfDoc, p) {
+    const page = await pdfDoc.getPage(p); const v1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(6, TARGET_W / v1.width) });
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    return c;
+  }
+  // Page 1 is read in Arabic + English to learn the file's language; the other pages run in parallel on several workers.
   async function readPdf(pdfDoc, progress) {
-    const all = []; let cols = null;
-    for (let p = 1; p <= pdfDoc.numPages; p++) {
-      progress && progress(p, pdfDoc.numPages);
-      const page = await pdfDoc.getPage(p); const v1 = page.getViewport({ scale: 1 });
-      const vp = page.getViewport({ scale: Math.min(6, TARGET_W / v1.width) });
-      const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
-      const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-      await page.render({ canvasContext: ctx, viewport: vp }).promise;
-      const r = await readCanvas(c, cols); if (r.cols && (!cols || r.cols.length === cols.length)) cols = r.cols;
-      all.push(...r.rows);
+    const N = pdfDoc.numPages, out = new Array(N); let done = 0;
+    const tick = () => progress && progress(done, N);
+    tick();
+    const [w0] = await workers(['eng', 'ara'], 1);
+    const first = await readCanvas(await pageCanvas(pdfDoc, 1), null, w0); out[0] = first.rows; done++; tick();
+    if (N > 1) {
+      const langs = first.arabic > 0.15 ? ['eng', 'ara'] : ['eng'];
+      const ws = await workers(langs, Math.min(cores(), N - 1));
+      let next = 2;
+      await Promise.all(ws.map(async w => {
+        while (next <= N) { const p = next++; const r = await readCanvas(await pageCanvas(pdfDoc, p), first.cols, w); out[p - 1] = r.rows; done++; tick(); }
+      }));
     }
-    return fixCodes(dropRepeatHeaders(all));
+    return fixCodes(dropRepeatHeaders([].concat(...out)));
   }
 
   async function readImage(file, progress) {
@@ -187,7 +201,8 @@
     const img = await createImageBitmap(file); const s = Math.max(1, Math.min(3, TARGET_W / img.width));
     const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
     const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
-    return fixCodes(dropRepeatHeaders((await readCanvas(c, null)).rows));
+    const [w] = await workers(['eng', 'ara'], 1);
+    return fixCodes(dropRepeatHeaders((await readCanvas(c, null, w)).rows));
   }
 
   root.BOQOCR = { readPdf, readImage, fixCodes };
