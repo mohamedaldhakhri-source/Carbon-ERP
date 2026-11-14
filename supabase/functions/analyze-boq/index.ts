@@ -134,8 +134,18 @@ Deno.serve(async (req) => {
     const { data: me } = await admin.from("profiles").select("role").eq("id", who.user.id).single();
     if (!me || !["admin", "owner", "gm"].includes(me.role)) return json({ error: "التحليل الذكي لمدير النظام وصاحب الشركة والمدير العام" }, 403);
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) return json({ error: "التحليل الذكي غير مفعّل بعد: مفتاح Claude API غير مضاف في Supabase" }, 503);
+    // Accept the key even if the secret name has a typo or stray space: any secret whose value looks like an Anthropic key.
+    const env = Deno.env.toObject();
+    const keyName = Object.keys(env).find((k) => k.trim().toUpperCase() === "ANTHROPIC_API_KEY" && env[k].trim()) ||
+      Object.keys(env).find((k) => env[k].trim().startsWith("sk-ant-"));
+    const apiKey = keyName ? env[keyName].trim() : "";
+    if (!apiKey) {
+      // Names only, never values, so the admin can see what Supabase actually holds.
+      const names = Object.keys(env).filter((k) => !/^(SUPABASE_|DENO_|SB_|PATH$|HOME$|HOSTNAME$|LANG$|PWD$|TZ$|EDGE_|PORT$|VERIFY_JWT$|_)/.test(k));
+      console.log("analyze-boq: no Anthropic key. custom secret names:", JSON.stringify(names));
+      return json({ error: "مفتاح Claude API غير موجود في Supabase. الأسرار الموجودة: " + (names.join("، ") || "لا شي") }, 503);
+    }
+    if (keyName !== "ANTHROPIC_API_KEY") console.log("analyze-boq: using key from secret named", JSON.stringify(keyName));
     const client = new Anthropic({ apiKey });
 
     const body = (await req.json()) as Body;
