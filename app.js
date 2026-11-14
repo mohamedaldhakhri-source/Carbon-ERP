@@ -58,7 +58,7 @@ const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
 const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
-const KIND = { gov: 'حكومي', company: 'شركات', private: 'قطاع خاص' };
+const KIND = { gov: 'حكومي', company: 'شركات', private: 'خاص' };
 const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
 const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
@@ -226,7 +226,7 @@ function views() {
   if (h === 'users') return vUsers();
   return vDash();
 }
-const segFilter = () => '<div class="seg" role="group" aria-label="نوع المشروع">' + [['all', 'الكل'], ['gov', 'حكومي'], ['company', 'شركات'], ['private', 'قطاع خاص']].map(([k, l]) => '<button data-act="filter" data-v="' + k + '" class="' + (ui.filter === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+const segFilter = () => '<div class="seg" role="group" aria-label="نوع المشروع">' + [['all', 'الكل'], ['gov', 'حكومي'], ['company', 'شركات'], ['private', 'خاص']].map(([k, l]) => '<button data-act="filter" data-v="' + k + '" class="' + (ui.filter === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
 
 function vDash() {
   const all = S.projects.filter(p => ui.filter === 'all' || p.kind === ui.filter);
@@ -567,7 +567,7 @@ function clientFields(f, n) {
   if (kind === 'gov') return '<div class="fr"><label class="fld"><span>الجهة الحكومية (العميل)</span><input data-npf="client" id="np-client" value="' + fv('client') + '" placeholder="مثال: وزارة التراث والسياحة"></label></div>';
   if (kind === 'company') return '<div class="sub-card"><b class="small">بيانات الشركة</b><div class="fr"><label class="fld"><span>اسم الشركة</span><input data-npf="client" id="np-client" required value="' + fv('client') + '"></label><label class="fld"><span>رقم السجل التجاري</span><input data-npf="cCr" id="np-cr" dir="ltr" value="' + fv('cCr') + '"></label></div>' +
     '<div class="fr"><label class="fld"><span>رقم الهاتف</span><input data-npf="cPhone" id="np-phone" type="tel" dir="ltr" required value="' + fv('cPhone') + '" placeholder="9XXXXXXX"></label></div></div>';
-  return '<div class="sub-card"><b class="small">بيانات العميل (قطاع خاص)</b><div class="fr"><label class="fld"><span>اسم العميل</span><input data-npf="client" id="np-client" required value="' + fv('client') + '"></label><label class="fld"><span>رقم الهاتف</span><input data-npf="cPhone" id="np-phone" type="tel" dir="ltr" required value="' + fv('cPhone') + '" placeholder="9XXXXXXX"></label></div>' +
+  return '<div class="sub-card"><b class="small">بيانات العميل</b><div class="fr"><label class="fld"><span>اسم العميل</span><input data-npf="client" id="np-client" required value="' + fv('client') + '"></label><label class="fld"><span>رقم الهاتف</span><input data-npf="cPhone" id="np-phone" type="tel" dir="ltr" required value="' + fv('cPhone') + '" placeholder="9XXXXXXX"></label></div>' +
     '<div class="fr"><label class="fld"><span>رقم البطاقة الشخصية</span><input data-npf="cId" id="np-cid" dir="ltr" required inputmode="numeric" value="' + fv('cId') + '"></label><label class="fld"><span>نسخة من البطاقة الشخصية' + (n.idFile ? ' ✓ ' + esc(n.idFile.name) : '') + '</span><input id="np-idf" type="file" accept="image/*,.pdf"' + (n.idFile ? '' : ' required') + '></label></div></div>';
 }
 function vNewProject() {
