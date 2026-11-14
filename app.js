@@ -138,11 +138,11 @@ function myQueue() {
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
 // One short line per item so the native dropdown stays narrow and readable: "2.3 · Structural design and anal… (600 ر.ع)".
-function boqOptions(p, sel, allowNone) {
+function boqOptions(p, sel, allowNone, dept) {
   const one = t => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 55 ? x.slice(0, 53) + '…' : x; };
   let h = allowNone ? '<option value="">خارج BOQ / غير محدد</option>' : '';
   const secs = p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i));
-  secs.forEach(([s, n]) => { const it = p.boq.filter(b => b.s === s); if (!it.length) return; h += '<optgroup label="' + esc(one(s + ' · ' + (n || 'قسم ' + s))) + '">'; it.forEach(b => { h += '<option value="' + esc(b.id) + '"' + (b.id === sel ? ' selected' : '') + ' title="' + esc(b.d) + '">' + esc(b.c + ' · ' + one(b.d)) + '</option>'; }); h += '</optgroup>'; });
+  secs.forEach(([s, n]) => { const it = p.boq.filter(b => b.s === s && (!dept || b.dept === dept || b.id === sel)); if (!it.length) return; h += '<optgroup label="' + esc(one(s + ' · ' + (n || 'قسم ' + s))) + '">'; it.forEach(b => { h += '<option value="' + esc(b.id) + '"' + (b.id === sel ? ' selected' : '') + ' title="' + esc(b.d) + '">' + esc(b.c + ' · ' + one(b.d)) + '</option>'; }); h += '</optgroup>'; });
   return h;
 }
 function projOptions(sel) { return S.projects.filter(p => p.status !== 'closed').map(p => '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(pName(p)) + '</option>').join(''); }
@@ -992,11 +992,14 @@ function deptOptions(p) { const ds = p.depts.length ? p.depts : Object.keys(DEPT
 function newReqForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   modal('طلب مواد جديد', '<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>القسم</span><select id="nr-d">' + deptOptions(p) + '</select></label></div>' +
-    '<label class="fld"><span>بند BOQ</span><select id="nr-b">' + boqOptions(p, '', true) + '</select></label>' +
+    '<label class="fld"><span>بند BOQ (بنود القسم المختار)</span><select id="nr-b"></select></label>' +
     '<div class="fld"><span>المواد المطلوبة</span><div class="line lh small muted"><span>اسم المادة</span><span>الكمية</span><span></span></div><div class="lines" id="nr-lines">' + lineRow() + '</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>' +
     '<div class="fr"><label class="fld"><span>مطلوب قبل</span><input id="nr-need" type="date" value="' + iso(new Date(today.getTime() + 5 * 864e5)) + '"></label><label class="fld"><span>ملاحظة</span><input id="nr-note" placeholder="مثال: للطابق الأرضي"></label></div>' +
     '<div class="actions"><button class="btn pri" type="submit">إرسال لرئيس القسم</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+  reqBoqFill();
 }
+// The BOQ list in a material request shows only the items of the chosen department.
+function reqBoqFill() { const pe = document.getElementById('nr-p'), de = document.getElementById('nr-d'), be = document.getElementById('nr-b'); if (!pe || !de || !be) return; const p = P(pe.value), d = de.value; const n = p.boq.filter(b => b.dept === d).length; be.innerHTML = boqOptions(p, '', true, d) + (n ? '' : '<option value="" disabled>ما في بنود BOQ لقسم ' + (DEPTS[d] || '') + ' في هذا المشروع</option>'); }
 function lineRow() { return '<div class="line"><input placeholder="وصف المادة" class="l-d" required aria-label="وصف المادة"><input type="number" min="0" step="any" placeholder="الكمية" class="l-q" required aria-label="الكمية"><button type="button" class="x" data-act="delLine" aria-label="حذف">×</button></div>'; }
 function newPettyForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
@@ -1085,7 +1088,8 @@ document.addEventListener('change', async e => {
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   const t = e.target;
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
-  if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-b').innerHTML = boqOptions(p, '', true); document.getElementById('nr-d').innerHTML = deptOptions(p); }
+  if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-d').innerHTML = deptOptions(p); reqBoqFill(); }
+  if (t.id === 'nr-d') reqBoqFill();
   if (t.id === 'pc-p') document.getElementById('pc-b').innerHTML = boqOptions(P(t.value), '', true);
   if (t.id === 'ps-g') document.getElementById('ps-w').innerHTML = wilOpts(t.value, '');
   if (t.dataset.npd != null && ui.np) { npSync(); ui.np.items[+t.dataset.npd][t.dataset.k] = t.value; render(); return; }
