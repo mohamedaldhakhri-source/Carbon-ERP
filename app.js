@@ -529,7 +529,7 @@ function vNewProject() {
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / مشروع جديد</span><h1>مشروع جديد</h1><span class="muted">ارفع ملف BOQ والنظام يقرأه ويوزع البنود على الأقسام ويعطي كل بند مدة. تراجع كل شي قبل الحفظ.</span></div><div class="actions"><button class="btn" data-act="npReset">بدء من جديد</button></div></div>' +
     '<form class="f" data-form="project">' +
     '<div class="card"><h2>1. بيانات المشروع</h2>' +
-    '<div class="fr"><label class="fld"><span>كود المشروع</span><input data-npf="code" id="np-code" value="' + fv('code') + '" dir="ltr" placeholder="يتولد تلقائياً مثل ' + nextCode() + '"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
+    '<div class="fr"><label class="fld"><span>كود المشروع</span><input id="np-code" value="' + nextCode() + '" dir="ltr" readonly tabindex="-1" class="ro" title="يتولد تلقائياً عند الحفظ"></label><label class="fld"><span>نوع المشروع</span><select data-npf="type" id="np-type"><option value="gov"' + (f.type === 'gov' ? ' selected' : '') + '>حكومي</option><option value="private"' + (f.type === 'private' ? ' selected' : '') + '>خاص</option></select></label></div>' +
     '<div class="fr"><label class="fld"><span>اسم المشروع الكامل</span><input data-npf="name" id="np-name" required value="' + fv('name') + '"></label><label class="fld"><span>اسم مختصر (يظهر في القوائم)</span><input data-npf="short" id="np-short" required value="' + fv('short') + '"></label></div>' +
     '<div class="fr"><label class="fld"><span>العميل</span><input data-npf="client" id="np-client" value="' + fv('client') + '"></label><label class="fld"><span>تفاصيل الموقع (المنطقة أو العنوان)</span><input data-npf="loc" id="np-loc" value="' + fv('loc') + '" placeholder="مثال: الخوض، قرب جامعة السلطان قابوس"></label></div>' +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select data-npf="gov" id="np-gov" required>' + govOpts(f.gov) + '</select></label><label class="fld"><span>الولاية</span><select data-npf="wil" id="np-wil" required>' + wilOpts(f.gov, f.wil) + '</select></label></div>' +
@@ -773,7 +773,7 @@ function newVOForm(pid) {
 }
 function projStatusForm(pid) {
   const p = P(pid);
-  modal('بيانات وحالة المشروع', '<form class="f" data-form="pstatus" data-v="' + pid + '"><label class="fld"><span>كود المشروع</span><input id="ps-c" required dir="ltr" value="' + esc(p.code || '') + '"></label>' +
+  modal('بيانات وحالة المشروع', '<form class="f" data-form="pstatus" data-v="' + pid + '"><label class="fld"><span>كود المشروع</span><input id="ps-c" dir="ltr" readonly tabindex="-1" class="ro" value="' + esc(p.code || '') + '"></label>' +
     '<div class="fr"><label class="fld"><span>المحافظة</span><select id="ps-g">' + govOpts(p.gov) + '</select></label><label class="fld"><span>الولاية</span><select id="ps-w">' + wilOpts(p.gov, p.wil) + '</select></label></div>' +
     '<label class="fld"><span>تفاصيل الموقع</span><input id="ps-l" value="' + esc(p.loc || '') + '"></label><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
     '<label class="fld"><span>سبب التوقف (إن وجد)</span><input id="ps-r" value="' + esc(p.stopReason || '') + '"></label>' +
@@ -898,18 +898,15 @@ document.addEventListener('submit', async e => {
       await run(sb.from('variations').update({ approval_path: path, client_status: 'approved' }).eq('id', f.dataset.v), 'انرفقت الموافقة، والعمل الإضافي عند المدير العام للاعتماد');
       closeModal(); refresh();
     } else if (kind === 'pstatus') {
-      const code = v('ps-c').trim();
-      if (S.projects.some(x => x.id !== f.dataset.v && String(x.code || '').toUpperCase() === code.toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
-      await run(sb.from('projects').update({ code, status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e'), governorate: v('ps-g') || null, wilayat: v('ps-w') || null, location_note: v('ps-l') || null }).eq('id', f.dataset.v), 'تم الحفظ');
+      await run(sb.from('projects').update({ status: v('ps-s'), stop_reason: v('ps-r') || null, end_date: v('ps-e'), governorate: v('ps-g') || null, wilayat: v('ps-w') || null, location_note: v('ps-l') || null }).eq('id', f.dataset.v), 'تم الحفظ');
       closeModal(); refresh();
     } else if (kind === 'project') {
       const n = npState(); npSync(); const pf = n.f;
       if (!pf.depts.length) { toast('اختر قسم واحد على الأقل', true); return; }
       if (pf.end < pf.start) { toast('موعد التسليم قبل تاريخ البداية', true); return; }
-      if ((pf.code || '').trim() && S.projects.some(x => String(x.code || '').toUpperCase() === pf.code.trim().toUpperCase())) { toast('كود المشروع مستخدم لمشروع ثاني', true); return; }
       const badT = n.items.find(i => (i.start || i.end) && (!i.start || !i.end || i.end < i.start));
       if (badT) { toast('راجع تواريخ البند ' + badT.code + ': النهاية لازم بعد البداية', true); return; }
-      const pr = await run(sb.from('projects').insert(Object.assign((pf.code || '').trim() ? { code: pf.code.trim() } : {}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
+      const pr = await run(sb.from('projects').insert(Object.assign({}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: pf.type, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));
