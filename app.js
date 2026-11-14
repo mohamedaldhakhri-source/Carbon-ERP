@@ -16,10 +16,11 @@ const OMAN = {
   'الظاهرة': ['عبري', 'ينقل', 'ضنك'],
   'الوسطى': ['هيماء', 'محوت', 'الدقم', 'الجازر']
 };
-const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', finance: 'المالية', pending: 'بانتظار التفعيل' };
+const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', qs: 'مهندس الكميات (QS)', finance: 'المالية', pending: 'بانتظار التفعيل' };
 const STAGES = [
   { k: 'dept', l: 'موافقة رئيس القسم', role: 'head' },
-  { k: 'procurement', l: 'تحديد المواد والأسعار', role: 'procurement' },
+  { k: 'procurement', l: 'التسعير والكوتيشن', role: 'procurement' },
+  { k: 'qs', l: 'مراجعة مهندس الكميات (QS)', role: 'qs' },
   { k: 'gm', l: 'اعتماد المدير العام', role: 'gm' },
   { k: 'po', l: 'إصدار أمر الشراء', role: 'procurement' },
   { k: 'done', l: 'أُرسل PO للمورّد' }
@@ -39,7 +40,7 @@ const ico = k => '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 
 /* ---------- state ---------- */
 let session = null, me = null;
-let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [] };
+let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [], suppliers: [] };
 let ui = { filter: 'all', tab: 'boq', reqFilter: 'mine', authMode: 'login', authErr: '' };
 
 /* ---------- helpers ---------- */
@@ -68,6 +69,10 @@ const canDates = p => me && ['site', 'head', 'gm', 'owner', 'admin'].includes(me
 const myDepts = (u = me) => u && u.depts && u.depts.length ? u.depts : u && u.dept ? [u.dept] : [];
 const deptNames = (u = me) => myDepts(u).map(d => DEPTS[d]).join('، ');
 const inMyDept = d => !myDepts().length || myDepts().includes(d);
+const canSeeSup = () => me && ['admin', 'owner', 'gm', 'procurement', 'qs', 'finance'].includes(me.role);
+const canEditSup = () => me && ['admin', 'owner', 'gm', 'procurement'].includes(me.role);
+const SUP = id => S.suppliers.find(x => x.id === id);
+const supOptions = () => '<option value="">اختر المورّد من القائمة</option>' + S.suppliers.filter(x => x.active).map(x => '<option value="' + x.id + '">' + esc(x.name) + ' · سجل ' + esc(x.cr) + '</option>').join('');
 const canFinance = () => me && ['finance', 'admin', 'gm', 'owner'].includes(me.role);
 const myItem = b => me.role !== 'head' || inMyDept(b.dept);
 const planN = p => p.boq.filter(b => b.ps && b.pe).length || p.tasks.length;
@@ -118,7 +123,7 @@ function health(p) {
 function stageInfo(r) {
   if (r.stage === 'rejected') return { l: 'مرفوض', c: 'p-bad' };
   if (r.stage === 'done') return { l: 'أُرسل PO', c: 'p-ok' };
-  if (r.clarify) return { l: 'المدير العام يطلب توضيح من ' + (r.clarify === 'dept' ? 'رئيس القسم' : 'المشتريات'), c: 'p-warn' };
+  if (r.clarify) return { l: askerName(r) + ' يطلب توضيح من ' + clName(r.clarify), c: 'p-warn' };
   const s = STAGES.find(x => x.k === r.stage); return { l: 'بانتظار: ' + s.l, c: r.stage === 'dept' ? 'p-idle' : 'p-warn' };
 }
 function canActOn(r) {
@@ -176,9 +181,10 @@ async function loadAll() {
   const q = t => sb.from(t).select('*');
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
-    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at')]);
+    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at'), q('suppliers').order('name')]);
   const bad = res.find(r => r.error); if (bad) throw bad.error;
-  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs] = res.map(r => r.data);
+  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups] = res.map(r => r.data);
+  S.suppliers = (sups || []).map(x => ({ id: x.id, name: x.name, cr: x.cr_no, crPath: x.cr_path, act: x.activity, contact: x.contact_name, phone: x.phone, email: x.email, addr: x.address, bank: x.bank_name, accName: x.account_name, acc: x.bank_account, iban: x.iban, notes: x.notes, active: x.active }));
   S.docs = docs.map(d => ({ id: d.id, pid: d.project_id, kind: d.kind, title: d.title, path: d.path, byId: d.uploaded_by, date: d.created_at }));
   S.profiles = profs;
   const codeOf = {}; items.forEach(b => { codeOf[b.id] = b.code; });
@@ -195,9 +201,9 @@ async function loadAll() {
   S.pending = allP.filter(p => p.approval !== 'approved' && (canApprove() || p.reqBy === me.id));
   S.requests = reqs.map(r => ({
     id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
-    date: r.created_at, need: r.need_by, note: r.note, stage: r.stage, clarify: r.clarify, po: r.po_no ? { no: r.po_no, date: r.po_date } : null,
+    date: r.created_at, need: r.need_by, note: r.note, stage: r.stage, clarify: r.clarify, clarifyBy: r.clarify_by || 'gm', po: r.po_no ? { no: r.po_no, date: r.po_date } : null,
     items: ritems.filter(i => i.request_id === r.id).map(i => ({ id: i.id, d: i.description, q: +i.qty, u: i.unit, pr: i.unit_price == null ? null : +i.unit_price })),
-    quotes: quotes.filter(x => x.request_id === r.id).map(x => ({ id: x.id, sup: x.supplier, amt: +x.amount, terms: x.terms, days: x.delivery_days, sel: x.selected, file: x.file_path })),
+    quotes: quotes.filter(x => x.request_id === r.id).map(x => ({ id: x.id, sup: x.supplier, amt: +x.amount, terms: x.terms, days: x.delivery_days, sel: x.selected, file: x.file_path, supId: x.supplier_id })),
     hist: hist.filter(h => h.request_id === r.id).map(h => ({ t: h.created_at, by: h.actor_name, role: h.role, a: h.action, note: h.note }))
   }));
   S.petty = petty.map(c => ({ id: c.id, no: c.no, pid: c.project_id, boq: c.boq_item_id ? codeOf[c.boq_item_id] : null, amt: +c.amount, d: c.description, by: nameOf(c.requested_by), date: c.created_at, status: c.status, file: c.receipt_path, note: c.decision_note, byId: c.requested_by, inv: c.invoice_path, invAt: c.invoice_at, decAt: c.decided_at }));
@@ -231,6 +237,7 @@ function views() {
   if (h.startsWith('r-')) return vRequest(h.slice(2));
   if (h === 'petty') return vPetty();
   if (h === 'expenses') return vExpenses();
+  if (h === 'suppliers') return vSuppliers();
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
   if (h === 'log') return vLog();
@@ -353,7 +360,7 @@ function vRequests() {
     '<div class="card"><div class="ch"><div class="seg">' + [['mine', 'بانتظار إجرائي (' + q.reqs.length + ')'], ['me', 'طلباتي'], ['open', 'قيد الإجراء'], ['done', 'صدر لها PO'], ['all', 'الكل']].map(([k, l]) => '<button data-act="reqFilter" data-v="' + k + '" class="' + (f === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' + reqTable(list, true) + '</div>' +
     '<div class="card"><h2>مسار الطلب</h2><div class="steps">' + STAGES.map((s, i) => '<div class="step"><span class="dot">' + (i + 1) + '</span>' + s.l + (s.role ? '<span class="muted small">' + ROLES[s.role] + '</span>' : '') + '</div>').join('') + '</div></div>';
 }
-function rejStage(r) { const last = r.hist[r.hist.length - 1] || {}; return ({ head: 'dept', procurement: 'procurement', finance: 'finance', gm: 'gm' })[last.role] || 'dept'; }
+function rejStage(r) { const last = r.hist[r.hist.length - 1] || {}; return ({ head: 'dept', procurement: 'procurement', qs: 'qs', finance: 'finance', gm: 'gm' })[last.role] || 'dept'; }
 function vRequest(id) {
   const r = R(id); if (!r) return '<div class="empty">الطلب غير موجود</div>';
   const p = P(r.pid), si = stageInfo(r), idx = STAGES.findIndex(s => s.k === r.stage);
@@ -392,27 +399,34 @@ function quotesTable(r, edit) {
   if (!r.quotes.length) return '<div class="empty">لم تُسجّل عروض أسعار بعد.</div>';
   return '<div class="tbl"><table><thead><tr>' + (edit ? '<th>اختيار</th>' : '') + '<th>المورّد</th><th class="n">المبلغ</th><th>الدفع</th><th class="n">مدة التوريد</th><th>الكوتيشن</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' + r.quotes.map(q => '<tr' + (q.sel && !edit ? ' style="font-weight:600"' : '') + '>' + (edit ? '<td><input type="radio" name="qsel" data-act="qsel" data-v="' + q.id + '" data-r="' + r.id + '" ' + (q.sel ? 'checked' : '') + ' style="width:auto" aria-label="اختيار ' + esc(q.sup) + '"></td>' : '') + '<td>' + esc(q.sup) + (q.sel && !edit ? ' <span class="pill p-ok">المختار</span>' : '') + '</td><td class="n">' + money(q.amt) + '</td><td>' + TERMS[q.terms] + '</td><td class="n">' + q.days + ' يوم</td><td>' + (q.file ? fileLink(q.file, 'الكوتيشن') : (edit ? '<button class="btn sm" data-act="qfile" data-v="' + q.id + '">ارفق الكوتيشن</button>' : '<span style="color:var(--bad)" class="small">بدون ملف</span>')) + '</td>' + (edit ? '<td><button class="x" data-act="qdel" data-v="' + q.id + '" data-r="' + r.id + '" aria-label="حذف">×</button></td>' : '') + '</tr>').join('') + '</tbody></table></div>';
 }
+const clName = k => ({ dept: 'رئيس القسم', procurement: 'المشتريات', qs: 'مهندس الكميات (QS)' })[k] || '';
+const askerName = r => r.clarifyBy === 'qs' ? 'مهندس الكميات (QS)' : 'المدير العام';
 function clarifyNote(r) {
   if (!r.clarify) return '';
-  const x = r.hist.slice().reverse().find(h => /طلب المدير العام توضيح/.test(h.a)) || {};
-  return '<div class="flag warn"><b>المدير العام يطلب توضيح من ' + (r.clarify === 'dept' ? 'رئيس القسم' : 'المشتريات') + ':</b> ' + esc(x.note || '') + '</div>';
+  const x = r.hist.slice().reverse().find(h => /طلب المدير العام توضيح|أرجع مهندس الكميات/.test(h.a)) || {};
+  return '<div class="flag warn"><b>' + askerName(r) + ' يطلب توضيح من ' + clName(r.clarify) + ':</b> ' + esc(x.note || '') + '</div>';
+}
+function answerPanel(r) {
+  return '<div class="panel"><h2>رد على استيضاح ' + askerName(r) + '</h2><span class="small">اكتب التوضيح المطلوب. بعد الإرسال يرجع الطلب مباشرة ل' + askerName(r) + '.</span><label class="fld"><span>التوضيح (إلزامي)</span><textarea id="actnote" required></textarea></label><div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">إرسال التوضيح</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">رفض</button></div></div>';
 }
 function actionPanel(r, p) {
   const st = STAGES.find(s => s.k === r.stage);
   if (r.stage === 'done') return '<div class="flag ok">تم إصدار أمر الشراء ' + esc(r.po.no) + ' وإرساله للمورّد.</div>';
   if (r.stage === 'rejected') { const l = r.hist[r.hist.length - 1] || {}; return '<div class="flag bad">رُفض الطلب: ' + esc(l.note || l.a) + '</div>'; }
   const cl = clarifyNote(r);
-  if (!canActOn(r)) return cl + '<div class="panel wait"><b>بانتظار ' + ROLES[st.role] + (st.role === 'head' ? ' ' + DEPTS[r.dept] : '') + '</b><span class="muted small">' + st.l + '</span>' + (['finance', 'gm'].includes(r.stage) ? budgetCheck(r, p) : '') + '</div>';
+  if (!canActOn(r)) return cl + '<div class="panel wait"><b>بانتظار ' + ROLES[st.role] + (st.role === 'head' ? ' ' + DEPTS[r.dept] : '') + '</b><span class="muted small">' + st.l + '</span>' + (['finance', 'qs', 'gm'].includes(r.stage) ? budgetCheck(r, p) : '') + '</div>';
   const noteF = '<label class="fld"><span>ملاحظة (اختياري، وإلزامية عند الرفض)</span><textarea id="actnote" placeholder="سبب الرفض أو أي توجيه"></textarea></label>';
   const btns = (ok) => '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">' + ok + '</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">' + (r.stage === 'procurement' ? 'إلغاء الطلب' : 'رفض') + '</button></div>';
-  if (r.stage === 'dept' && r.clarify) return cl + '<div class="panel"><h2>رد على استيضاح المدير العام</h2><span class="small">اكتب التوضيح المطلوب. بعد الإرسال يرجع الطلب مباشرة للمدير العام.</span><label class="fld"><span>التوضيح (إلزامي)</span><textarea id="actnote" required></textarea></label><div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">إرسال التوضيح للمدير العام</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">رفض</button></div></div>';
+  if (r.stage === 'dept' && r.clarify) return cl + answerPanel(r);
   if (r.stage === 'dept') return '<div class="panel"><h2>موافقة رئيس القسم</h2><span class="small">راجع المواد والكميات. بعد موافقتك يروح الطلب مباشرة للمشتريات.</span>' + noteF + btns('موافقة وإرسال للمشتريات') + '</div>';
   if (r.stage === 'procurement') return cl + '<div class="panel"><h2>تسعير المواد وإرفاق الكوتيشن</h2><span class="small">اكتب اسم كل مادة بالضبط كما بتنشترى وسعر الوحدة، ثم سجّل عرض المورّد وارفق ملف الكوتيشن.</span>' +
     '<div class="tbl"><table><thead><tr><th>المادة (الاسم الدقيق)</th><th class="n">الكمية</th><th>الوحدة</th><th class="n">سعر الوحدة (ر.ع)</th></tr></thead><tbody>' + r.items.map(it => '<tr><td><input class="ri" data-ri="' + it.id + '" data-k="d" value="' + esc(it.d) + '" aria-label="اسم المادة"></td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td><td><input class="ri num" type="number" min="0" step="0.001" data-ri="' + it.id + '" data-k="price" value="' + (it.pr != null ? it.pr : '') + '" aria-label="سعر الوحدة"></td></tr>').join('') + '</tbody></table></div>' +
     '<div class="actions" style="margin:8px 0 14px"><button class="btn" data-act="reqItemsSave" data-v="' + r.id + '">حفظ المواد والأسعار</button>' + (r.items.every(it => it.pr != null) ? '<span class="muted small">إجمالي المواد ' + money(r.items.reduce((a, it) => a + it.pr * it.q, 0)) + ' ر.ع</span>' : '<span class="muted small" style="color:var(--warn)">باقي مواد بدون سعر</span>') + '</div>' +
     '<h2>عرض المورّد</h2>' + quotesTable(r, true) +
-    '<form class="f" data-form="quote" data-v="' + r.id + '"><div class="fr"><label class="fld"><span>المورّد</span><input id="q-sup" required placeholder="اسم المورّد"></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="q-amt" type="number" min="0" step="0.001" required></label></div><div class="fr"><label class="fld"><span>طريقة الدفع</span><select id="q-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label><label class="fld"><span>مدة التوريد (يوم)</span><input id="q-days" type="number" min="0" value="3"></label></div><label class="fld"><span>ملف الكوتيشن من المورّد (PDF أو صورة، إلزامي)</span><input id="q-f" type="file" accept="image/*,.pdf" required></label><div><button class="btn" type="submit">+ إضافة العرض</button></div></form>' +
-    (r.clarify ? '<label class="fld"><span>التوضيح للمدير العام (إلزامي)</span><textarea id="actnote" required></textarea></label>' : noteF) + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '" ' + (selQuote(r) && selQuote(r).file && r.items.every(it => it.pr != null) ? '' : 'disabled title="اكتب الأسعار واختر عرض المورّد وارفق الكوتيشن أولاً"') + '>' + (r.clarify ? 'إرسال التوضيح للمدير العام' : 'إرسال للمدير العام') + '</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">إلغاء الطلب</button></div></div>';
+    '<form class="f" data-form="quote" data-v="' + r.id + '"><div class="fr"><label class="fld"><span>المورّد (من قائمة الموردين)</span><select id="q-sup" required>' + supOptions() + '</select><a href="#suppliers" class="small">+ تسجيل مورّد جديد</a></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="q-amt" type="number" min="0" step="0.001" required></label></div><div class="fr"><label class="fld"><span>طريقة الدفع</span><select id="q-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label><label class="fld"><span>مدة التوريد (يوم)</span><input id="q-days" type="number" min="0" value="3"></label></div><label class="fld"><span>ملف الكوتيشن من المورّد (PDF أو صورة، إلزامي)</span><input id="q-f" type="file" accept="image/*,.pdf" required></label><div><button class="btn" type="submit">+ إضافة العرض</button></div></form>' +
+    (r.clarify ? '<label class="fld"><span>التوضيح ل' + askerName(r) + ' (إلزامي)</span><textarea id="actnote" required></textarea></label>' : noteF) + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '" ' + (selQuote(r) && selQuote(r).file && selQuote(r).supId && r.items.every(it => it.pr != null) ? '' : 'disabled title="اكتب الأسعار واختر عرض مورّد مسجل وارفق الكوتيشن أولاً"') + '>' + (r.clarify ? 'إرسال التوضيح ل' + askerName(r) : 'إرسال لمهندس الكميات (QS)') + '</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">إلغاء الطلب</button></div></div>';
+  if (r.stage === 'qs' && r.clarify) return cl + answerPanel(r);
+  if (r.stage === 'qs') { const q = selQuote(r) || {}; const sp = SUP(q.supId); return '<div class="panel"><h2>مراجعة مهندس الكميات (QS)</h2><span class="small">راجع المواد والكميات والأسعار مقابل بند BOQ وميزانية المشروع والكوتيشن. بعد موافقتك يروح للمدير العام.</span><div class="check"><div class="row"><span>المورّد</span><b>' + esc(q.sup || '—') + (sp ? ' · سجل ' + esc(sp.cr) : '') + '</b></div><div class="row"><span>المبلغ</span><b class="num">' + money(q.amt || 0) + ' ر.ع</b></div><div class="row"><span>الكوتيشن</span><b>' + (q.file ? fileLink(q.file, 'عرض الكوتيشن') : '—') + '</b></div></div>' + budgetCheck(r, p) + noteF + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">موافقة وإرسال للمدير العام</button><button class="btn" data-act="clarify" data-v="' + r.id + '">إرجاع للتوضيح</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">رفض</button></div></div>'; }
   if (r.stage === 'gm') { const q = selQuote(r); return '<div class="panel"><h2>الاعتماد النهائي للشراء</h2><div class="check"><div class="row"><span>المورّد</span><b>' + esc(q.sup) + '</b></div><div class="row"><span>المبلغ</span><b class="num">' + money(q.amt) + ' ر.ع</b></div><div class="row"><span>الدفع</span><b>' + TERMS[q.terms] + '</b></div><div class="row"><span>الكوتيشن</span><b>' + (q.file ? fileLink(q.file, 'عرض الكوتيشن') : '—') + '</b></div></div>' + budgetCheck(r, p) + noteF + '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">اعتماد الشراء</button><button class="btn" data-act="clarify" data-v="' + r.id + '">طلب توضيح</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">رفض</button></div></div>'; }
   if (r.stage === 'po') { const q = selQuote(r); return '<div class="panel"><h2>إصدار أمر الشراء</h2><span class="small">المدير العام اعتمد الشراء. أصدر أمر الشراء للمورّد <b>' + esc(q.sup) + '</b> بمبلغ <b class="num">' + money(q.amt) + '</b> ر.ع (' + TERMS[q.terms] + ').</span><div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">إصدار PO وإرساله للمورّد</button></div></div>'; }
   return '';
@@ -422,14 +436,32 @@ function poDoc(r, p) {
   const due = (() => { const d = D(r.po.date); if (q.terms === 'credit30') d.setDate(d.getDate() + 30); return iso(d); })();
   const step = re => r.hist.slice().reverse().find(h => re.test(h.a));
   const sig = (l, x) => '<div><span class="muted small">' + l + '</span><b>' + esc((x && x.by) || '—') + '</b><span class="small muted">' + (x && x.t ? fd(x.t) : '') + '</span></div>';
-  const head = step(/^وافق رئيس القسم/), proc = step(/سعّر المواد|حدد المواد/), gm = step(/^اعتمد المدير العام/), iss = step(/^أصدر أمر الشراء/);
+  const head = step(/^وافق رئيس القسم/), proc = step(/سعّر المواد|حدد المواد/), qs = step(/^راجع مهندس الكميات/), sp = SUP(q.supId), gm = step(/^اعتمد المدير العام/), iss = step(/^أصدر أمر الشراء/);
   const priced = r.items.every(it => it.pr != null), tot = r.items.reduce((a, it) => a + (it.pr || 0) * it.q, 0);
   return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">' + esc(r.po.no) + '</span><div class="muted small">التاريخ ' + fd(r.po.date) + '</div></div><div class="po-logo"><img src="assets/logo.png" alt="شعار كربون"></div></div>' +
-    '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + '</dd><dt>المشروع</dt><dd>' + esc(pName(p)) + '</dd><dt>موقع التوريد</dt><dd>' + esc(locText(p) || '—') + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + ' · قسم ' + DEPTS[r.dept] + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
+    '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + (sp ? '<div class="small muted">سجل تجاري ' + esc(sp.cr) + ' · ' + esc(sp.phone) + (sp.email ? ' · ' + esc(sp.email) : '') + '</div>' + (sp.bank || sp.iban ? '<div class="small muted">' + esc([sp.bank, sp.accName, sp.acc, sp.iban].filter(Boolean).join(' · ')) + '</div>' : '') : '') + '</dd><dt>المشروع</dt><dd>' + esc(pName(p)) + '</dd><dt>موقع التوريد</dt><dd>' + esc(locText(p) || '—') + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + ' · قسم ' + DEPTS[r.dept] + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
     '<div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th>' + (priced ? '<th class="n">سعر الوحدة</th><th class="n">الإجمالي</th>' : '') + '</tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td>' + (priced ? '<td class="n">' + money(it.pr) + '</td><td class="n">' + money(it.pr * it.q) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' +
     '<div class="ch"><span class="noprint">' + (q.file ? fileLink(q.file, 'كوتيشن المورّد') : '') + '</span><b class="num">الإجمالي ' + money(priced ? tot : q.amt) + ' ر.ع</b></div>' +
-    '<div class="po-sign">' + sig('طلب المواد', { by: r.by, t: r.date }) + (head ? sig('موافقة رئيس القسم', head) : '') + sig('التسعير والكوتيشن (المشتريات)', proc) + sig('اعتماد المدير العام', gm) + sig('أصدر أمر الشراء', iss) + '</div>' +
+    '<div class="po-sign">' + sig('طلب المواد', { by: r.by, t: r.date }) + (head ? sig('موافقة رئيس القسم', head) : '') + sig('التسعير والكوتيشن (المشتريات)', proc) + (qs ? sig('مراجعة مهندس الكميات (QS)', qs) : '') + sig('اعتماد المدير العام', gm) + sig('أصدر أمر الشراء', iss) + '</div>' +
     '<div class="noprint"><button class="btn sm" data-act="printPO">🖨 طباعة أمر الشراء</button></div></div>';
+}
+function vSuppliers() {
+  if (!canSeeSup()) return '<div class="empty">قائمة الموردين للمشتريات والإدارة.</div>';
+  const qy = (ui.supQ || '').trim().toLowerCase(), list = S.suppliers.filter(x => !qy || (x.name + ' ' + x.cr + ' ' + (x.act || '')).toLowerCase().includes(qy));
+  let h = '<div class="head"><div class="t"><h1>الموردين</h1><span class="muted">الموردين المسجلين في الشركة. المشتريات تختار المورّد من هذي القائمة فقط.</span></div><div class="actions">' + (canEditSup() ? '<button class="btn pri" data-act="supNew">+ تسجيل مورّد</button>' : '') + '</div></div>';
+  h += '<div class="card"><div class="ch" style="margin-bottom:8px"><input id="sup-q" placeholder="بحث بالاسم أو السجل التجاري أو النشاط" value="' + esc(ui.supQ || '') + '" style="max-width:360px"><span class="muted small">' + S.suppliers.filter(x => x.active).length + ' مورّد فعّال</span></div>' +
+    (list.length ? '<div class="tbl"><table><thead><tr><th>المورّد</th><th>السجل التجاري</th><th>التواصل</th><th>البيانات البنكية</th><th>الحالة</th>' + (canEditSup() ? '<th></th>' : '') + '</tr></thead><tbody>' + list.map(x => '<tr><td><b>' + esc(x.name) + '</b>' + (x.act ? '<div class="small muted">' + esc(x.act) + '</div>' : '') + '</td><td class="num">' + esc(x.cr) + '<div>' + fileLink(x.crPath, 'نسخة السجل') + '</div></td><td class="small">' + esc(x.contact || '') + '<div dir="ltr" style="text-align:end">' + esc(x.phone) + '</div>' + (x.email ? '<div dir="ltr" style="text-align:end">' + esc(x.email) + '</div>' : '') + '</td><td class="small">' + (x.bank || x.iban || x.acc ? esc(x.bank || '') + (x.accName ? '<div>' + esc(x.accName) + '</div>' : '') + (x.acc ? '<div class="num">' + esc(x.acc) + '</div>' : '') + (x.iban ? '<div class="num" dir="ltr" style="text-align:end">' + esc(x.iban) + '</div>' : '') : '<span style="color:var(--warn)">ناقصة</span>') + '</td><td>' + (x.active ? '<span class="pill p-ok">فعّال</span>' : '<span class="pill p-idle">موقوف</span>') + '</td>' + (canEditSup() ? '<td><button class="btn sm" data-act="supEdit" data-v="' + x.id + '">تعديل</button></td>' : '') + '</tr>').join('') + '</tbody></table></div>' : '<div class="empty">' + (S.suppliers.length ? 'ما في نتائج.' : 'ما في موردين مسجلين بعد.') + '</div>') + '</div>';
+  return h;
+}
+function supForm(id) {
+  const x = id ? SUP(id) : {}; const f = (k, l, v, o) => '<label class="fld"><span>' + l + '</span><input id="sp-' + k + '" value="' + esc(v || '') + '"' + (o || '') + '></label>';
+  modal(id ? 'تعديل بيانات المورّد' : 'تسجيل مورّد جديد', '<form class="f" data-form="sup" data-v="' + (id || '') + '">' +
+    '<div class="fr">' + f('n', 'اسم المورّد (الشركة)', x.name, ' required') + f('a', 'النشاط / المواد اللي يوفرها', x.act) + '</div>' +
+    '<div class="fr">' + f('cr', 'رقم السجل التجاري', x.cr, ' required dir="ltr"') + '<label class="fld"><span>نسخة السجل التجاري' + (id ? ' (اختياري، لاستبدال النسخة)' : ' (إلزامي)') + '</span><input id="sp-crf" type="file" accept="image/*,.pdf"' + (id ? '' : ' required') + '></label></div>' +
+    '<b class="small">التواصل</b><div class="fr">' + f('c', 'اسم الشخص المسؤول', x.contact) + f('ph', 'رقم الهاتف', x.phone, ' required dir="ltr"') + '</div><div class="fr">' + f('e', 'البريد الإلكتروني', x.email, ' type="email" dir="ltr"') + f('ad', 'العنوان', x.addr) + '</div>' +
+    '<b class="small">البيانات البنكية</b><div class="fr">' + f('b', 'اسم البنك', x.bank) + f('an', 'اسم صاحب الحساب', x.accName) + '</div><div class="fr">' + f('ac', 'رقم الحساب', x.acc, ' dir="ltr"') + f('ib', 'IBAN', x.iban, ' dir="ltr"') + '</div>' +
+    f('no', 'ملاحظات', x.notes) + (id ? '<label class="fld" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sp-act" style="width:auto"' + (x.active ? ' checked' : '') + '><span>المورّد فعّال (يظهر للمشتريات)</span></label>' : '') +
+    '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>', 'wide');
 }
 function vPetty() {
   const pend = S.petty.filter(c => c.status === 'pending'), tot = S.petty.filter(c => c.status === 'approved').reduce((a, c) => a + c.amt, 0);
@@ -493,12 +525,12 @@ function vInbox() {
 // "الكل" ticks every department (saved as none = all). Admin, owner and GM always cover every department.
 function deptChecks(id, sel, role) {
   if (role === 'admin') return '<span class="muted small">مسؤول النظام: يشوف كل شي ويسوي كل شي</span>';
-  if (['owner', 'gm', 'procurement', 'finance'].includes(role)) return '<span class="muted small">كل الأقسام</span>';
+  if (['owner', 'gm', 'procurement', 'qs', 'finance'].includes(role)) return '<span class="muted small">كل الأقسام</span>';
   const all = !sel.length || Object.keys(DEPTS).every(k => sel.includes(k));
   return '<div class="dchk" id="' + id + '"><label><input type="checkbox" value="*"' + (all ? ' checked' : '') + '> <b>الكل</b></label>' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (all || sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
 }
 /* ---------- activity log (admin) ---------- */
-const LOG_T = { projects: 'مشروع', boq_sections: 'قسم BOQ', boq_items: 'بند BOQ', tasks: 'مهمة', material_requests: 'طلب مواد', request_items: 'مادة في طلب', quotes: 'عرض سعر', petty_cash: 'بيتي كاش', variations: 'Variation Order', project_docs: 'مستند', profiles: 'مستخدم' };
+const LOG_T = { projects: 'مشروع', boq_sections: 'قسم BOQ', boq_items: 'بند BOQ', tasks: 'مهمة', material_requests: 'طلب مواد', request_items: 'مادة في طلب', quotes: 'عرض سعر', petty_cash: 'بيتي كاش', variations: 'Variation Order', project_docs: 'مستند', profiles: 'مستخدم', suppliers: 'مورّد' };
 const LOG_A = { insert: ['أضاف', 'p-ok'], update: ['عدّل', 'p-warn'], delete: ['حذف', 'p-bad'], login: ['سجّل دخول', 'p-idle'], logout: ['سجّل خروج', 'p-idle'], session: ['فتح البرنامج', 'p-idle'] };
 const LOG_F = { name: 'الاسم', short_name: 'الاسم المختصر', client: 'العميل', type: 'النوع', client_type: 'نوع العميل', client_phone: 'هاتف العميل', client_email: 'بريد العميل', client_id_no: 'رقم البطاقة', client_id_path: 'نسخة البطاقة/السجل', client_cr: 'السجل التجاري', status: 'الحالة', stage: 'المرحلة', amount: 'المبلغ', qty: 'الكمية', unit: 'الوحدة', rate: 'سعر الوحدة', total: 'الإجمالي', start_date: 'البداية', end_date: 'النهاية', progress: 'الإنجاز %', description: 'الوصف', dept: 'القسم', depts: 'الأقسام', role: 'الدور', full_name: 'الاسم', email: 'البريد', approval: 'الاعتماد', approval_note: 'ملاحظة الاعتماد', gm_status: 'اعتماد المدير العام', gm_note: 'ملاحظة المدير العام', client_status: 'موافقة العميل', approval_path: 'ملف الموافقة', invoice_path: 'الفاتورة', receipt_path: 'مرفق الطلب', unit_price: 'سعر الوحدة', selected: 'العرض المختار', supplier: 'المورّد', po_no: 'رقم أمر الشراء', po_date: 'تاريخ أمر الشراء', title: 'العنوان', code: 'الرقم', no: 'الرقم', governorate: 'المحافظة', wilayat: 'الولاية', location_note: 'تفاصيل الموقع', stop_reason: 'سبب التوقف', schedule_status: 'حالة الجدول', need_by: 'مطلوب قبل', note: 'ملاحظة', decision_note: 'ملاحظة القرار', terms: 'الشروط', delivery_days: 'أيام التوريد', kind: 'النوع', path: 'الملف', section_code: 'القسم', prior_spent: 'مصروف سابق' };
 const LOG_SKIP = ['id', 'created_at', 'updated_at', 'project_id', 'request_id', 'requested_by', 'created_by', 'uploaded_by', 'decided_by', 'decided_at', 'gm_by', 'gm_at', 'approval_by', 'approval_at', 'requested_at', 'sort', 'boq_item_id', 'invoice_at', 'schedule_approved_by', 'schedule_approved_at'];
@@ -1025,9 +1057,9 @@ function newReqForm(pid) {
   modal('طلب مواد جديد', '<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>القسم</span><select id="nr-d">' + deptOptions(p) + '</select></label></div>' +
     '<label class="fld"><span>بند BOQ (بنود القسم المختار)</span><select id="nr-b"></select></label>' +
     '<div class="fld"><span>المواد المطلوبة</span><div class="line lh small muted' + (pr ? ' pr' : '') + '"><span>اسم المادة</span><span>الكمية</span>' + (pr ? '<span>سعر الوحدة (ر.ع)</span><span>الإجمالي</span>' : '') + '<span></span></div><div class="lines" id="nr-lines">' + lineRow(pr) + '</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>' +
-    (pr ? '<div class="sub-card"><b>عرض المورّد (الكوتيشن)</b><div class="fr"><label class="fld"><span>المورّد</span><input id="nr-sup" required placeholder="اسم المورّد"></label><label class="fld"><span>طريقة الدفع</span><select id="nr-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label></div><div class="fr"><label class="fld"><span>مدة التوريد (يوم)</span><input id="nr-days" type="number" min="0" value="3"></label><label class="fld"><span>ملف الكوتيشن (PDF أو صورة، إلزامي)</span><input id="nr-qf" type="file" accept="image/*,.pdf" required></label></div><div class="qtot"><span>إجمالي العرض</span><b class="num" id="nr-tot">0.000 ر.ع</b></div></div>' : '') +
+    (pr ? '<div class="sub-card"><b>عرض المورّد (الكوتيشن)</b><div class="fr"><label class="fld"><span>المورّد (من قائمة الموردين)</span><select id="nr-sup" required>' + supOptions() + '</select></label><label class="fld"><span>طريقة الدفع</span><select id="nr-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label></div><div class="fr"><label class="fld"><span>مدة التوريد (يوم)</span><input id="nr-days" type="number" min="0" value="3"></label><label class="fld"><span>ملف الكوتيشن (PDF أو صورة، إلزامي)</span><input id="nr-qf" type="file" accept="image/*,.pdf" required></label></div><div class="qtot"><span>إجمالي العرض</span><b class="num" id="nr-tot">0.000 ر.ع</b></div></div>' : '') +
     '<div class="fr"><label class="fld"><span>مطلوب قبل</span><input id="nr-need" type="date" value="' + iso(new Date(today.getTime() + 5 * 864e5)) + '"></label><label class="fld"><span>ملاحظة</span><input id="nr-note" placeholder="مثال: للطابق الأرضي"></label></div>' +
-    '<div class="actions"><button class="btn pri" type="submit">' + (pr ? 'إرسال للمدير العام' : 'إرسال لرئيس القسم') + '</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>', 'wide');
+    '<div class="actions"><button class="btn pri" type="submit">' + (pr ? 'إرسال لمهندس الكميات (QS)' : 'إرسال لرئيس القسم') + '</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>', 'wide');
   reqBoqFill();
   if (pr) document.getElementById('nr-lines').addEventListener('input', reqTotals);
 }
@@ -1074,8 +1106,10 @@ const A = {
   newReq: d => newReqForm(d.p), newPetty: d => newPettyForm(d.p), newVO: d => newVOForm(d.p), projStatus: d => projStatusForm(d.p),
   close: closeModal, closeOv: (d, el, e) => { if (e.target === el) closeModal(); },
   file: d => openFile(d.v),
+  supNew: () => supForm(null),
+  supEdit: d => supForm(d.v),
   printPO: () => { document.body.classList.add('print-po'); const off = () => { document.body.classList.remove('print-po'); window.removeEventListener('afterprint', off); }; window.addEventListener('afterprint', off); window.print(); },
-  clarify: d => { const r = R(d.v); modal('طلب توضيح - ' + r.no, '<form class="f" data-form="clarify" data-v="' + r.id + '"><label class="fld"><span>من تبغى التوضيح؟</span><select id="cl-to"><option value="procurement">المشتريات (الأسعار أو المورّد أو الكوتيشن)</option><option value="dept">رئيس القسم ' + esc(DEPTS[r.dept] || '') + ' (الكميات أو الحاجة للمواد)</option></select></label><label class="fld"><span>وش التوضيح المطلوب؟</span><textarea id="cl-n" required></textarea></label><span class="muted small">بعد ما يرد، يرجع الطلب لك مباشرة.</span><div class="actions"><button class="btn pri" type="submit">إرسال</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  clarify: d => { const r = R(d.v); modal('طلب توضيح - ' + r.no, '<form class="f" data-form="clarify" data-v="' + r.id + '"><label class="fld"><span>من تبغى التوضيح؟</span><select id="cl-to"><option value="procurement">المشتريات (الأسعار أو المورّد أو الكوتيشن)</option>' + (r.stage === 'gm' ? '<option value="qs">مهندس الكميات QS (المراجعة مقابل BOQ والمشروع)</option>' : '') + '<option value="dept">رئيس القسم ' + esc(DEPTS[r.dept] || '') + ' (الكميات أو الحاجة للمواد)</option></select></label><label class="fld"><span>وش التوضيح المطلوب؟</span><textarea id="cl-n" required></textarea></label><span class="muted small">بعد ما يرد، يرجع الطلب لك مباشرة.</span><div class="actions"><button class="btn pri" type="submit">إرسال</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   qfile: d => modal('إرفاق ملف الكوتيشن', '<form class="f" data-form="qfile" data-v="' + d.v + '"><label class="fld"><span>ملف الكوتيشن (PDF أو صورة)</span><input id="qf-f" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   addLine: () => { document.getElementById('nr-lines').insertAdjacentHTML('beforeend', lineRow(isProc())); },
   delLine: (d, el) => { if (document.querySelectorAll('#nr-lines .line').length > 1) el.closest('.line').remove(); },
@@ -1126,6 +1160,7 @@ document.addEventListener('change', async e => {
   if (e.target.id && e.target.id.startsWith('ur-')) { const cell = e.target.closest('tr').children[3], uid = e.target.id.slice(3), u = S.profiles.find(x => x.id === uid); cell.innerHTML = deptChecks('ud-' + uid, myDepts(u), e.target.value); return; }
   if (e.target.dataset && e.target.dataset.logf != null) { ui.logF[e.target.dataset.logf] = e.target.value; ui.logRows = null; render(); return; }
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
+  if (e.target.id === 'sup-q') { ui.supQ = e.target.value; render(); return; }
   const t = e.target;
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-d').innerHTML = deptOptions(p); reqBoqFill(); }
@@ -1174,6 +1209,14 @@ document.addEventListener('submit', async e => {
       if (res) { if (res.id && (ds.length > 1 || !ds.length)) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
     } else if (kind === 'secRename') {
       await run(sb.rpc('rename_section', { p_project: f.dataset.p, p_code: f.dataset.v, p_name: v('sr-n') }), 'تم تعديل اسم القسم'); closeModal(); refresh();
+    } else if (kind === 'sup') {
+      const id = f.dataset.v; let path = null;
+      if (fileOf('sp-crf')) { path = await upload(fileOf('sp-crf'), 'suppliers'); if (!path) return; } else if (!id) return toast('ارفق نسخة السجل التجاري', true);
+      const row = { name: v('sp-n'), activity: v('sp-a') || null, cr_no: v('sp-cr'), contact_name: v('sp-c') || null, phone: v('sp-ph'), email: v('sp-e') || null, address: v('sp-ad') || null, bank_name: v('sp-b') || null, account_name: v('sp-an') || null, bank_account: v('sp-ac') || null, iban: v('sp-ib') || null, notes: v('sp-no') || null };
+      if (path) row.cr_path = path;
+      if (id) { row.active = document.getElementById('sp-act').checked; row.updated_at = new Date().toISOString(); await run(sb.from('suppliers').update(row).eq('id', id), 'انحفظت بيانات المورّد'); }
+      else await run(sb.from('suppliers').insert(row), 'انسجل المورّد');
+      closeModal(); refresh();
     } else if (kind === 'clarify') {
       await run(sb.rpc('clarify_request', { p_req: f.dataset.v, p_to: v('cl-to'), p_note: v('cl-n') }), 'أُرسل طلب التوضيح'); closeModal(); refresh();
     } else if (kind === 'qfile') {
@@ -1188,22 +1231,24 @@ document.addEventListener('submit', async e => {
       const pr = isProc();
       const items = [...f.querySelectorAll('#nr-lines .line')].map(l => Object.assign({ description: l.querySelector('.l-d').value.trim(), qty: +l.querySelector('.l-q').value, unit: '' }, pr ? { unit_price: +l.querySelector('.l-p').value } : {})).filter(i => i.description);
       if (!items.length) return toast('اكتب مادة وحدة على الأقل', true);
+      const nsp = pr ? SUP(v('nr-sup')) : null; if (pr && !nsp) return toast('اختر المورّد من القائمة', true);
       let qpath = null; if (pr) { if (!fileOf('nr-qf')) return toast('ارفق ملف الكوتيشن', true); qpath = await upload(fileOf('nr-qf'), 'quotes'); if (!qpath) return; }
       const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
       await run(sb.from('request_items').insert(items.map(i => Object.assign({ request_id: r.id }, i))));
       if (pr) {
         await run(sb.rpc('start_proc_request', { p_req: r.id }));
-        await run(sb.from('quotes').insert({ request_id: r.id, supplier: v('nr-sup'), amount: Math.round(items.reduce((a, i) => a + i.qty * i.unit_price, 0) * 1000) / 1000, terms: v('nr-terms'), delivery_days: +v('nr-days') || 0, selected: true, file_path: qpath }));
+        await run(sb.from('quotes').insert({ request_id: r.id, supplier: nsp.name, supplier_id: nsp.id, amount: Math.round(items.reduce((a, i) => a + i.qty * i.unit_price, 0) * 1000) / 1000, terms: v('nr-terms'), delivery_days: +v('nr-days') || 0, selected: true, file_path: qpath }));
         await run(sb.rpc('advance_request', { p_req: r.id, p_note: null }));
       }
-      closeModal(); await loadAll(); location.hash = 'r-' + r.id; render(); toast('أُرسل الطلب ' + r.no + (pr ? ' للمدير العام' : ' لرئيس القسم'));
+      closeModal(); await loadAll(); location.hash = 'r-' + r.id; render(); toast('أُرسل الطلب ' + r.no + (pr ? ' لمهندس الكميات (QS)' : ' لرئيس القسم'));
     } else if (kind === 'quote') {
       const rid = f.dataset.v; const r = R(rid); const amt = +v('q-amt');
       if (!fileOf('q-f')) return toast('ارفق ملف الكوتيشن', true);
       const qpath = await upload(fileOf('q-f'), 'quotes'); if (!qpath) return;
       const cheapest = !r.quotes.length || amt < Math.min.apply(null, r.quotes.map(q => q.amt));
       if (cheapest && r.quotes.length) await run(sb.from('quotes').update({ selected: false }).eq('request_id', rid));
-      await run(sb.from('quotes').insert({ request_id: rid, supplier: v('q-sup'), amount: amt, terms: v('q-terms'), delivery_days: +v('q-days') || 0, selected: cheapest, file_path: qpath }), cheapest ? 'أُضيف العرض واختير لأنه الأرخص' : 'أُضيف العرض');
+      const sp = SUP(v('q-sup')); if (!sp) return toast('اختر المورّد من القائمة', true);
+      await run(sb.from('quotes').insert({ request_id: rid, supplier: sp.name, supplier_id: sp.id, amount: amt, terms: v('q-terms'), delivery_days: +v('q-days') || 0, selected: cheapest, file_path: qpath }), cheapest ? 'أُضيف العرض واختير لأنه الأرخص' : 'أُضيف العرض');
       refresh();
     } else if (kind === 'petty') {
       const path = await upload(fileOf('pc-f'), 'petty');
@@ -1267,6 +1312,7 @@ function render() {
   const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
+  if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
   if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';

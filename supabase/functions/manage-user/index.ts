@@ -10,7 +10,7 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-const ROLES = ["admin", "owner", "gm", "head", "site", "procurement", "finance"];
+const ROLES = ["admin", "owner", "gm", "head", "site", "procurement", "qs", "finance"];
 const DEPTS = ["arch", "interior", "fitout", "joinery", "contracting", "supervision"];
 
 Deno.serve(async (req) => {
