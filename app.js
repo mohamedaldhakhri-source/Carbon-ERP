@@ -993,11 +993,11 @@ function newReqForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   modal('طلب مواد جديد', '<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>القسم</span><select id="nr-d">' + deptOptions(p) + '</select></label></div>' +
     '<label class="fld"><span>بند BOQ</span><select id="nr-b">' + boqOptions(p, '', true) + '</select></label>' +
-    '<div class="fld"><span>المواد المطلوبة</span><div class="line lh small muted"><span>اسم المادة</span><span>الكمية (كم واحد)</span><span>وحدة القياس</span><span></span></div><div class="lines" id="nr-lines">' + lineRow() + '</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>' +
+    '<div class="fld"><span>المواد المطلوبة</span><div class="line lh small muted"><span>اسم المادة</span><span>الكمية</span><span></span></div><div class="lines" id="nr-lines">' + lineRow() + '</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>' +
     '<div class="fr"><label class="fld"><span>مطلوب قبل</span><input id="nr-need" type="date" value="' + iso(new Date(today.getTime() + 5 * 864e5)) + '"></label><label class="fld"><span>ملاحظة</span><input id="nr-note" placeholder="مثال: للطابق الأرضي"></label></div>' +
     '<div class="actions"><button class="btn pri" type="submit">إرسال لرئيس القسم</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
-function lineRow() { return '<div class="line"><input placeholder="وصف المادة" class="l-d" required aria-label="وصف المادة"><input type="number" min="0" step="any" placeholder="الكمية" class="l-q" required aria-label="الكمية"><select class="l-u" aria-label="وحدة القياس" title="وحدة القياس">' + ['حبة', 'م', 'م²', 'م³', 'كجم', 'طن', 'لتر', 'كيس', 'لفة', 'علبة', 'كرتون', 'لوح', 'طقم', 'مقطوعية'].map(u => '<option>' + u + '</option>').join('') + '</select><button type="button" class="x" data-act="delLine" aria-label="حذف">×</button></div>'; }
+function lineRow() { return '<div class="line"><input placeholder="وصف المادة" class="l-d" required aria-label="وصف المادة"><input type="number" min="0" step="any" placeholder="الكمية" class="l-q" required aria-label="الكمية"><button type="button" class="x" data-act="delLine" aria-label="حذف">×</button></div>'; }
 function newPettyForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   modal('طلب بيتي كاش', '<form class="f" data-form="petty"><div class="fr"><label class="fld"><span>المشروع</span><select id="pc-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>المبلغ (ر.ع)</span><input id="pc-a" type="number" min="0.001" step="0.001" required></label></div>' +
@@ -1134,7 +1134,7 @@ document.addEventListener('submit', async e => {
     } else if (kind === 'resetPass') {
       if (await callFn({ action: 'password', id: f.dataset.v, password: v('rp') }, 'تم تغيير كلمة المرور')) closeModal();
     } else if (kind === 'req') {
-      const items = [...f.querySelectorAll('.line')].map(l => ({ description: l.querySelector('.l-d').value.trim(), qty: +l.querySelector('.l-q').value, unit: l.querySelector('.l-u').value || 'حبة' })).filter(i => i.description);
+      const items = [...f.querySelectorAll('.line')].map(l => ({ description: l.querySelector('.l-d').value.trim(), qty: +l.querySelector('.l-q').value, unit: '' })).filter(i => i.description);
       const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
       await run(sb.from('request_items').insert(items.map(i => Object.assign({ request_id: r.id }, i))));
       closeModal(); await loadAll(); location.hash = 'r-' + r.id; render(); toast('أُرسل الطلب ' + r.no + ' لرئيس القسم');
