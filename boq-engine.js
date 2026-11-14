@@ -90,9 +90,22 @@
         if (v) {
           if (/sub\s*-?\s*total|قبل الضريبة|المجموع الفرعي/i.test(joined)) out.statedSub = Math.max(out.statedSub || 0, v);
           else if (/grand\s*total|المجموع الكلي|الإجمالي الكلي/i.test(joined)) out.statedGrand = Math.max(out.statedGrand || 0, v);
-          else if (/carried|مرحّل|مرحل/i.test(joined)) out.carried = (out.carried || 0) + v;
+          else if (/carried|مرحّل|مرحل/i.test(joined) && /general|العام/i.test(joined)) out.carried = (out.carried || 0) + v;
+        } else if (/carried|مرحّل|مرحل/i.test(joined) && /general|العام/i.test(joined)) out.carriedMissing = true;
+        // Section check: a "Total (...) carried" line is compared with the items read since the previous total line.
+        if (/carried|مرحّل|مرحل/i.test(joined)) {
+          const its = out.items.slice(out.mark || 0), got = its.reduce((a, i) => a + i.total, 0);
+          if (its.length) { const name = (joined.match(/\(([^)]+)\)/) || [])[1] || joined.replace(/total|carried.*$/ig, '').trim(); (out.checks = out.checks || []).push({ name: name.trim(), stated: v || 0, read: got, from: its[0].code, to: its[its.length - 1].code }); }
+          out.mark = out.items.length;
         }
         last = null; continue;
+      }
+      // Preliminaries printed under the table count toward the project value (they are part of the sub-total).
+      if (!code && /^\s*(prelim\w*|أعمال تمهيدية|التمهيدية)\s*$/i.test(desc || joined.replace(/[\d,.\s]+$/, '')) && (!isNaN(total) || row.some(c => num(c) > 0))) {
+        const v = !isNaN(total) ? total : row.map(num).filter(x => x > 0).pop();
+        if (!out.sections.find(s => s[0] === 'P')) out.sections.unshift(['P', 'أعمال تمهيدية (Prelims)']);
+        out.items.push({ code: 'P.1', desc: 'Preliminaries (أعمال تمهيدية)', qty: 1, unit: 'LS', rate: v, total: v, sec: 'P', sub: '', dept: null });
+        out.mark = out.items.length; last = null; continue;
       }
       // A bare "Total" line with no item number is a total row, not an item.
       if (!code && /^\s*(total|المجموع|الإجمالي|الاجمالي|الإجمالى)(\s|:|$)/i.test(desc)) { if (!isNaN(total)) out.stated = Math.max(out.stated, total); last = null; continue; }
@@ -116,7 +129,7 @@
       last = { code: code || String(out.items.length + 1), desc, qty: q, unit: str(cell(row, 'unit')), rate: Math.round(rt * 1000) / 1000, total: tt, sec, sub: curSub, dept: null };
       out.items.push(last);
     }
-    out.stated = out.statedSub || out.carried || out.statedGrand || out.stated || 0;
+    out.stated = out.statedSub || (out.carriedMissing ? 0 : out.carried) || (out.statedGrand ? out.statedGrand / 1.05 : 0) || out.stated || 0;
     return out;
   }
   function parseText(text) {

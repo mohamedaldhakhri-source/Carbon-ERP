@@ -510,7 +510,12 @@ function boqReview(n) {
     '<div class="kpi' + (n.stated && !ok ? ' alert' : '') + '"><span class="l">المكتوب في الملف (بدون الضريبة)</span><span class="v">' + (n.stated ? money(n.stated) + ' <small>ر.ع</small>' : '—') + '</span><span class="s">' + (!n.stated ? 'ما لقيت إجمالي مكتوب في الملف' : ok ? '✓ يطابق مجموع البنود' : 'الفرق ' + money(Math.abs(diff)) + ' ر.ع ' + (diff < 0 ? 'ناقص' : 'زايد') + ' في البنود المقروءة') + '</span></div></div>' +
     '<div class="ch" style="margin-top:6px"><b>البنود</b><div class="actions"><button type="button" class="btn sm" data-act="npClassify">أعد توزيع الأقسام تلقائياً</button><button type="button" class="btn sm" data-act="npSchedule">احسب المدد تلقائياً</button></div></div>';
   if (n.via) h += '<span class="hint">' + esc(n.via) + '</span>';
-  if (n.stated && !ok) h += '<div class="flag warn">مجموع البنود المقروءة ما يطابق الإجمالي المكتوب في الملف. راجع البنود قبل الحفظ، خصوصاً البنود المعلّمة في الملاحظات.</div>';
+  if (n.stated && !ok) {
+    // Where the difference is: each section total printed in the file against the items read for it.
+    const bad = (n.checks || []).filter(c => c.stated > 0 && String(c.from).split('.')[0] === String(c.to).split('.')[0] && Math.abs(c.stated - c.read) > Math.max(2, c.stated * 0.001));
+    h += '<div class="flag warn">مجموع البنود المقروءة ما يطابق الإجمالي المكتوب في الملف. راجع البنود قبل الحفظ.' +
+      (bad.length ? '<br><b>الفرق في هذي الأقسام:</b><br>' + bad.map(c => esc(c.name) + ' (البنود ' + esc(c.from) + ' إلى ' + esc(c.to) + '): المكتوب ' + money(c.stated) + '، المقروء ' + money(c.read) + ' ر.ع').join('<br>') : '') + '</div>';
+  }
   if (n.warnings && n.warnings.length) h += '<details><summary class="hint" style="cursor:pointer">' + n.warnings.length + ' ملاحظة على الأرقام</summary><div class="hint">' + n.warnings.map(esc).join('<br>') + '</div></details>';
   if (n.notes) h += '<div class="flag warn">ملاحظات القراءة: ' + esc(n.notes) + '</div>';
   if (!n.f.start || !n.f.end) h += '<div class="flag warn">حدد تاريخ البداية وموعد التسليم فوق عشان تنحسب مدة كل بند.</div>';
@@ -637,7 +642,7 @@ function rerender() { npSync(); render(); }
 function addDepts(n) { n.items.forEach(i => { if (i.dept && !n.f.depts.includes(i.dept)) n.f.depts.push(i.dept); }); }
 function npPlan(n) { if (n.f.start && n.f.end && n.f.end >= n.f.start && n.items.length) { BOQ.schedule(n.items, n.f.start, n.f.end); n.planFor = n.f.start + '|' + n.f.end; } }
 function npTake(n, res, via) {
-  n.sections = res.sections; n.items = res.items; n.stated = res.stated || 0; n.statedGrand = res.statedGrand || 0; n.warnings = res.warnings || []; n.notes = res.notes || ''; n.via = via;
+  n.sections = res.sections; n.items = res.items; n.stated = res.stated || 0; n.statedGrand = res.statedGrand || 0; n.checks = res.checks || []; n.warnings = res.warnings || []; n.notes = res.notes || ''; n.via = via;
   BOQ.classify(n.sections, n.items, true); addDepts(n); npPlan(n);
 }
 function npDatesOk(n) {

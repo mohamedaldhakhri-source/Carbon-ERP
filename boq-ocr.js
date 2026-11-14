@@ -83,6 +83,20 @@
         for (let c = 0; c + 1 < vs.length; c++) { const l = vs[c], rr = vs[c + 1]; cells.push(cellText(inRow.filter(w => { const cx = (w.x0 + w.x1) / 2; return cx > l && cx < rr; }))); boxes.push({ left: Math.round(l), top: Math.round(a), width: Math.round(rr - l), height: Math.round(b - a) }); }
         rows.push(cells); rects.push(boxes);
       }
+      // Totals printed under the table (TOTAL, PRELIMS, SUB-TOTAL, VAT, GRAND TOTAL) sit outside the ruled grid:
+      // one row per text line, label in the description column and the amount in the last column.
+      const end = g.hs[g.hs.length - 1], below = ok.filter(w => (w.y0 + w.y1) / 2 > end + 4);
+      if (below.length) {
+        const h = below.reduce((s2, w) => s2 + (w.y1 - w.y0), 0) / below.length || 20, lines = [];
+        below.sort((a, b) => a.y0 - b.y0).forEach(w => { const cy = (w.y0 + w.y1) / 2, l = lines.find(L => Math.abs(L.cy - cy) < h * 0.6); if (l) l.ws.push(w); else lines.push({ cy, ws: [w] }); });
+        lines.forEach(L => {
+          const ws = L.ws.sort((a, b) => a.x0 - b.x0), isN = w => /^[\d.,]+$/.test(clean(w.text)) && /\d/.test(w.text);
+          const amt = ws.filter(isN).map(w => clean(w.text)).pop(), label = clean(ws.filter(w => !isN(w)).map(w => w.text).join(' '));
+          if (!amt || !/[A-Za-z\u0600-\u06FF]{3,}/.test(label)) return;
+          const cells = new Array(vs.length - 1).fill(''); cells[Math.min(cells.length - 2, (codeCol >= 0 ? codeCol : 0) + 1)] = label; cells[cells.length - 1] = amt;
+          rows.push(cells); rects.push(null);
+        });
+      }
       return { rows, rects, cols: vs };
     }
     // No ruled table: one row per text line, cells split at wide gaps.
@@ -93,9 +107,12 @@
     return { rows, cols: null };
   }
 
-  async function readCanvas(canvas, prevCols, w) {
+  async function readCanvas(canvas, prevCols, w, psm) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const g = grid(ctx, canvas.width, canvas.height);
+    // Whole page in automatic layout mode (PSM 3); single cells later in block mode (PSM 6). Set every time so
+    // every page reads the same way whichever worker gets it.
+    await w.setParameters({ tessedit_pageseg_mode: psm || '3' });
     const { data } = await w.recognize(canvas);
     let words = data.words || [];
     let out = rowsOf(words, g, prevCols), fixedN = 0;
@@ -104,7 +121,7 @@
     if (out.rects) {
       const ink = r => { const p = 8; let n = 0; for (let y = r.top + p; y < r.top + r.height - p; y += 2) for (let x = r.left + p; x < r.left + r.width - p; x += 2) n += g.dark[y * g.W + x]; return n; };
       const todo = [];
-      out.rows.forEach((row, i) => row.forEach((t, c) => { if (weak(t) && ink(out.rects[i][c]) > 12) todo.push(out.rects[i][c]); }));
+      out.rows.forEach((row, i) => out.rects[i] && row.forEach((t, c) => { if (weak(t) && ink(out.rects[i][c]) > 12) todo.push(out.rects[i][c]); }));
       if (todo.length) {
         await w.setParameters({ tessedit_pageseg_mode: '6' });
         const inside = (wd, r) => { const cx = (wd.bbox.x0 + wd.bbox.x1) / 2, cy = (wd.bbox.y0 + wd.bbox.y1) / 2; return cx > r.left && cx < r.left + r.width && cy > r.top && cy < r.top + r.height; };
@@ -118,7 +135,6 @@
             words = words.filter(x => !inside(x, r)).concat(ws); fixedN++;
           } catch (e) { }
         }
-        await w.setParameters({ tessedit_pageseg_mode: '3' });
         if (fixedN) out = rowsOf(words, g, prevCols);
       }
     }
@@ -141,7 +157,7 @@
     const col = Object.keys(counts).map(Number).sort((a, b) => counts[b] - counts[a])[0];
     if (col == null) return rows;
     // Stray marks next to item numbers ("B 6.1", "! 0") come from borders and bullets.
-    const codes = rows.map(r => { let c = String(r[col] || '').trim(); const m = c.match(/\d+(?:\.\d+)*/); if (m && c.length - m[0].length <= 3 && !/[A-Za-z\u0600-\u06FF]{2,}/.test(c)) c = m[0]; return c.replace(/\.$/, ''); });
+    const codes = rows.map(r => { let c = String(r[col] || '').trim().replace(/^(\d+)\s*[\s,:;]\s*(\d+)$/, '$1.$2').replace(/^(\d+(?:\.\d+)*)(?:\.\s+|\s+)(\d+)$/, '$1.$2'); const m = c.match(/\d+(?:\.\d+)*/); if (m && c.length - m[0].length <= 3 && !/[A-Za-z\u0600-\u06FF]{2,}/.test(c)) c = m[0]; return c.replace(/\.$/, ''); });
     const good = i => /^\d+(\.\d+)+$/.test(codes[i]);
     const digits = c => c.replace(/\./g, '');
     const parent = c => c.split('.').slice(0, -1).join('.');
@@ -162,6 +178,20 @@
         sibs.find(x => more(x) && digits(x) === d) || (p ? prefixes(p) : []).find(x => more(x) && digits(x) === d);
       if (hit && hit !== c) fixed[i] = hit;
     });
+    // A priced row whose number came back without its dots (2.3 read as "3", 2.11 as "2 :") takes the next number
+    // after the item above it, as long as that still comes before the next item number read cleanly.
+    const priced = r => r.some((c, k) => k !== col && /^\d{1,3}(,\d{3})*(\.\d+)?$|^\d+(\.\d+)?$/.test(String(c).trim()) && +String(c).replace(/,/g, '') > 0);
+    const isC = x => /^\d+(\.\d+)+$/.test(x || '');
+    const lt = (x, y) => { const a = x.split('.').map(Number), b = y.split('.').map(Number); for (let k = 0; k < Math.max(a.length, b.length); k++) { const d = (a[k] || 0) - (b[k] || 0); if (d) return d < 0; } return false; };
+    for (let i = 0; i < fixed.length; i++) {
+      if (isC(fixed[i]) || !fixed[i] || !priced(rows[i]) || /total|carried|summary|prelim|vat|المجموع|الإجمالي/i.test(rows[i].join(' ')) || (fixed[i] && !/^[\d\s.,:;]*$/.test(fixed[i]))) continue;
+      let p = null, n = null;
+      for (let k = i - 1; k >= 0 && !p; k--) if (isC(fixed[k])) p = fixed[k];
+      for (let k = i + 1; k < fixed.length && !n; k++) if (isC(fixed[k])) n = fixed[k];
+      if (!p) continue;
+      const seg = p.split('.'), cand = seg.slice(0, -1).concat(+seg[seg.length - 1] + 1).join('.');
+      if (!n || lt(cand, n)) fixed[i] = cand;
+    }
     rows = rows.map((r, i) => { if (fixed[i] === String(r[col] || '')) return r; const o = r.slice(); o[col] = fixed[i]; return o; });
     // Commas read as dots: when the document writes thousands as 1,234, a lone 2.503 is really 2,503.
     const nums = []; rows.forEach(r => r.forEach((c, i) => { if (i !== col && /^[\d.,]+$/.test(String(c).trim())) nums.push(String(c).trim()); }));
@@ -170,6 +200,47 @@
     return rows;
   }
 
+
+  // A priced row is "sound" when its last three numbers agree: qty x rate = total.
+  const nums = r => r.map(c => { const t = String(c).replace(/,/g, '').trim(); return /^\d+(\.\d+)?$/.test(t) ? +t : NaN; });
+  const isCode = c => /^\d+(\.\d+)+$/.test(String(c).trim());
+  function sound(r) { const n = nums(r).filter(x => !isNaN(x)); if (n.length < 3) return false; const [q, rt, t] = n.slice(-3); return t > 0 && Math.abs(q * rt - t) <= Math.max(1, t * 0.05); }
+  const pageScore = rows => { const coded = rows.filter(r => isCode(r[0]) && nums(r).some(x => !isNaN(x))); const good = coded.filter(sound).length; return { coded: coded.length, good }; };
+  // Two reads of the same page: start from the better one, swap in sound rows for unsound ones and add sound rows it missed.
+  const cmp = (x, y) => { const a = x.split('.').map(Number), b = y.split('.').map(Number); for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  function mergeReads(a, b) {
+    a = fixCodes(a); b = fixCodes(b);
+    const [base, other] = pageScore(a).good >= pageScore(b).good ? [a, b] : [b, a];
+    const key = rows => { const seen = {}; return rows.map(r => { if (!isCode(r[0])) return null; const c = r[0].trim(); seen[c] = (seen[c] || 0) + 1; return c + '#' + seen[c]; }); };
+    const kb = key(base), ko = key(other), out = base.slice(), outK = kb.slice();
+    ko.forEach((k, i) => {
+      if (!k) return;
+      const j = outK.indexOf(k);
+      if (j >= 0) { if (sound(other[i]) && !sound(out[j])) out[j] = other[i]; return; }
+      // A missed item needs at least a quantity and a total (its rate may be misread; the total is what counts).
+      const nn = nums(other[i]).filter(x => !isNaN(x)); if (nn.length < 2 || !(nn[nn.length - 1] > 0)) return;
+      // Missing in the base: it goes in only where its number fits between its neighbours (7.1.2 between 7.1.1 and 7.2.1),
+      // which keeps a misread number from bringing an item in twice.
+      if (out.some(r => r[0] && r[0].replace(/\D/g, '') === k.split('#')[0].replace(/\D/g, ''))) return;
+      const c = k.split('#')[0];
+      let at = -1; for (let m = i - 1; m >= 0 && at < 0; m--) if (ko[m]) at = outK.indexOf(ko[m]);
+      if (at < 0) { if (outK.findIndex(Boolean) < 0) return; at = outK.findIndex(Boolean) - 1; }
+      const prevK = outK.slice(0, at + 1).filter(Boolean).pop(), nextK = outK.slice(at + 1).find(Boolean);
+      if ((prevK && cmp(prevK.split('#')[0], c) >= 0) || (nextK && cmp(c, nextK.split('#')[0]) >= 0)) return;
+      if (at < 0) { const f = outK.findIndex(Boolean); if (f < 0) return; out.splice(f, 0, other[i]); outK.splice(f, 0, k); return; }
+      let pos = at + 1; while (pos < out.length && !outK[pos] && !/total|carried/i.test(out[pos].join(' '))) pos++;
+      out.splice(pos, 0, other[i]); outK.splice(pos, 0, k);
+    });
+    return out;
+  }
+  // Each page is read in automatic layout mode first; a page with unsound or missing prices gets a second read in
+  // block mode and the two are merged. Both modes are set explicitly so every computer reads the same way.
+  async function readPage(canvas, prevCols, w) {
+    const r1 = await readCanvas(canvas, prevCols, w, '3'), s1 = pageScore(r1.rows);
+    if (s1.coded && s1.good === s1.coded) return r1;
+    const r2 = await readCanvas(canvas, prevCols, w, '6');
+    return Object.assign({}, r1, { rows: mergeReads(r1.rows, r2.rows) });
+  }
   async function pageCanvas(pdfDoc, p) {
     const page = await pdfDoc.getPage(p); const v1 = page.getViewport({ scale: 1 });
     const vp = page.getViewport({ scale: Math.min(6, TARGET_W / v1.width) });
@@ -184,15 +255,16 @@
     const tick = () => progress && progress(done, N);
     tick();
     const [w0] = await workers(['eng', 'ara'], 1);
-    const first = await readCanvas(await pageCanvas(pdfDoc, 1), null, w0); out[0] = first.rows; done++; tick();
+    const first = await readPage(await pageCanvas(pdfDoc, 1), null, w0); out[0] = first.rows; done++; tick();
     if (N > 1) {
       const langs = first.arabic > 0.15 ? ['eng', 'ara'] : ['eng'];
       const ws = await workers(langs, Math.min(cores(), N - 1));
       let next = 2;
       await Promise.all(ws.map(async w => {
-        while (next <= N) { const p = next++; const r = await readCanvas(await pageCanvas(pdfDoc, p), first.cols, w); out[p - 1] = r.rows; done++; tick(); }
+        while (next <= N) { const p = next++; const r = await readPage(await pageCanvas(pdfDoc, p), first.cols, w); out[p - 1] = r.rows; done++; tick(); }
       }));
     }
+    root.BOQOCR.pages = out;
     return fixCodes(dropRepeatHeaders([].concat(...out)));
   }
 
@@ -202,7 +274,7 @@
     const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
     const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
     const [w] = await workers(['eng', 'ara'], 1);
-    return fixCodes(dropRepeatHeaders((await readCanvas(c, null, w)).rows));
+    return fixCodes(dropRepeatHeaders((await readPage(c, null, w)).rows));
   }
 
   root.BOQOCR = { readPdf, readImage, fixCodes };
