@@ -160,7 +160,8 @@ async function openFile(path) {
   if (error) return toast(errMsg(error), true);
   window.open(data.signedUrl, '_blank', 'noopener');
 }
-const checkedDepts = id => [...document.querySelectorAll('#' + id + ' input:checked')].map(x => x.value);
+// Ticked departments; all of them (or "الكل") = [] meaning all; nothing ticked = null (not allowed).
+const checkedDepts = id => { if (!document.getElementById(id)) return []; const ds = [...document.querySelectorAll('#' + id + ' input:checked')].map(x => x.value).filter(x => x !== '*'); if (!ds.length) return null; return ds.length === Object.keys(DEPTS).length ? [] : ds; };
 const fileLink = (path, label) => path ? '<button class="linkbtn small" data-act="file" data-v="' + esc(path) + '">📎 ' + esc(label || 'عرض المرفق') + '</button>' : '';
 
 /* ---------- data ---------- */
@@ -452,19 +453,25 @@ function vInbox() {
   if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + planN(p) + (p.boq.some(b => b.ps) ? ' بند' : ' مهمة') + ' · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
+// "الكل" ticks every department (saved as none = all). Admin, owner and GM always cover every department.
+function deptChecks(id, sel, role) {
+  if (role === 'admin') return '<span class="muted small">مسؤول النظام: يشوف كل شي ويسوي كل شي</span>';
+  if (['owner', 'gm', 'procurement', 'finance'].includes(role)) return '<span class="muted small">كل الأقسام</span>';
+  const all = !sel.length || Object.keys(DEPTS).every(k => sel.includes(k));
+  return '<div class="dchk" id="' + id + '"><label><input type="checkbox" value="*"' + (all ? ' checked' : '') + '> <b>الكل</b></label>' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (all || sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
+}
 function vUsers() {
   if (me.role !== 'admin') return '<div class="empty">صفحة المستخدمين لمدير النظام فقط.</div>';
   const sysAdmin = me.role === 'admin';
   const roleOpts = sel => Object.entries(ROLES).filter(([k]) => k !== 'pending' || sel === 'pending').map(([k, l]) => '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + (k === 'pending' ? 'موقوف' : l) + '</option>').join('');
   // Several departments per person: ticked boxes; none ticked = all departments.
-  const deptChecks = (id, sel) => '<div class="dchk" id="' + id + '">' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
   let h = '<div class="head"><div class="t"><h1>المستخدمين</h1><span class="muted">' + S.profiles.length + ' مستخدم</span></div></div>';
   if (sysAdmin) h += '<div class="card"><h2>إضافة موظف</h2><form class="f" data-form="newUser"><div class="fr"><label class="fld"><span>الاسم الكامل</span><input id="nu-name" required></label><label class="fld"><span>البريد الإلكتروني (للدخول)</span><input id="nu-email" type="email" required dir="ltr"></label></div>' +
     '<div class="fr"><label class="fld"><span>كلمة المرور</span><input id="nu-pass" type="text" required minlength="6" dir="ltr" autocomplete="off"></label><label class="fld"><span>الدور</span><select id="nu-role" required>' + roleOpts('site') + '</select></label></div>' +
-    '<div class="fld"><span>الأقسام اللي يمسكها (تقدر تختار أكثر من قسم)</span>' + deptChecks('nu-dept', []) + '</div><div class="fr"><div class="fld" style="justify-content:flex-end"><button class="btn pri" type="submit">إضافة الموظف</button></div></div>' +
+    '<div class="fld"><span>الأقسام اللي يمسكها (تقدر تختار أكثر من قسم)</span>' + '<div id="nu-dwrap">' + deptChecks('nu-dept', [], 'site') + '</div>' + '</div><div class="fr"><div class="fld" style="justify-content:flex-end"><button class="btn pri" type="submit">إضافة الموظف</button></div></div>' +
     '<span class="hint">أعطِ الموظف بريده وكلمة المرور، ويقدر يدخل مباشرة. رئيس القسم يعتمد طلبات أقسامه فقط، واتركه بدون أقسام إذا يعتمد كل الأقسام.</span></form></div>';
   h += '<div class="card"><div class="tbl"><table><thead><tr><th>الاسم</th><th>البريد</th><th>الدور</th><th>الأقسام</th><th></th></tr></thead><tbody>' +
-    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-idle">موقوف</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور"' + (u.id === me.id ? ' disabled' : '') + '>' + roleOpts(u.role) + '</select></td><td>' + deptChecks('ud-' + u.id, myDepts(u)) + '</td><td><div class="actions"><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button>' +
+    S.profiles.map(u => '<tr><td><b>' + esc(u.full_name) + '</b>' + (u.role === 'pending' ? ' <span class="pill p-idle">موقوف</span>' : '') + '</td><td class="small" dir="ltr" style="text-align:end">' + esc(u.email) + '</td><td><select id="ur-' + u.id + '" aria-label="الدور"' + (u.id === me.id ? ' disabled' : '') + '>' + roleOpts(u.role) + '</select></td><td>' + deptChecks('ud-' + u.id, myDepts(u), u.role) + '</td><td><div class="actions"><button class="btn sm" data-act="saveUser" data-v="' + u.id + '">حفظ</button>' +
       (sysAdmin ? '<button class="btn sm" data-act="resetPass" data-v="' + u.id + '">كلمة مرور جديدة</button>' + (u.id !== me.id ? '<button class="btn sm bad" data-act="delUser" data-v="' + u.id + '">حذف</button>' : '') : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
@@ -872,7 +879,7 @@ const A = {
   delUser: d => { const u = S.profiles.find(x => x.id === d.v); modal('حذف ' + u.full_name, '<p>بيتم حذف حساب <b>' + esc(u.full_name) + '</b> نهائياً وما يقدر يدخل النظام. إذا عنده طلبات مسجلة، الأفضل توقف حسابه بتغيير دوره إلى "موقوف" بدل الحذف.</p><div class="actions"><button class="btn bad" data-act="delUserGo" data-v="' + u.id + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'); },
   delUserGo: async d => { if (await callFn({ action: 'delete', id: d.v }, 'تم حذف الحساب')) { closeModal(); refresh(); } },
   ...A2,
-  saveUser: async d => { const ds = checkedDepts('ud-' + d.v); await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: ds[0] || '' })); await run(sb.rpc('set_user_depts', { p_user: d.v, p_depts: ds }), 'تم الحفظ'); refresh(); },
+  saveUser: async d => { const ds = checkedDepts('ud-' + d.v); if (!ds) { toast('اختر قسم واحد على الأقل أو الكل', true); return; } await run(sb.rpc('set_user_role', { p_user: d.v, p_role: document.getElementById('ur-' + d.v).value, p_dept: ds[0] || '' })); await run(sb.rpc('set_user_depts', { p_user: d.v, p_depts: ds }), 'تم الحفظ'); refresh(); },
   pcInv: d => { const c = S.petty.find(x => x.id === d.v); modal('إرفاق فاتورة ' + c.no, '<form class="f" data-form="pcInv" data-v="' + c.id + '"><p class="muted">' + esc(c.d) + ' · ' + money(c.amt) + ' ر.ع</p><label class="fld"><span>الفاتورة (صورة أو PDF)</span><input id="pi-f" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">إرفاق</button></div></form>'); }
 };
 document.addEventListener('click', e => {
@@ -883,6 +890,13 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); if (e.key === 'Enter') { const g = e.target.closest && e.target.closest('[data-go]'); if (g && g.tagName === 'DIV') location.hash = g.dataset.go; } });
 document.addEventListener('change', async e => {
+  if (e.target.closest && e.target.closest('.dchk')) {
+    const box = e.target.closest('.dchk'), others = [...box.querySelectorAll('input:not([value="*"])')], all = box.querySelector('input[value="*"]');
+    if (e.target.value === '*') others.forEach(x => { x.checked = e.target.checked; }); else all.checked = others.every(x => x.checked);
+    return;
+  }
+  if (e.target.id === 'nu-role') { document.getElementById('nu-dwrap').innerHTML = deptChecks('nu-dept', [], e.target.value); return; }
+  if (e.target.id && e.target.id.startsWith('ur-')) { const cell = e.target.closest('tr').children[3], uid = e.target.id.slice(3), u = S.profiles.find(x => x.id === uid); cell.innerHTML = deptChecks('ud-' + uid, myDepts(u), e.target.value); return; }
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   const t = e.target;
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
@@ -925,8 +939,9 @@ document.addEventListener('submit', async e => {
       if (error) { ui.authErr = error.message; render(); }
       else if (!data.session) { ui.authMode = 'login'; ui.authErr = ''; render(); toast('أرسلنا رسالة تأكيد لبريدك. أكّده ثم سجّل دخول.'); }
     } else if (kind === 'newUser') {
-      const ds = checkedDepts('nu-dept'), res = await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: ds[0] || '' }, 'أُضيف الموظف ويقدر يدخل الحين');
-      if (res) { if (res.id && ds.length > 1) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
+      const ds = checkedDepts('nu-dept'); if (!ds) { toast('اختر قسم واحد على الأقل أو الكل', true); return; }
+      const res = await callFn({ action: 'create', full_name: v('nu-name'), email: v('nu-email'), password: v('nu-pass'), role: v('nu-role'), dept: ds[0] || '' }, 'أُضيف الموظف ويقدر يدخل الحين');
+      if (res) { if (res.id && (ds.length > 1 || !ds.length)) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
     } else if (kind === 'pcInv') {
       const path = await upload(fileOf('pi-f'), 'petty'); if (!path) return;
       await run(sb.rpc('attach_petty_invoice', { p_id: f.dataset.v, p_path: path }), 'انرفقت الفاتورة وتقفل الطلب'); closeModal(); refresh();
