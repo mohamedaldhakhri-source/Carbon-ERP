@@ -314,3 +314,7 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   @page{size:A4 landscape;margin:12mm}
 }
+.logf{flex-wrap:wrap}
+.logf .fld{min-width:140px;flex:1}
+.logt td{vertical-align:top}
+.logt s{text-decoration:line-through}

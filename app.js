@@ -229,6 +229,7 @@ function views() {
   if (h === 'expenses') return vExpenses();
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
+  if (h === 'log') return vLog();
   return vDash();
 }
 const segFilter = () => '<div class="seg" role="group" aria-label="نوع المشروع">' + [['all', 'الكل'], ['gov', 'حكومي'], ['company', 'شركات'], ['private', 'خاص']].map(([k, l]) => '<button data-act="filter" data-v="' + k + '" class="' + (ui.filter === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
@@ -287,7 +288,7 @@ function vProject(id) {
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (p.status === 'closed' ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
-  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]];
+  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]].concat(me.role === 'admin' ? [['log', 'السجل', '']] : []);
   const showTime = planN(p) || isAdmin() || canDates(p) || (ui.ted && ui.ted.pid === p.id);
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
   h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
@@ -320,6 +321,11 @@ function vProject(id) {
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
   else if (ui.tab === 'vo') h += voTab(p, vos) + (vos.length ? voTable(vos, false) : '<div class="empty">لا توجد Variation Orders لهذا المشروع.</div>') + '<p class="muted small">العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها يعتمده المدير العام ويُضاف لقيمة المشروع وميزانيته.</p>';
   else if (ui.tab === 'docs') h += docsTab(p);
+  else if (ui.tab === 'log' && me.role === 'admin') {
+    ui.plog = ui.plog || {};
+    if (!ui.plog[p.id]) { ui.plog[p.id] = 'busy'; sb.from('audit_log').select('*').eq('project_id', p.id).order('at', { ascending: false }).limit(300).then(({ data }) => { ui.plog[p.id] = data || []; render(); }); }
+    h += Array.isArray(ui.plog[p.id]) ? '<p class="muted small">كل اللي صار على هذا المشروع: البنود والطلبات والبيتي كاش والـ VO والمستندات. <a href="#log">السجل الكامل</a></p>' + logTable(ui.plog[p.id], false) : '<div class="empty">جاري التحميل…</div>';
+  }
   h += '</div></div>';
   return h;
 }
@@ -473,6 +479,76 @@ function deptChecks(id, sel, role) {
   if (['owner', 'gm', 'procurement', 'finance'].includes(role)) return '<span class="muted small">كل الأقسام</span>';
   const all = !sel.length || Object.keys(DEPTS).every(k => sel.includes(k));
   return '<div class="dchk" id="' + id + '"><label><input type="checkbox" value="*"' + (all ? ' checked' : '') + '> <b>الكل</b></label>' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (all || sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
+}
+/* ---------- activity log (admin) ---------- */
+const LOG_T = { projects: 'مشروع', boq_sections: 'قسم BOQ', boq_items: 'بند BOQ', tasks: 'مهمة', material_requests: 'طلب مواد', request_items: 'مادة في طلب', quotes: 'عرض سعر', petty_cash: 'بيتي كاش', variations: 'Variation Order', project_docs: 'مستند', profiles: 'مستخدم' };
+const LOG_A = { insert: ['أضاف', 'p-ok'], update: ['عدّل', 'p-warn'], delete: ['حذف', 'p-bad'], login: ['سجّل دخول', 'p-idle'], logout: ['سجّل خروج', 'p-idle'], session: ['فتح البرنامج', 'p-idle'] };
+const LOG_F = { name: 'الاسم', short_name: 'الاسم المختصر', client: 'العميل', type: 'النوع', client_type: 'نوع العميل', client_phone: 'هاتف العميل', client_email: 'بريد العميل', client_id_no: 'رقم البطاقة', client_id_path: 'نسخة البطاقة/السجل', client_cr: 'السجل التجاري', status: 'الحالة', stage: 'المرحلة', amount: 'المبلغ', qty: 'الكمية', unit: 'الوحدة', rate: 'سعر الوحدة', total: 'الإجمالي', start_date: 'البداية', end_date: 'النهاية', progress: 'الإنجاز %', description: 'الوصف', dept: 'القسم', depts: 'الأقسام', role: 'الدور', full_name: 'الاسم', email: 'البريد', approval: 'الاعتماد', approval_note: 'ملاحظة الاعتماد', gm_status: 'اعتماد المدير العام', gm_note: 'ملاحظة المدير العام', client_status: 'موافقة العميل', approval_path: 'ملف الموافقة', invoice_path: 'الفاتورة', receipt_path: 'مرفق الطلب', unit_price: 'سعر الوحدة', selected: 'العرض المختار', supplier: 'المورّد', po_no: 'رقم أمر الشراء', po_date: 'تاريخ أمر الشراء', title: 'العنوان', code: 'الرقم', no: 'الرقم', governorate: 'المحافظة', wilayat: 'الولاية', location_note: 'تفاصيل الموقع', stop_reason: 'سبب التوقف', schedule_status: 'حالة الجدول', need_by: 'مطلوب قبل', note: 'ملاحظة', decision_note: 'ملاحظة القرار', terms: 'الشروط', delivery_days: 'أيام التوريد', kind: 'النوع', path: 'الملف', section_code: 'القسم', prior_spent: 'مصروف سابق' };
+const LOG_SKIP = ['id', 'created_at', 'updated_at', 'project_id', 'request_id', 'requested_by', 'created_by', 'uploaded_by', 'decided_by', 'decided_at', 'gm_by', 'gm_at', 'approval_by', 'approval_at', 'requested_at', 'sort', 'boq_item_id', 'invoice_at', 'schedule_approved_by', 'schedule_approved_at'];
+function logVal(k, v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'نعم' : 'لا';
+  if (Array.isArray(v)) return v.map(x => DEPTS[x] || x).join('، ') || '—';
+  if (/_path$/.test(k) || k === 'path') return '📎 ملف';
+  if (k === 'role') return ROLES[v] || v;
+  if (k === 'dept' || k === 'section_dept') return DEPTS[v] || v;
+  if (k === 'stage') { const st = STAGES.find(x => x.k === v); return st ? st.l : v === 'rejected' ? 'مرفوض' : v === 'done' ? 'منتهي' : v; }
+  const W = { pending: 'بانتظار', approved: 'معتمد', rejected: 'مرفوض', active: 'جاري', stopped: 'متوقف', closed: 'مغلق', draft: 'مسودة', gov: 'حكومي', private: 'خاص', company: 'شركة', individual: 'فرد' };
+  if (W[v]) return W[v];
+  if (typeof v === 'number' || /^-?\d+(\.\d+)?$/.test(String(v))) return /amount|total|rate|price|spent/.test(k) ? money(+v) : String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(String(v))) return fd(String(v).slice(0, 10));
+  const t = String(v); return t.length > 120 ? t.slice(0, 118) + '…' : t;
+}
+function logDevice(ua) {
+  if (!ua) return '';
+  const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return [os, br].filter(Boolean).join(' · ');
+}
+function logDetails(r) {
+  const c = r.changes || {};
+  if (r.action === 'update') return Object.keys(c).filter(k => !LOG_SKIP.includes(k) || k === 'progress').map(k => '<div><b>' + esc(LOG_F[k] || k) + ':</b> <s class="muted">' + esc(logVal(k, c[k][0])) + '</s> ← <b>' + esc(logVal(k, c[k][1])) + '</b></div>').join('') || '<span class="muted">تغيير داخلي</span>';
+  if (r.action === 'insert' || r.action === 'delete') {
+    const ks = Object.keys(c).filter(k => !LOG_SKIP.includes(k) && c[k] != null && c[k] !== '' && !(Array.isArray(c[k]) && !c[k].length));
+    const main = ks.slice(0, 4), rest = ks.slice(4);
+    const line = k => '<div><b>' + esc(LOG_F[k] || k) + ':</b> ' + esc(logVal(k, c[k])) + '</div>';
+    return main.map(line).join('') + (rest.length ? '<details><summary class="small muted">كل التفاصيل (' + rest.length + ')</summary>' + rest.map(line).join('') + '</details>' : '');
+  }
+  return '';
+}
+function logTable(rows, showProj) {
+  if (!rows.length) return '<div class="empty">ما في نشاط مسجل بهذي الفلاتر.</div>';
+  return '<div class="tbl"><table class="logt"><thead><tr><th>الوقت</th><th>الشخص</th><th>العملية</th><th>على</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التفاصيل</th><th>الجهاز والموقع</th></tr></thead><tbody>' +
+    rows.map(r => { const a = LOG_A[r.action] || [r.action, 'p-idle'], pj = r.project_id ? P(r.project_id) : null;
+      return '<tr><td class="small num" style="white-space:nowrap">' + ftime(r.at) + '</td><td><b>' + esc(r.user_name || (r.user_id ? nameOf(r.user_id) : 'النظام')) + '</b><div class="muted small">' + esc(ROLES[r.user_role] || r.user_role || '') + '</div></td><td><span class="pill ' + a[1] + '">' + a[0] + '</span></td>' +
+        '<td class="small">' + (r.table_name ? esc(LOG_T[r.table_name] || r.table_name) + (r.record_label ? '<div><b>' + esc(r.record_label) + '</b></div>' : '') : '—') + '</td>' + (showProj ? '<td class="small">' + (pj ? '<a href="#p-' + pj.id + '">' + esc(pName(pj)) + '</a>' : '—') + '</td>' : '') +
+        '<td class="small">' + logDetails(r) + '</td><td class="small"><span dir="ltr" class="num">' + esc(r.ip || '—') + '</span><div class="muted">' + esc([r.city, r.country].filter(Boolean).join('، ')) + '</div><div class="muted">' + esc(logDevice(r.user_agent)) + '</div></td></tr>'; }).join('') + '</tbody></table></div>';
+}
+async function loadLog() {
+  const f = ui.logF || (ui.logF = { user: '', act: '', tbl: '', proj: '', from: '', to: '' });
+  let q = sb.from('audit_log').select('*').order('at', { ascending: false }).limit(400);
+  if (f.user) q = q.eq('user_id', f.user);
+  if (f.act === 'auth') q = q.in('action', ['login', 'logout', 'session']); else if (f.act) q = q.eq('action', f.act);
+  if (f.tbl) q = q.eq('table_name', f.tbl);
+  if (f.proj) q = q.eq('project_id', f.proj);
+  if (f.from) q = q.gte('at', f.from + 'T00:00:00+04:00');
+  if (f.to) q = q.lte('at', f.to + 'T23:59:59+04:00');
+  const { data, error } = await q; ui.logRows = error ? [] : data; ui.logErr = error ? errMsg(error) : ''; ui.logBusy = false; render();
+}
+function vLog() {
+  if (me.role !== 'admin') return '<div class="empty">سجل النشاط لمدير النظام فقط.</div>';
+  const f = ui.logF || (ui.logF = { user: '', act: '', tbl: '', proj: '', from: '', to: '' });
+  if (!ui.logRows && !ui.logBusy) { ui.logBusy = true; loadLog(); }
+  const opt = (v, l, cur) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>';
+  let h = '<div class="head"><div class="t"><h1>سجل النشاط</h1><span class="muted">كل دخول وكل إضافة وتعديل وحذف في البرنامج، مع الشخص والوقت والـ IP والموقع التقريبي</span></div><div class="actions"><button class="btn" data-act="logReload">تحديث</button></div></div>';
+  h += '<div class="card"><div class="fr logf">' +
+    '<label class="fld"><span>الشخص</span><select data-logf="user">' + opt('', 'الكل', f.user) + S.profiles.map(u => opt(u.id, u.full_name, f.user)).join('') + '</select></label>' +
+    '<label class="fld"><span>العملية</span><select data-logf="act">' + opt('', 'الكل', f.act) + opt('auth', 'الدخول والخروج', f.act) + opt('insert', 'إضافة', f.act) + opt('update', 'تعديل', f.act) + opt('delete', 'حذف', f.act) + '</select></label>' +
+    '<label class="fld"><span>النوع</span><select data-logf="tbl">' + opt('', 'الكل', f.tbl) + Object.entries(LOG_T).map(([k, l]) => opt(k, l, f.tbl)).join('') + '</select></label>' +
+    '<label class="fld"><span>المشروع</span><select data-logf="proj">' + opt('', 'الكل', f.proj) + S.projects.concat(S.pending).map(p => opt(p.id, pName(p), f.proj)).join('') + '</select></label>' +
+    '<label class="fld"><span>من تاريخ</span><input type="date" data-logf="from" value="' + esc(f.from) + '"></label><label class="fld"><span>إلى تاريخ</span><input type="date" data-logf="to" value="' + esc(f.to) + '"></label></div>' +
+    (ui.logErr ? '<div class="flag bad">' + esc(ui.logErr) + '</div>' : '') + (ui.logRows ? '<p class="muted small">' + ui.logRows.length + (ui.logRows.length === 400 ? '+ (آخر 400، ضيّق الفلاتر للأقدم)' : '') + ' عملية</p>' + logTable(ui.logRows, !f.proj) : '<div class="empty">جاري التحميل…</div>') + '</div>';
+  return h;
 }
 function vUsers() {
   if (me.role !== 'admin') return '<div class="empty">صفحة المستخدمين لمدير النظام فقط.</div>';
@@ -843,6 +919,7 @@ const A2 = {
   npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
   schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r })) }; render(); },
   print: () => window.print(),
+  logReload: () => { ui.logRows = null; render(); },
   gcol: d => { ui.gcol = ui.gcol || {}; if (ui.gcol[d.v]) delete ui.gcol[d.v]; else ui.gcol[d.v] = 1; render(); },
   gfold: d => { const p = P(d.v); if (Object.keys(ui.gcol || {}).length) ui.gcol = {}; else { ui.gcol = {}; p.boq.forEach(b => { ui.gcol[b.s] = 1; }); } render(); },
   schedCancel: () => { ui.ted = null; render(); },
@@ -945,10 +1022,10 @@ function projStatusForm(pid) {
 /* ---------- actions ---------- */
 const A = {
   filter: d => { ui.filter = d.v; render(); },
-  tab: d => { ui.tab = d.v; render(); },
+  tab: d => { ui.tab = d.v; if (d.v === 'log') ui.plog = {}; render(); },
   reqFilter: d => { ui.reqFilter = d.v; render(); },
   authMode: () => { ui.authMode = ui.authMode === 'login' ? 'signup' : 'login'; ui.authErr = ''; render(); },
-  logout: async () => { await sb.auth.signOut(); },
+  logout: async () => { try { await sb.rpc('log_event', { p_action: 'logout' }); } catch (e) { } await sb.auth.signOut(); },
   reloadPage: () => location.reload(),
   newReq: d => newReqForm(d.p), newPetty: d => newPettyForm(d.p), newVO: d => newVOForm(d.p), projStatus: d => projStatusForm(d.p),
   close: closeModal, closeOv: (d, el, e) => { if (e.target === el) closeModal(); },
@@ -1001,6 +1078,7 @@ document.addEventListener('change', async e => {
   }
   if (e.target.id === 'nu-role') { document.getElementById('nu-dwrap').innerHTML = deptChecks('nu-dept', [], e.target.value); return; }
   if (e.target.id && e.target.id.startsWith('ur-')) { const cell = e.target.closest('tr').children[3], uid = e.target.id.slice(3), u = S.profiles.find(x => x.id === uid); cell.innerHTML = deptChecks('ud-' + uid, myDepts(u), e.target.value); return; }
+  if (e.target.dataset && e.target.dataset.logf != null) { ui.logF[e.target.dataset.logf] = e.target.value; ui.logRows = null; render(); return; }
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   const t = e.target;
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
@@ -1037,6 +1115,7 @@ document.addEventListener('submit', async e => {
     const kind = f.dataset.form;
     if (kind === 'login') {
       const { error } = await sb.auth.signInWithPassword({ email: v('a-email').trim(), password: v('a-pass') });
+      if (!error) ui.justLoggedIn = true;
       if (error) { ui.authErr = error.message === 'Invalid login credentials' ? 'البريد أو كلمة المرور غير صحيحة' : error.message === 'Email not confirmed' ? 'أكّد بريدك من الرسالة اللي وصلتك أولاً' : error.message; render(); }
     } else if (kind === 'signup') {
       const { data, error } = await sb.auth.signUp({ email: v('a-email').trim(), password: v('a-pass'), options: { data: { full_name: v('a-name').trim() }, emailRedirectTo: location.origin + location.pathname } });
@@ -1124,7 +1203,7 @@ function render() {
   const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
-  if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين']);
+  if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
   root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
@@ -1138,12 +1217,23 @@ function greet() {
   const hr = new Date().getHours(), first = String(me.full_name || '').trim().split(/\s+/)[0] || '';
   return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' ' + esc(first) : '') + '</b><span class="muted small">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + ' · ' + new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
 }
+// Sign-in (or opening the app with a saved session, once per browser tab) goes to the activity log.
+// The server takes the IP from the request; the city here is an approximate lookup from that IP.
+async function logVisit() {
+  let k = 'session'; if (ui.justLoggedIn) { k = 'login'; ui.justLoggedIn = false; }
+  else { try { if (sessionStorage.getItem('cv-' + me.id)) return; } catch (e) { } }
+  try { sessionStorage.setItem('cv-' + me.id, '1'); } catch (e) { }
+  let city = null, country = null;
+  try { const c = new AbortController(); setTimeout(() => c.abort(), 3000); const g = await (await fetch('https://ipwho.is/?fields=city,country', { signal: c.signal })).json(); city = g.city || null; country = g.country || null; } catch (e) { }
+  try { await sb.rpc('log_event', { p_action: k, p_city: city, p_country: country }); } catch (e) { }
+}
 async function boot(sess) {
   session = sess; me = null; render();
   if (!session) return;
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).single();
   if (error) { toast(errMsg(error), true); return; }
   me = data;
+  logVisit();
   if (me.role !== 'pending') { try { await loadAll(); } catch (e) { toast(errMsg(e), true); } }
   render();
 }
