@@ -577,9 +577,9 @@ function payForm(pid) {
 }
 function docsTab(p) {
   const ko = Object.keys(DOCK), ds = S.docs.filter(x => x.pid === p.id).sort((a, b) => ko.indexOf(a.kind) - ko.indexOf(b.kind));
-  let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><span class="actions">' + (canAi() ? '<button class="btn" data-act="aiDesign" data-v="' + p.id + '">✨ صمّم بـ AI</button>' : '') + '<button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></span></div>';
+  let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><span class="actions">' + '<button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></span></div>';
   if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
-  h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DWG أو DXF أو PDF، أو حتى صورة المخطط (PNG / JPG)، ويتحول 3D تلقائياً.</p>';
+  h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DWG أو DXF أو PDF، أو حتى صورة المخطط (PNG / JPG)، ويتحول 3D تلقائياً. إذا المخطط مرسوم بأسلوب ما يقراه البرنامج، يقراه الـ AI بنفسه أول ما تفتحه.</p>';
   return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + (isAiDoc(d) ? '' : fileLink(d.path, 'فتح')) + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 /* ---------- 3D viewer ---------- */
@@ -605,7 +605,7 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=57'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=58'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   // finishes read from the design renders in the file (Claude, once per document, saved for everyone)
@@ -1598,8 +1598,11 @@ document.addEventListener('submit', async e => {
       closeModal(); refresh();
     } else if (kind === 'doc') {
       const path = await upload(fileOf('dc-f'), 'docs');
-      await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: v('dc-k'), title: v('dc-t'), path, uploaded_by: me.id }), 'انرفع المستند');
-      ui.tab = 'docs'; closeModal(); refresh();
+      if (!path) return;
+      const row = await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: v('dc-k'), title: v('dc-t'), path, uploaded_by: me.id }).select('id,kind,path').single(), 'انرفع المستند');
+      ui.tab = 'docs'; closeModal(); await refresh();
+      // a plan or model opens in 3D straight away (the AI reads it there if needed)
+      if (row && row.id && ext3dDoc(row)) location.hash = '#v3d-' + row.id;
     } else if (kind === 'aidesign') {
       const path = 'ai/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.layout';
       const row = await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: 'model3d', title: v('ad-t'), path, uploaded_by: me.id, look: { brief: v('ad-b') } }).select('id').single());

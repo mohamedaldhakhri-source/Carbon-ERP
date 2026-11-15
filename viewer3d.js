@@ -493,7 +493,10 @@ export class Viewer {
       else if (ext === 'pdf') await this._loadPdf(buf);
       else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp') await this._loadPictures([buf], ext);
       else throw new Error('نوع الملف غير مدعوم');
-    } catch (e) { console.error(e); this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); if (pic) this._offerAi(); return false; }
+    } catch (e) { console.error(e);
+      // a drawing the usual reading can't follow goes straight to the AI (once; the result is kept with the document)
+      if (pic && this.opts.ai && this.opts.ai.plan) { this.aiPlan(); return false; }
+      this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); if (pic) this._offerAi(); return false; }
     this._finish(); return true;
   }
   /* ----- plans the AI reads (any drawing style) ----- */
