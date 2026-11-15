@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
 import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=50';
 import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
-import { Look, dressModel } from './look3d.js?v=50';
+import { Look, dressModel } from './look3d.js?v=51';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -231,7 +231,7 @@ export class Viewer {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 5000);
     this.scene.add(new THREE.HemisphereLight(0xdfeeff, 0x9a8f80, 1.5));
     const sun = this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2); sun.position.set(30, 60, 20); this.scene.add(sun);
-    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.autoUpdate = false; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.model = new THREE.Group(); this.scene.add(this.model);
     // daylight sky, reflections and (on computers) soft shadows in corners and under furniture
     this.look = new Look(this); let hq = !matchMedia('(pointer:coarse)').matches; try { const q = localStorage.getItem('v3-hq'); if (q) hq = q === '1'; } catch (e) { } this.hq = hq;
@@ -253,7 +253,7 @@ export class Viewer {
   msg(t) { this.msgEl.hidden = !t; this.msgEl.textContent = t || ''; }
   resize() {
     const r = this.stage.getBoundingClientRect(), w = Math.max(200, r.width), h = Math.max(200, r.height);
-    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (this.look) this.look.resize();
+    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (this.look) this.look.resize(); this.redraw = true;
   }
   dispose() {
     this.alive = false; window.removeEventListener('resize', this._onResize); document.removeEventListener('keydown', this._kd); document.removeEventListener('keyup', this._ku);
@@ -274,7 +274,7 @@ export class Viewer {
       else if (this.sel && (e.code === 'Delete' || e.code === 'Backspace')) { e.preventDefault(); this._itemAct('del'); } };
     document.addEventListener('keydown', this._ki);
     const cv = this.renderer.domElement;
-    ['pointerdown', 'pointerup', 'wheel', 'click'].forEach(ev => this.stage.addEventListener(ev, () => { this.dirty = true; }, { passive: true }));
+    ['pointerdown', 'pointerup', 'wheel', 'click'].forEach(ev => this.stage.addEventListener(ev, () => { this.redraw = true; }, { passive: true }));
     this._plc = () => { this.locked = document.pointerLockElement === cv; this._hint(); };
     this._mm = e => { if (this.locked) this._look(e.movementX, e.movementY, 0.0022); };
     document.addEventListener('pointerlockchange', this._plc); document.addEventListener('mousemove', this._mm);
@@ -404,8 +404,17 @@ export class Viewer {
       this._mapDraw();
     } else this.orbit.update();
     // draw only when something moves (or twice a second), so the realistic mode stays light when you just look
-    const cm = this.camera.matrixWorld.elements, key = cm.join(',') + this.camera.projectionMatrix.elements[0], now = performance.now();
-    if (key !== this._lastKey || this.dirty || now - (this._lastDraw || 0) > 500) { this._lastKey = key; this.dirty = false; this._lastDraw = now; this.look.render(); }
+    const cm = this.camera.matrixWorld.elements, key = cm.join(',') + this.camera.projectionMatrix.elements[0], now = performance.now(), moving = key !== this._lastKey;
+    if (this.dirty) this.renderer.shadowMap.needsUpdate = true; // the sun does not move: redo its shadows only when the model or what is shown changes
+    if (moving || this.dirty || this.redraw) { this._lastKey = key; this.dirty = false; this.redraw = false; this._still = false; this._movedAt = now; this.look.render(true); this._pace(now); }
+    else if (!this._still && now - this._movedAt > 180) { this._still = true; this.look.render(false); } // stopped: one full-quality frame
+    else if (now - (this._movedAt || 0) > 3000 && now - (this._lastDraw || 0) > 3000) { this._lastDraw = now; this.look.render(false); }
+  }
+  // frame pacing while moving: if frames keep taking longer than ~40 ms, draw fewer pixels
+  _pace(now) {
+    const p = this._pf || (this._pf = { t: now, n: 0, sum: 0 }), dt = now - p.t; p.t = now;
+    if (dt > 200) { p.n = 0; p.sum = 0; return; } p.n++; p.sum += dt;
+    if (p.n >= 30) { if (p.sum / p.n > 40) this.look.slower(); p.n = 0; p.sum = 0; }
   }
   /* ----- small map while walking: the plan seen from above, cut a little below eye level, with you on it ----- */
   _mapMake() {
@@ -459,6 +468,7 @@ export class Viewer {
     this._finish(); return true;
   }
   _finish() {
+    this.dirty = true;
     this.meshes = []; this.model.traverse(o => { if (o.isMesh && !o.isInstancedMesh) { this.meshes.push(o); o.geometry.computeBoundsTree(); } if (o.isMesh) { const tr = [].concat(o.material).some(m => m.transparent); o.castShadow = !tr; o.receiveShadow = true; } });
     this.box = new THREE.Box3().setFromObject(this.model);
     if (this.box.isEmpty()) { this.msg('الملف ما فيه عناصر ثلاثية الأبعاد.'); return; }

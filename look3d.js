@@ -102,6 +102,9 @@ export class Look {
     this.resize(); dressModel(v.scene, hq); v.dirty = true;
   }
   resize() { if (!this.composer) return; const s = this.v.renderer.getSize(new THREE.Vector2()); this.composer.setPixelRatio(this.v.renderer.getPixelRatio()); this.composer.setSize(s.x, s.y); }
-  render() { if (this.composer) this.composer.render(); else this.v.renderer.render(this.v.scene, this.v.camera); }
+  // while the view moves: a plain fast frame; once it stops: the full frame with corner shadows
+  render(moving) { if (this.composer && !moving) this.composer.render(); else this.v.renderer.render(this.v.scene, this.v.camera); }
+  // a slow device: draw fewer pixels (down to 3/4 of the screen) rather than stutter
+  slower() { const r = this.v.renderer, pr = r.getPixelRatio(); if (pr <= 0.76) return false; r.setPixelRatio(Math.max(0.75, pr - 0.25)); this.resize(); return true; }
   dispose() { if (this.composer) { this.composer.dispose(); this.ao.dispose(); } this.env.dispose(); this.sky.material.dispose(); this.sky.geometry.dispose(); }
 }
