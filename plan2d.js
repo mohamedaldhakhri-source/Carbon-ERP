@@ -98,7 +98,7 @@ export function readLevels(sheets) {
 const findLvl = (lv, re, not) => { const k = Object.keys(lv).find(k => re.test(k) && !(not && not.test(k))); return k == null ? null : lv[k]; };
 
 /* ---------- raster helpers ---------- */
-function stampSeg(G, a, b, r, val) {
+export function stampSeg(G, a, b, r, val) {
   const { nx, ny, m } = G, x0 = Math.max(0, Math.floor(Math.min(a[0], b[0]) - r)), x1 = Math.min(nx - 1, Math.ceil(Math.max(a[0], b[0]) + r));
   const y0 = Math.max(0, Math.floor(Math.min(a[1], b[1]) - r)), y1 = Math.min(ny - 1, Math.ceil(Math.max(a[1], b[1]) + r));
   const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1e-9, r2 = r * r;
@@ -108,7 +108,7 @@ function stampSeg(G, a, b, r, val) {
   }
 }
 // cells reachable from the border through cells where pass(i) is true
-function floodBorder(nx, ny, pass) {
+export function floodBorder(nx, ny, pass) {
   const seen = new Uint8Array(nx * ny), q = new Int32Array(nx * ny); let h = 0, t = 0;
   const push = i => { if (!seen[i] && pass(i)) { seen[i] = 1; q[t++] = i; } };
   for (let x = 0; x < nx; x++) { push(x); push((ny - 1) * nx + x); }
@@ -117,7 +117,7 @@ function floodBorder(nx, ny, pass) {
   return seen;
 }
 // chamfer distance (in cells) to the nearest cell where src is set
-function dist(nx, ny, src) {
+export function dist(nx, ny, src) {
   const D = new Float32Array(nx * ny), INF = 1e9;
   for (let i = 0; i < D.length; i++) D[i] = src[i] ? 0 : INF;
   const a = 1, b = 1.4142;
@@ -128,7 +128,7 @@ function dist(nx, ny, src) {
   return D;
 }
 // mask -> rectangles (runs merged down the rows)
-function rects(nx, ny, m) {
+export function rects(nx, ny, m) {
   const out = [], open = new Map();
   for (let y = 0; y <= ny; y++) {
     const runs = new Map();
@@ -139,7 +139,7 @@ function rects(nx, ny, m) {
   return out;
 }
 // connected components of a mask: [{cells:[i...], x0,y0,x1,y1}]
-function comps(nx, ny, m) {
+export function comps(nx, ny, m) {
   const lab = new Int32Array(nx * ny).fill(-1), out = [], q = [];
   for (let s = 0; s < m.length; s++) {
     if (!m[s] || lab[s] >= 0) continue;

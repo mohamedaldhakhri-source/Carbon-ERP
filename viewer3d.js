@@ -5,7 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
-import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=52';
+import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
+import { looksLikePlan, analyzeImages } from './planimg.js?v=53';
 import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
 import { Look, dressModel } from './look3d.js?v=52';
 
@@ -422,10 +423,10 @@ export class Viewer {
   }
   // heavy reading of drawings runs in a background worker, so the page stays responsive; the same code runs here if workers are not available
   _work(fn, ...args) {
-    const direct = () => (fn === 'analyzeSet' ? analyzeSet : recognizeFurniture)(...args);
+    const direct = () => ({ analyzeSet, recognizeFurniture, analyzeImages })[fn](...args);
     if (!this.worker && !this.noWorker) {
       try {
-        this.worker = new Worker(new URL('./plan2d-worker.js?v=52', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
+        this.worker = new Worker(new URL('./plan2d-worker.js?v=53', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
         this.worker.onmessage = e => { const q = this.wq.get(e.data.id); if (!q) return; this.wq.delete(e.data.id); if (e.data.ok) q.res(e.data.r); else q.rej(new Error(e.data.err)); };
         this.worker.onerror = e => { e.preventDefault && e.preventDefault(); const qs = [...this.wq.values()]; this.wq.clear(); this.worker && this.worker.terminate(); this.worker = null; this.noWorker = true; qs.forEach(q => q.fail()); };
       } catch (e) { this.noWorker = true; this.worker = null; }
@@ -480,6 +481,7 @@ export class Viewer {
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
       else if (ext === 'pdf') await this._loadPdf(buf);
+      else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp') await this._loadPictures([buf], ext);
       else throw new Error('نوع الملف غير مدعوم');
     } catch (e) { console.error(e); this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); return false; }
     this._finish(); return true;
@@ -493,7 +495,7 @@ export class Viewer {
     this.camera.near = Math.max(0.02, R / 5000); this.camera.far = R * 20; this.camera.updateProjectionMatrix();
     // ground plane
     const c = this.box.getCenter(new THREE.Vector3());
-    const gnd = new THREE.Mesh(new THREE.CircleGeometry(R * 3, 48), tag(new THREE.MeshStandardMaterial({ color: '#cbc6ba', roughness: 0.95 }), 'paving'));
+    const gnd = new THREE.Mesh(new THREE.RingGeometry(0, R * 3, 64, 24), tag(new THREE.MeshStandardMaterial({ color: '#cbc6ba', roughness: 0.95 }), 'paving'));
     gnd.receiveShadow = true;
     const sn = this.sun; sn.position.set(c.x + R * 0.5, c.y + R * 1.1, c.z + R * 0.35); sn.target.position.copy(c); this.scene.add(sn.target);
     this.look.placeSun(sn.position.clone().sub(c));
@@ -656,8 +658,10 @@ export class Viewer {
     const st = {}; ex.paths.forEach(p => { const s = st[p.layer] = st[p.layer] || { n: 0 }; s.n++; });
     if (Object.keys(st).length < 3) { // plotted without layers (most municipality sets): read the walls from the pens, sheet by sheet
       if (await this._loadSheets(L, ex.doc)) return;
+      if (await this._loadRaster(await this._pdfImages(L, ex.doc))) return;
       throw new Error('ما لقيت في هذا الـ PDF مخطط أدوار أقدر أقرأه (يمكن يكون صورة ممسوحة أو عرض تقديمي). ارفع المخطط المطبوع من AutoCAD، أو ملف DXF أو IFC.');
     }
+    if (ex.paths.length < 300 && await this._loadRaster(await this._pdfImages(L, ex.doc))) return;
     if (ex.paths.length < 300) throw new Error('هذا الـ PDF ما فيه رسم كافي يتحول 3D. ارفع المخطط المطبوع من AutoCAD، أو ملف DXF أو IFC.');
     this.pdf = ex; this.dxfCount = st; this.pdfRoles = guessPdfRoles(Object.keys(st));
     const m = /1\s*:\s*(\d{2,4})/.exec(ex.text || ''); this.pdfScale = m ? +m[1] : 100; this.dxfH = 3.5;
@@ -758,6 +762,76 @@ export class Viewer {
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
   }
+  /* ----- plans that are pictures: key plans inside a presentation, scans, exported images ----- */
+  // every picture in the PDF that looks like a floor plan (white paper, grey and black lines), once each, in page order
+  async _pdfImages(L, doc) {
+    const O = L.OPS, out = [], sig = new Set(), n = Math.min(doc.numPages, 60);
+    for (let i = 1; i <= n; i++) {
+      this.msg('جاري البحث عن المخططات المصوّرة… صفحة ' + i + ' من ' + n); await new Promise(r => setTimeout(r, 0));
+      let page, ol; try { page = await doc.getPage(i); ol = await page.getOperatorList(); } catch (e) { console.warn(e); continue; }
+      for (let j = 0; j < ol.fnArray.length; j++) {
+        const f = ol.fnArray[j]; if (f !== O.paintImageXObject && f !== O.paintInlineImageXObject) continue;
+        let im = ol.argsArray[j][0];
+        if (typeof im === 'string') { const name = im, objs = name.startsWith('g_') ? page.commonObjs : page.objs; im = await new Promise(res => { try { objs.get(name, res); } catch (e) { res(null); } setTimeout(() => res(null), 3000); }); }
+        const pic = im && this._picture(im); if (!pic) continue;
+        const key = pic.width + 'x' + pic.height + ':' + Array.from({ length: 48 }, (_, q) => pic.data[(((q * 7919) % (pic.width * pic.height)) * 4)] >> 3).join(',');
+        if (sig.has(key)) continue; sig.add(key);
+        if (looksLikePlan(pic)) out.push({ ...pic, page: i });
+      }
+      if (out.length >= 6) break;
+    }
+    return out;
+  }
+  // a decoded image (pdf.js gives raw pixels or a bitmap) as RGBA, at most 1600 px on its long side
+  _picture(im) {
+    const w = im.width, h = im.height; if (!w || !h || w < 300 || h < 300 || w / h > 4 || h / w > 4) return null;
+    let src;
+    if (im.bitmap) src = im.bitmap;
+    else if (im.data) {
+      const d = im.data, rgba = new Uint8ClampedArray(w * h * 4);
+      if (im.kind === 3 || d.length === w * h * 4) rgba.set(d.subarray ? d.subarray(0, w * h * 4) : d);
+      else if (im.kind === 2 || d.length === w * h * 3) for (let p = 0, q = 0; p < w * h; p++, q += 3) { rgba[p * 4] = d[q]; rgba[p * 4 + 1] = d[q + 1]; rgba[p * 4 + 2] = d[q + 2]; rgba[p * 4 + 3] = 255; }
+      else { const row = (w + 7) >> 3; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = d[y * row + (x >> 3)] & (128 >> (x & 7)) ? 255 : 0, p = (y * w + x) * 4; rgba[p] = rgba[p + 1] = rgba[p + 2] = v; rgba[p + 3] = 255; } }
+      src = document.createElement('canvas'); src.width = w; src.height = h; src.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
+    } else if (im instanceof HTMLImageElement || (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap)) src = im;
+    else return null;
+    const s = Math.min(1, 1600 / Math.max(w, h)), W = Math.round(w * s), H = Math.round(h * s), cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, 0, 0, W, H);
+    return { width: W, height: H, data: ctx.getImageData(0, 0, W, H).data };
+  }
+  // plan pictures uploaded on their own (PNG / JPG)
+  async _loadPictures(bufs, ext) {
+    const pics = [];
+    for (const b of bufs) { const bmp = await createImageBitmap(new Blob([b], { type: 'image/' + (ext === 'jpg' ? 'jpeg' : ext) })); const p = this._picture(bmp); if (p) pics.push({ ...p, page: pics.length + 1 }); }
+    if (!(await this._loadRaster(pics))) throw new Error('ما قدرت أقرأ مخطط من هذي الصورة. الأفضل تكون صورة المخطط واضحة على خلفية بيضاء.');
+  }
+  async _loadRaster(imgs, opt) {
+    if (!imgs || !imgs.length) return false;
+    this.msg('لقيت ' + (imgs.length > 1 ? imgs.length + ' مخططات مصوّرة' : 'مخطط مصوّر') + '، جاري قراءة الجدران والزجاج والأبواب والدرج…'); await new Promise(r => setTimeout(r, 30));
+    let set = null; try { set = await this._work('analyzeImages', imgs, opt || {}); } catch (e) { console.warn(e); }
+    if (!set || !set.storeys.length) return false;
+    this.rasterImgs = imgs; this.rasterOpt = opt || {}; this.set = set; this.texCache = {};
+    await this._buildSheets(); return true;
+  }
+  async rebuildRaster(opt) {
+    this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
+    const o = { ...this.rasterOpt, ...opt }; let set = null; try { set = await this._work('analyzeImages', this.rasterImgs, o); } catch (e) { console.warn(e); }
+    if (!set) { this.msg('ما قدرت أبني المخطط بهذي القيم.'); return; }
+    this.rasterOpt = o; this.set = set; this.texCache = {};
+    this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
+    await this._buildSheets(); this._finish();
+  }
+  // the plan picture placed on the shared grid, a little sharper than the original
+  _rasterTex(i) {
+    if (this.texCache['r' + i]) return this.texCache['r' + i];
+    const S = this.set, im = this.rasterImgs[i], st = S.storeys.find(s => s.img === i), rg = S.region; if (!im || !st) return null;
+    const f = Math.max(1, Math.min(3, Math.floor((this.look.weak ? 2048 : 4096) / Math.max(S.nx, S.ny)))), cv = document.createElement('canvas'); cv.width = S.nx * f; cv.height = S.ny * f;
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    const t = document.createElement('canvas'); t.width = im.width; t.height = im.height; t.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(im.data), im.width, im.height), 0, 0);
+    ctx.imageSmoothingQuality = 'high'; ctx.drawImage(t, (st.off[0] - rg.X0) * f, (st.off[1] - rg.Y0) * f, im.width * f, im.height * f);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    return (this.texCache['r' + i] = tex);
+  }
   async _sheetTex(pi, off) {
     if (pi == null) return null;
     if (this.texCache[pi]) return this.texCache[pi];
@@ -786,7 +860,8 @@ export class Viewer {
     const box = (list, x0, x1, y0, y1, z0, z1) => { if (x1 - x0 < 0.004 || y1 - y0 < 0.004 || z1 - z0 < 0.004) return; const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0); g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); list.push(g); };
     const add = (list, mat, ud) => { for (let s = 0; s < list.length; s += 3000) { const m = new THREE.Mesh(mergeGeometries(list.slice(s, s + 3000), false), mat); m.userData = { ...ud }; this.model.add(m); } list.forEach(g => g.dispose()); };
     // flat quads with the sheet mapped on them (world x,z -> page coordinates of the base sheet)
-    const uv = (x, z) => [((pcx + x / k) - rg.X0) / (rg.X1 - rg.X0), ((pcy - z / k) - rg.Y0) / (rg.Y1 - rg.Y0)];
+    // (a picture plan runs down the page: world z grows with the picture's rows)
+    const uv = S.raster ? (x, z) => [(x / k + pcx - rg.X0) / (rg.X1 - rg.X0), 1 - (z / k + pcy - rg.Y0) / (rg.Y1 - rg.Y0)] : (x, z) => [((pcx + x / k) - rg.X0) / (rg.X1 - rg.X0), ((pcy - z / k) - rg.Y0) / (rg.Y1 - rg.Y0)];
     const quads = (list, y) => { const pos = [], uvs = [], idx = []; list.forEach(r => { const b = pos.length / 3; [[r.x0, r.z0], [r.x0, r.z1], [r.x1, r.z1], [r.x1, r.z0]].forEach(([x, z]) => { pos.push(x, y, z); uvs.push(...uv(x, z)); }); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); });
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); g.setIndex(idx); g.computeVertexNormals(); return g; };
     const counts = { walls: 0, windows: 0, doors: 0, floor: 0, roof: 0 };
@@ -815,6 +890,9 @@ export class Viewer {
         }
       });
       s.parapets.forEach(r => box(W, r.x0, r.x1, b, b + s.parapetH, r.z0, r.z1));
+      // glass partitions and shopfronts drawn as yellow lines: floor to ceiling glass in a thin frame
+      (s.glass || []).forEach(r => { box(GL, r.x0, r.x1, b + 0.05, t - 0.05, r.z0, r.z1); box(FR, r.x0, r.x1, b, b + 0.05, r.z0, r.z1); box(FR, r.x0, r.x1, t - 0.05, t, r.z0, r.z1); });
+      counts.windows += (s.glass || []).length;
       // stairs up to the next storey: each tread a stepped slab (not solid, so you can walk under the flight above)
       const STP = [];
       (s.stairs || []).forEach(st => st.steps.concat(st.lands).forEach(q => { const y0 = Math.max(b, q.top - 0.28), h = q.top - y0; if (h < 0.02) return;
@@ -827,10 +905,10 @@ export class Viewer {
       s.slab.forEach(r => box(SL, r.x0, r.x1, sy0, sy1, r.z0, r.z1)); counts.floor += s.slab.length;
       add(W, MAT.wall, { ...ud, cat: 'walls' }); add(GL, MAT.glass, { ...ud, cat: 'windows' }); add(FR, MAT.frame, { ...ud, cat: 'windows', noCollide: true });
       add(DR, MAT.door, { ...ud, cat: 'doors', noCollide: true }); add(SL, MAT.slab, { ...ud, cat: 'floor' });
-      const tex = await this._sheetTex(s.page, s.off).catch(e => { console.warn(e); return null; });
+      const tex = S.raster ? this._rasterTex(s.img) : await this._sheetTex(s.page, s.off).catch(e => { console.warn(e); return null; });
       if (tex && s.slab.length) { const m = new THREE.Mesh(quads(s.slab, sy1 + 0.003), new THREE.MeshStandardMaterial({ map: tex, color: '#efe7d8', roughness: 0.55 })); m.userData = { ...ud, cat: 'floor', noCollide: true }; this.model.add(m); }
       if (i === 0 && tex) { // the site around the building (parking, paving, landscape) from the ground floor sheet
-        const g = quads([{ x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: -(rg.Y1 - pcy) * k, z1: -(rg.Y0 - pcy) * k }], 0.004);
+        const g = quads([S.raster ? { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: (rg.Y0 - pcy) * k, z1: (rg.Y1 - pcy) * k } : { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: -(rg.Y1 - pcy) * k, z1: -(rg.Y0 - pcy) * k }], 0.004);
         const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, color: '#ddd8cc', roughness: 0.95 })); m.userData = { cat: 'floor', noCollide: true, site: true }; this.model.add(m);
       }
     }
@@ -990,9 +1068,11 @@ export class Viewer {
       h += '<div class="v3-modes"><button type="button" data-all="1">👁 إظهار كل التفاصيل</button></div>';
       const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك', doors: 'الأبواب', stairs: 'الدرج', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
       h += '<div class="v3-cats"><b>عناصر المبنى</b>' + Object.keys(CL).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '>' + CL[c] + ' <small>' + this.counts[c] + '</small></label>').join('') +
-        '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>' +
+        (S.raster ? '<label class="v3-f"><span>عرض المبنى (م)</span><input type="number" min="3" max="400" step="0.1" value="' + S.width + '" data-rw="1"></label><label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="12" step="0.1" value="' + S.height + '" data-rh="1"></label>' :
+        '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>') +
         '<b style="margin-top:6px">الصفحات اللي انقرت</b><span class="v3-note">' + S.sheets.map(x => 'ص' + (x.i + 1) + ': ' + esc(x.title || '—')).join('<br>') + '</span>' +
-        '<span class="v3-note">الجدران من القلم الأسمك في المخطط، والأبواب والشبابيك من الفتحات ورموزها، والمناسيب من القطاع' + (Object.keys(S.levels).length ? '' : ' (ما لقيتها، فاستخدمت 3.6 م للدور)') + '.</span></div>';
+        (S.raster ? '<span class="v3-note">المخطط هنا صورة، فقريته من الألوان والأشكال: الجدران من التعبئة الرمادية، والزجاج من الخطوط الصفراء، والأبواب من الفتحات بين الجدران، والفراغات المفتوحة (Double height) من علامة X، والدرج من الدرجات المرسومة. المقياس محسوب من سماكة الجدران، ولو العرض مو مضبوط اكتب العرض الصحيح فوق ويتعدل كل شي.</span></div>' :
+        '<span class="v3-note">الجدران من القلم الأسمك في المخطط، والأبواب والشبابيك من الفتحات ورموزها، والمناسيب من القطاع' + (Object.keys(S.levels).length ? '' : ' (ما لقيتها، فاستخدمت 3.6 م للدور)') + '.</span></div>');
     } else if (this.ext === 'dxf' || this.ext === 'pdf') {
       const pdf = this.ext === 'pdf', RL = pdf ? PDF_ROLES : { wall: 'جدران', window: 'شبابيك', door: 'أبواب', skip: 'تجاهل' }, rolesNow = pdf ? this.pdfRoles : this.dxfRoles;
       h += '<div class="v3-cats"><b>طريقة رفع المخطط</b><label class="v3-f"><span>ارتفاع الجدران (م)</span><input type="number" step="0.1" min="2" max="12" value="' + this.dxfH + '" data-dh="1"></label>' +
@@ -1026,6 +1106,8 @@ export class Viewer {
       else if (t.dataset.st) { this.storeySel = t.value; if (this.mode === 'walk') this.setMode('walk'); else this.applyVis(); }
       else if (t.dataset.layer != null) { if (this.ext === 'pdf') { this.pdfRoles[t.dataset.layer] = t.value; this.rebuildPdf(); } else { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); } }
       else if (t.dataset.dh) { this.dxfH = Math.max(2, Math.min(12, +t.value || 3)); if (this.ext === 'pdf') this.rebuildPdf(); else this.rebuildDxf(); }
+      else if (t.dataset.rw && this.set && this.set.raster) { const w = +t.value; if (w > 2 && this.set.width) this.rebuildRaster({ mpp: this.set.mpp * w / this.set.width }); }
+      else if (t.dataset.rh && this.set && this.set.raster) { const v = +t.value; if (v >= 2.4 && v <= 12) this.rebuildRaster({ height: v }); }
       else if (t.dataset.ps) { this.pdfScale = Math.max(1, +t.value || 100); if (this.set) this.rebuildSheets(); else this.rebuildPdf(); }
       else if (t.dataset.du) { this.dxfUnits = +t.value; this.rebuildDxf(); }
     };
