@@ -6,9 +6,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
 import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
-import { looksLikePlan, analyzeImages } from './planimg.js?v=53';
+import { looksLikePlan, analyzeImages } from './planimg.js?v=55';
 import { dwgToDxf } from './dwg.js?v=53';
-import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=55';
 import { Look, dressModel } from './look3d.js?v=52';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -427,7 +427,7 @@ export class Viewer {
     const direct = () => ({ analyzeSet, recognizeFurniture, analyzeImages, dwgToDxf })[fn](...args);
     if (!this.worker && !this.noWorker) {
       try {
-        this.worker = new Worker(new URL('./plan2d-worker.js?v=54', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
+        this.worker = new Worker(new URL('./plan2d-worker.js?v=55', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
         this.worker.onmessage = e => { const q = this.wq.get(e.data.id); if (!q) return; this.wq.delete(e.data.id); if (e.data.ok) q.res(e.data.r); else q.rej(new Error(e.data.err)); };
         this.worker.onerror = e => { e.preventDefault && e.preventDefault(); const qs = [...this.wq.values()]; this.wq.clear(); this.worker && this.worker.terminate(); this.worker = null; this.noWorker = true; qs.forEach(q => q.fail()); };
       } catch (e) { this.noWorker = true; this.worker = null; }
@@ -910,6 +910,20 @@ export class Viewer {
         const g = new THREE.BoxGeometry(q.depth + 0.01, h, q.width); g.rotateY(q.ang); g.translate(q.x, y0 + h / 2, q.z); STP.push(g); }));
       counts.stairs = (counts.stairs || 0) + (s.stairs || []).length;
       add(STP, MAT.stair, { ...ud, cat: 'stairs' });
+      // furniture read from a plan picture, each piece where it is drawn and facing its table
+      if (s.furniture && s.furniture.length) {
+        const grp = new THREE.Group(), byMat = new Map();
+        s.furniture.forEach(it => { const L = Math.max(it.sx || 0, it.sz || 0), W = Math.min(it.sx || 0, it.sz || 0), turn = (it.sz || 0) > (it.sx || 0) ? Math.PI / 2 : 0; let q = null;
+          if (it.t === 'chair') q = { t: 'ochair', r: it.r }; else if (it.t === 'armchair') q = { t: 'armchair', r: it.r };
+          else if (it.t === 'table') q = { t: 'otable', sx: L, sz: W, r: turn }; else if (it.t === 'desk') q = { t: 'desk', sx: L, sz: W, r: turn };
+          else if (it.t === 'rtable') q = { t: 'rtable', d: it.d }; else if (it.t === 'cabinet') q = { t: 'cabinet', sx: L, sz: W, r: turn };
+          else if (it.t === 'ltable') q = { t: 'ltable', sx: L, sz: W, r: turn }; else if (it.t === 'sofa') q = { t: 'sofa', sx: L / 2.2, r: turn };
+          const g = q && buildItem({ ...q, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
+        grp.updateMatrixWorld(true);
+        grp.traverse(o => { if (!o.isMesh) return; const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld); (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(g); o.geometry.dispose(); });
+        byMat.forEach((gs, mat) => { for (let k2 = 0; k2 < gs.length; k2 += 3000) { const m = new THREE.Mesh(mergeGeometries(gs.slice(k2, k2 + 3000), false), mat); m.castShadow = true; m.receiveShadow = true; m.userData = { ...ud, cat: 'furniture', noCollide: true }; this.model.add(m); } gs.forEach(g => g.dispose()); });
+        counts.furniture = (counts.furniture || 0) + s.furniture.length;
+      }
       counts.walls += s.walls.length + s.parapets.length;
       // floor slab, with this storey's sheet printed on it
       const sy0 = i ? b - 0.22 : 0, sy1 = i ? b : 0.15;
@@ -1077,7 +1091,7 @@ export class Viewer {
       const S = this.set;
       if (this.storeys.length > 1) h += '<label class="v3-f"><span>الأدوار</span><select data-st="1"><option value="all">كل المبنى</option>' + this.storeys.map(x => '<option value="' + x.id + '"' + (String(x.id) === String(this.storeySel) ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></label><span class="v3-note">في وضع المشي: اختار الدور وينقلك له.</span>';
       h += '<div class="v3-modes"><button type="button" data-all="1">👁 إظهار كل التفاصيل</button></div>';
-      const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك', doors: 'الأبواب', stairs: 'الدرج', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
+      const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك والزجاج', doors: 'الأبواب', stairs: 'الدرج', furniture: 'الأثاث (من المخطط)', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
       h += '<div class="v3-cats"><b>عناصر المبنى</b>' + Object.keys(CL).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '>' + CL[c] + ' <small>' + this.counts[c] + '</small></label>').join('') +
         (S.raster ? '<label class="v3-f"><span>عرض المبنى (م)</span><input type="number" min="3" max="400" step="0.1" value="' + S.width + '" data-rw="1"></label><label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="12" step="0.1" value="' + S.height + '" data-rh="1"></label>' :
         '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>') +

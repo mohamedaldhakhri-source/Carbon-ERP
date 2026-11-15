@@ -147,6 +147,92 @@ export function findXs(P, mpp) {
   return out;
 }
 
+// furniture drawn on the plan: tables and desks are closed outlines (their inside is an enclosed white patch),
+// round tables enclose a round patch, and chairs are small separate symbols left over once the tables are taken out.
+// Returned in picture pixels: { t: 'table'|'desk'|'rtable'|'cabinet'|'sofa'|'ltable'|'chair'|'armchair', x, y, sx, sy, d, f:[fx,fy] }
+function comps8(w, h, m, keep) {
+  const lab = new Int32Array(w * h).fill(-1), out = [], q = [];
+  for (let s = 0; s < m.length; s++) {
+    if (!m[s] || lab[s] >= 0) continue; const c = { cells: [], x0: 1e9, y0: 1e9, x1: -1, y1: -1 }; lab[s] = out.length; q.length = 0; q.push(s);
+    while (q.length) { const i = q.pop(), x = i % w, y = (i / w) | 0; c.cells.push(i); if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const j = yy * w + xx; if (m[j] && lab[j] < 0) { lab[j] = out.length; q.push(j); } } }
+    if (!keep || keep(c)) out.push(c);
+  }
+  return out;
+}
+export function findFurniture(P, mpp, skip) {
+  const { w, h, faint, wall, glass } = P, N = w * h, px = v => v / mpp, out = [];
+  // the drawing's thin lines, without walls, glass and the long grid / dimension lines that cross the whole plan
+  const m = new Uint8Array(N); for (let i = 0; i < N; i++) m[i] = faint[i] && !wall[i] && !glass[i] && !(skip && skip[i]) ? 1 : 0;
+  const LONG = px(4.5);
+  for (let y = 0; y < h; y++) { let x = 0; while (x < w) { if (!m[y * w + x]) { x++; continue; } let e = x; while (e < w && m[y * w + e]) e++; if (e - x >= LONG) for (let t = x; t < e; t++) m[y * w + t] = 2; x = e; } }
+  for (let x = 0; x < w; x++) { let y = 0; while (y < h) { if (!m[y * w + x]) { y++; continue; } let e = y; while (e < h && m[e * w + x]) e++; if (e - y >= LONG) for (let t = y; t < e; t++) m[t * w + x] = 2; y = e; } }
+  for (let i = 0; i < N; i++) if (m[i] === 2) m[i] = 0;
+  // enclosed white patches (walls and glass count as edges too, so a room is a patch as well and is told apart below)
+  const free = new Uint8Array(N); for (let i = 0; i < N; i++) free[i] = m[i] || wall[i] || glass[i] ? 0 : 1;
+  const holes = comps(w, h, free).filter(c => { const bw = (c.x1 - c.x0 + 1) * mpp, bh = (c.y1 - c.y0 + 1) * mpp; return c.x0 > 0 && c.y0 > 0 && c.x1 < w - 1 && c.y1 < h - 1 && Math.min(bw, bh) >= 0.4 && Math.max(bw, bh) <= 4.2 && bw * bh <= 8; });
+  const sideWall = (x0, y0, x1, y1) => { // how many of the four sides run along a wall or glass
+    const at = (x, y) => { for (let d = -3; d <= 3; d++) for (let e = -3; e <= 3; e++) { const xx = x + d, yy = y + e; if (xx >= 0 && yy >= 0 && xx < w && yy < h && (wall[yy * w + xx] || glass[yy * w + xx])) return 1; } return 0; };
+    const side = (ax, ay, bx, by) => { let k = 0, n = 0; for (let t = 0.1; t <= 0.9; t += 0.1) { n++; k += at(Math.round(ax + (bx - ax) * t), Math.round(ay + (by - ay) * t)); } return k / n > 0.6 ? 1 : 0; };
+    return side(x0 - 2, y0 - 2, x1 + 2, y0 - 2) + side(x0 - 2, y1 + 2, x1 + 2, y1 + 2) + side(x0 - 2, y0 - 2, x0 - 2, y1 + 2) + side(x1 + 2, y0 - 2, x1 + 2, y1 + 2);
+  };
+  // the ink around each patch: the outline it belongs to (a desk cluster has several patches inside one outline)
+  const inkLab = new Int32Array(N).fill(-1), inkC = comps8(w, h, m); inkC.forEach((c, k) => c.cells.forEach(i => { inkLab[i] = k; }));
+  const groups = new Map(), rounds = [];
+  holes.forEach(c => {
+    const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1, fill = c.cells.length / (bw * bh), wm = bw * mpp, hm = bh * mpp;
+    if (sideWall(c.x0, c.y0, c.x1, c.y1) >= 2) return; // a small room or a cupboard space, not furniture
+    const ell = c.cells.length / (Math.PI / 4 * bw * bh);
+    if (Math.abs(bw - bh) <= Math.max(bw, bh) * 0.15 && ell > 0.9 && ell < 1.08 && fill < 0.86 && wm >= 0.5 && wm <= 1.8) { rounds.push({ x: (c.x0 + c.x1) / 2, y: (c.y0 + c.y1) / 2, d: (bw + bh) / 2 * mpp + 0.05 }); return; }
+    if (fill < 0.62 || Math.min(wm, hm) < 0.5 || Math.min(wm, hm) > 1.6) return; // wider than 1.6 m is a zone or a room, not a table top
+    // a zone drawn with thin lines that has chairs or other pieces standing inside it is not a table top
+    if (inkC.some(q => q.x0 > c.x0 + 1 && q.y0 > c.y0 + 1 && q.x1 < c.x1 - 1 && q.y1 < c.y1 - 1 && Math.max(q.x1 - q.x0, q.y1 - q.y0) * mpp >= 0.4 && Math.min(q.x1 - q.x0, q.y1 - q.y0) * mpp >= 0.3)) return;
+    // which outline holds this patch: the ink just left of it
+    let k = -1; for (let x = c.x0 - 1; x >= Math.max(0, c.x0 - 4) && k < 0; x--) k = inkLab[((c.y0 + c.y1) >> 1) * w + x];
+    if (k < 0) for (let y = c.y0 - 1; y >= Math.max(0, c.y0 - 4) && k < 0; y--) k = inkLab[y * w + ((c.x0 + c.x1) >> 1)];
+    const key = k < 0 ? 'h' + c.x0 + '_' + c.y0 : k, g = groups.get(key) || groups.set(key, { x0: 1e9, y0: 1e9, x1: -1, y1: -1, n: 0, big: 0 }).get(key);
+    g.x0 = Math.min(g.x0, c.x0); g.y0 = Math.min(g.y0, c.y0); g.x1 = Math.max(g.x1, c.x1); g.y1 = Math.max(g.y1, c.y1); g.n++; g.big++; g.area = (g.area || 0) + bw * bh; (g.parts = g.parts || []).push({ x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 });
+  });
+  // patches inside one outline make one piece when together they fill it (a desk cluster); otherwise each is its own piece (an L of cabinets)
+  const rectsF = [...groups.values()].filter(g => g.big).flatMap(g => g.area >= 0.6 * (g.x1 - g.x0 + 1) * (g.y1 - g.y0 + 1) ? [g] : g.parts.map(q => ({ ...q, n: 1 }))).map(g => ({ x0: g.x0 - 1, y0: g.y0 - 1, x1: g.x1 + 1, y1: g.y1 + 1, n: g.n })).filter(r => { const a = (r.x1 - r.x0) * mpp, b = (r.y1 - r.y0) * mpp; return Math.min(a, b) >= 0.45 && Math.max(a, b) <= 6; });
+  // chairs: what is left of the drawing once tables are taken out, in small separate pieces
+  const rest = m.slice(), blank = (x0, y0, x1, y1) => { for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) rest[y * w + x] = 0; };
+  rectsF.forEach(r => blank(r.x0 - 2, r.y0 - 2, r.x1 + 2, r.y1 + 2)); rounds.forEach(r => { const R = r.d / mpp / 2 + 2; blank(Math.round(r.x - R), Math.round(r.y - R), Math.round(r.x + R), Math.round(r.y + R)); });
+  const chairs = [];
+  comps8(w, h, rest, c => { const bw = (c.x1 - c.x0 + 1) * mpp, bh = (c.y1 - c.y0 + 1) * mpp, d = c.cells.length / ((c.x1 - c.x0 + 1) * (c.y1 - c.y0 + 1)), L = Math.max(bw, bh), S = Math.min(bw, bh);
+    // two chairs side by side drawn touching: split in two
+    if (L >= 0.8 && L <= 1.4 && S >= 0.35 && S <= 0.7 && L / S >= 1.7 && L / S <= 2.8 && d >= 0.1 && d <= 0.97) { const hx = bw >= bh, mid = hx ? (c.x0 + c.x1) / 2 : (c.y0 + c.y1) / 2;
+      [0, 1].forEach(k => { const cs = c.cells.filter(i => ((hx ? i % w : (i / w) | 0) < mid) === !k); if (!cs.length) return; const q = { cells: cs, x0: 1e9, y0: 1e9, x1: -1, y1: -1 }; cs.forEach(i => { const x = i % w, y = (i / w) | 0; q.x0 = Math.min(q.x0, x); q.x1 = Math.max(q.x1, x); q.y0 = Math.min(q.y0, y); q.y1 = Math.max(q.y1, y); }); chairs.push(q); }); return false; }
+    const ok = Math.max(bw, bh) >= 0.38 && Math.max(bw, bh) <= 0.95 && Math.min(bw, bh) >= 0.3 && Math.max(bw, bh) / Math.min(bw, bh) <= 1.7 && d >= 0.1 && d <= 0.97; if (ok) chairs.push(c); return false; });
+  const near = (x, y, r) => { const dx = Math.max(r.x0 - x, 0, x - r.x1), dy = Math.max(r.y0 - y, 0, y - r.y1); return Math.hypot(dx, dy) * mpp; };
+  const used = new Set();
+  chairs.forEach(c => {
+    const x = (c.x0 + c.x1) / 2, y = (c.y0 + c.y1) / 2, size = Math.max(c.x1 - c.x0 + 1, c.y1 - c.y0 + 1) * mpp;
+    let f = null, best = 1.0;
+    rectsF.forEach((r, k) => { const d = near(x, y, r); if (d < best) { best = d; used.add(k); const cx = Math.max(r.x0, Math.min(r.x1, x)), cy = Math.max(r.y0, Math.min(r.y1, y)); f = Math.abs(cx - x) > Math.abs(cy - y) ? [Math.sign(cx - x), 0] : [0, Math.sign(cy - y)]; } });
+    rounds.forEach(r => { const d = Math.hypot(r.x - x, r.y - y) * mpp - r.d / 2; if (d < best) { best = d; const L = Math.hypot(r.x - x, r.y - y) || 1; f = [(r.x - x) / L, (r.y - y) / L]; } });
+    if (!f) { // a chair on its own: it must look like one (a closed seat or a solid seat, at least 45 cm), not a letter or a mark
+      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1, solid = c.cells.length / (bw * bh) > 0.75, own = new Uint8Array(bw * bh); c.cells.forEach(i => { own[(((i / w) | 0) - c.y0) * bw + (i % w - c.x0)] = 1; });
+      const out2 = floodBorder(bw, bh, j => !own[j]); let inside = 0; for (let j = 0; j < bw * bh; j++) if (!own[j] && !out2[j]) inside++;
+      if (size < 0.45 || !(solid || inside * mpp * mpp >= 0.03)) return;
+      // facing away from the heavier side (the backrest)
+      let sx = 0, sy = 0; c.cells.forEach(i => { sx += i % w - x; sy += ((i / w) | 0) - y; }); sx /= c.cells.length; sy /= c.cells.length;
+      f = Math.abs(sx) > Math.abs(sy) ? [-Math.sign(sx) || 1, 0] : [0, -Math.sign(sy) || 1]; }
+    out.push({ t: size > 0.82 ? 'armchair' : 'chair', x, y, f });
+  });
+  rectsF.forEach((r, k) => {
+    const sx = (r.x1 - r.x0) * mpp, sy = (r.y1 - r.y0) * mpp, x = (r.x0 + r.x1) / 2, y = (r.y0 + r.y1) / 2, L = Math.max(sx, sy), W = Math.min(sx, sy);
+    if (used.has(k)) { out.push({ t: r.n >= 3 ? 'desk' : 'table', x, y, sx, sy }); return; }
+    const against = sideWall(r.x0, r.y0, r.x1, r.y1) >= 1;
+    if (against && W <= 0.8) out.push({ t: 'cabinet', x, y, sx, sy });
+    else if (L >= 1.4 && L <= 2.8 && W >= 0.6 && W <= 1.1) out.push({ t: 'sofa', x, y, sx, sy });
+    else if (L <= 1.6) out.push({ t: 'ltable', x, y, sx, sy });
+    else out.push({ t: 'table', x, y, sx, sy });
+  });
+  rounds.forEach(r => out.push({ t: 'rtable', x: r.x, y: r.y, d: r.d }));
+  return out;
+}
+
 /* imgs: [{width, height, data (RGBA), page}] in the order the storeys go up. opt: { mpp: metres per pixel, height: storey height in m } */
 export function analyzeImages(imgs, opt) {
   opt = opt || {};
@@ -193,7 +279,12 @@ export function analyzeImages(imgs, opt) {
     if (opt.debug) xs.forEach(b => opt.debug.push({ i, X: [b.x0, b.y0, b.x1, b.y1], m: [+((b.x1 - b.x0) * c).toFixed(1), +((b.y1 - b.y0) * c).toFixed(1)] }));
     const nVoid = xs.length;
     const flights = findTreads(p, offs[i][0] - X0, offs[i][1] - Y0, mpp);
-    return { wall, glass, op, foot, voids, nVoid, opens, flights, off: offs[i] };
+    // furniture (not on the stairs, not over voids)
+    let furn = []; try { furn = findFurniture(p, mpp); } catch (e) { }
+    const ox = offs[i][0] - X0, oy = offs[i][1] - Y0, onStair = (gx, gy) => flights.some(f => f.steps.some(q => Math.hypot(q.x - gx, q.y - gy) < f.width * 0.8));
+    furn = furn.filter(it => { const gx = Math.round(it.x + ox), gy = Math.round(it.y + oy), j = gy * nx + gx; return gx >= 0 && gy >= 0 && gx < nx && gy < ny && foot[j] && !voids[j] && !onStair(gx, gy); })
+      .map(it => ({ ...it, x: wx(it.x + ox), z: wz(it.y + oy), sx: it.sx, sz: it.sy, r: it.f ? Math.atan2(it.f[0], it.f[1]) : 0 }));
+    return { wall, glass, op, foot, voids, nVoid, opens, flights, furn, off: offs[i] };
   });
   // storeys: ground at 0, each one H higher
   const res = { raster: true, scale: 0, k: c, mpp, wallTh: th, cell: c, nx, ny, region: { X0, Y0, X1, Y1 }, center: [cxp, cyp], levels: {}, storeys: [] };
@@ -229,7 +320,7 @@ export function analyzeImages(imgs, opt) {
     for (let j = 0; j < N; j++) slab[j] = (s.foot[j] || (below && below[j])) && !holes[i][j] && !(i && s.voids[j]) ? 1 : 0;
     // walls and glass of this storey; glass runs floor to ceiling here (offices, shopfronts, balustrades on voids)
     res.storeys.push({ kind: i ? 'f' + i : 'g', name: NAMES[i] || ('دور ' + (i + 1)), title: '', page: imgs[i].page, img: i, off: [s.off[0] - 0, s.off[1] - 0], base: b, top: b + H,
-      walls: rects(nx, ny, s.wall).map(R), glass: rects(nx, ny, s.glass).map(R), parapets: [], parapetH: 1, opens: s.opens, slab: rects(nx, ny, slab).map(R), stairs: stairsOf[i], voids: s.nVoid, flights: s.flights.map(f => ({ n: f.steps.length, w: +(f.width * c).toFixed(2), gap: +(f.gap * c).toFixed(2), at: [Math.round(f.steps[0].x), Math.round(f.steps[0].y)] })) });
+      furniture: s.furn, walls: rects(nx, ny, s.wall).map(R), glass: rects(nx, ny, s.glass).map(R), parapets: [], parapetH: 1, opens: s.opens, slab: rects(nx, ny, slab).map(R), stairs: stairsOf[i], voids: s.nVoid, flights: s.flights.map(f => ({ n: f.steps.length, w: +(f.width * c).toFixed(2), gap: +(f.gap * c).toFixed(2), at: [Math.round(f.steps[0].x), Math.round(f.steps[0].y)] })) });
   });
   const top = storeys[storeys.length - 1];
   const roofM = new Uint8Array(N); for (let j = 0; j < N; j++) roofM[j] = top.foot[j] || (storeys.length > 1 && storeys[storeys.length - 2].foot[j]) ? 1 : 0;

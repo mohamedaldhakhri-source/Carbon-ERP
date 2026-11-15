@@ -71,6 +71,16 @@ export const LIB = {
   otable: { hide: true, build: (g, a, it) => { const L = Math.max(0.8, it.sx || 1.6), W = Math.max(0.5, it.sz || 0.8), top = prim(a, M.oak());
     if (it.oval) { const t = cyl(g, 0.5, 0.5, 0.04, 0, 0.73, 0, top, 48); t.scale.set(L, 1, W); } else box(g, L, 0.04, W, 0, 0.73, 0, top);
     [-1, 1].forEach(s => { cyl(g, 0.05, 0.06, 0.69, s * L * 0.3, 0.355, 0, M.black(), 12); box(g, 0.08, 0.03, W * 0.6, s * L * 0.3, 0.015, 0, M.black()); }); } },
+  // office pieces read from plan pictures (sizes come from the drawing)
+  ochair: { hide: true, build: (g, a) => { const k = prim(a, mat('#3a3d42', { roughness: 0.8 })), m = M.black();
+    for (let i = 0; i < 5; i++) { const t = i * Math.PI * 2 / 5, l = box(g, 0.3, 0.025, 0.04, Math.sin(t) * 0.14, 0.05, Math.cos(t) * 0.14, m); l.rotation.y = t + Math.PI / 2; }
+    cyl(g, 0.025, 0.025, 0.36, 0, 0.24, 0, m, 10); box(g, 0.48, 0.07, 0.46, 0, 0.46, 0.02, k); box(g, 0.44, 0.5, 0.06, 0, 0.78, -0.21, k);
+    [-1, 1].forEach(s2 => box(g, 0.04, 0.03, 0.26, s2 * 0.24, 0.64, 0.02, m)); } },
+  desk: { hide: true, build: (g, a, it) => { const L = Math.max(0.6, it.sx || 1.4), W = Math.max(0.5, it.sz || 0.7), top = prim(a, mat('#f3f1ec', { roughness: 0.4 })), m = M.black();
+    box(g, L, 0.03, W, 0, 0.735, 0, top); [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([x, z]) => box(g, 0.04, 0.72, 0.04, x * (L / 2 - 0.05), 0.36, z * (W / 2 - 0.05), m));
+    if (W > 1.1) box(g, L - 0.04, 0.38, 0.025, 0, 0.94, 0, tag(mat('#6d8796', { roughness: 0.9 }), 'fabric')); } },
+  cabinet: { hide: true, build: (g, a, it) => { const L = Math.max(0.3, it.sx || 1), W = Math.max(0.3, it.sz || 0.6); box(g, L, 0.86, W, 0, 0.45, 0, prim(a, M.oak())); box(g, L + 0.02, 0.03, W + 0.02, 0, 0.895, 0, M.marble()); } },
+  ltable: { hide: true, build: (g, a, it) => { const L = Math.max(0.4, it.sx || 1), W = Math.max(0.4, it.sz || 0.6); box(g, L, 0.05, W, 0, 0.42, 0, prim(a, M.walnut())); box(g, L * 0.8, 0.4, W * 0.7, 0, 0.2, 0, M.walnut()); } },
   parasol: { l: 'مظلة جلسة خارجية', i: '⛱', build: (g, a) => { cyl(g, 0.03, 0.03, 2.4, 0, 1.2, 0, M.walnut(), 8); const c = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.45, 8, 1, true), prim(a, M.fabric())); c.position.y = 2.5; c.material.side = THREE.DoubleSide; g.add(c); cyl(g, 0.3, 0.32, 0.08, 0, 0.04, 0, M.black(), 16); } }
 };
 
