@@ -35,12 +35,18 @@ const make = {
   stone: () => { const n = noise2(512, 512, 10), m = noise2(512, 512, 70); return canvasTex(512, (d, S) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const band = Math.sin((y / S * 12 + n(x, y) * 3) * Math.PI) * 0.5 + 0.5, pore = m(x, y) < 0.18 ? 0.82 : 1, v = (0.86 + band * 0.08 + rnd() * 0.04) * pore, i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = v * 255; d[i + 3] = 255; } }); }
 };
+// floor and wall finishes read from design renders
+make.tile = () => canvasTex(512, (d, S) => { const g = S / 2; for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const e = Math.min(x % g, y % g, g - 1 - (x % g), g - 1 - (y % g)), v = (e < 2 ? 0.8 : 0.95) + rnd() * 0.03, i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = v * 255; d[i + 3] = 255; } });
+make.terrazzo = () => { const m = noise2(512, 512, 40); return canvasTex(512, (d, S) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const r = rnd(), v = r < 0.025 ? 0.7 : r < 0.05 ? 1.04 : 0.93 + m(x, y) * 0.04, i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = Math.min(255, v * 255); d[i + 3] = 255; } }); };
+make.concrete = () => { const n = noise2(512, 512, 6), m = noise2(512, 512, 60); return canvasTex(512, (d, S) => { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const v = 0.88 + n(x, y) * 0.08 + m(x, y) * 0.04 + rnd() * 0.02, i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = Math.min(255, v * 255); d[i + 3] = 255; } }); };
+make.slats = () => canvasTex(256, (d, S) => { const w = S / 8; for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const e = x % w, v = e < 3 ? 0.55 : 0.9 + Math.sin(y * 0.15 + Math.floor(x / w) * 2) * 0.03, i = (y * S + x) * 4; d[i] = v * 255; d[i + 1] = v * 247; d[i + 2] = v * 235; d[i + 3] = 255; } });
 const tex = k => TEX[k] || (TEX[k] = make[k]());
 // how many metres one copy of the texture covers
 const LOOK = {
   wood: { t: 'wood', s: 0.9, rough: 0.55, env: 0.6 }, walnut: { t: 'wood', s: 0.9, rough: 0.5, env: 0.6 }, marble: { t: 'marble', s: 1.2, rough: 0.18, env: 1.1 },
   fabric: { t: 'fabric', s: 0.25, rough: 0.95, env: 0.3 }, leather: { t: 'leather', s: 0.5, rough: 0.45, env: 0.6 }, plaster: { t: 'plaster', s: 2.5, rough: 0.92, env: 0.35 },
-  stone: { t: 'stone', s: 1.2, rough: 0.7, env: 0.5 }, paving: { t: 'stone', s: 4, rough: 0.95, env: 0.3 }, metal: { env: 1.2 }, glass: { env: 0.7 }, floor: { env: 0.45 }
+  stone: { t: 'stone', s: 1.2, rough: 0.7, env: 0.5 }, paving: { t: 'stone', s: 4, rough: 0.95, env: 0.3 }, metal: { env: 1.2 }, glass: { env: 0.7 }, floor: { env: 0.45 },
+  tile: { t: 'tile', s: 1.2, rough: 0.35, env: 0.8 }, terrazzo: { t: 'terrazzo', s: 1.0, rough: 0.3, env: 0.8 }, concrete: { t: 'concrete', s: 3, rough: 0.45, env: 0.6 }, carpet: { t: 'fabric', s: 0.35, rough: 1, env: 0.15 }, slats: { t: 'slats', s: 0.9, rough: 0.6, env: 0.4 }
 };
 
 // texture coordinates in metres, projected from the side each face looks at (so long walls are not stretched)

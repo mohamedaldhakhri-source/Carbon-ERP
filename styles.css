@@ -445,3 +445,11 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 @media (max-width:700px),(pointer:coarse){.v3-stage canvas.v3-map{width:150px!important;top:48px}}
 .v3-hq{display:flex;align-items:flex-start;gap:6px;font-size:.82rem;margin:8px 0;cursor:pointer}
 .v3-hq input[type=checkbox]{width:auto;flex:none;margin:3px 0 0;padding:0}
+.v3-area{display:grid;grid-template-columns:64px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.v3-area img{width:64px;height:44px;object-fit:cover;border-radius:5px;background:var(--line)}
+.v3-area div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.v3-area b{font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v3-area small{margin:0;font-size:.68rem;color:var(--muted);line-height:1.35}
+.v3-area button{border:1px solid var(--line);background:var(--surface);border-radius:6px;cursor:pointer;padding:6px 8px;font-size:1rem}
+.v3-chip{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-inline-end:3px;vertical-align:middle}
+.v3-link{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:.72rem;padding:4px 0;text-decoration:underline}

@@ -602,10 +602,13 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=55'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=56'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
-  const viewer = me3.viewer = new mod.Viewer({ canEdit: false,
+  // finishes read from the design renders in the file (Claude, once per document, saved for everyone)
+  const looks = { load: async () => { const { data } = await sb.from('project_docs').select('look').eq('id', id).single(); return (data && data.look) || null; } };
+  if (['admin', 'owner', 'gm'].includes(me.role)) looks.analyze = async body => { const { data, error } = await sb.functions.invoke('analyze-renders', { body: { doc_id: id, ...body } }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
+  const viewer = me3.viewer = new mod.Viewer({ canEdit: false, looks,
     pdfjs: async () => { const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib'); L.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; return L; } });
   (document.getElementById('v3d-mount') || mt).appendChild(viewer.el); viewer.resize();
   viewer.msg('جاري تنزيل الملف…');

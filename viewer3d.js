@@ -9,7 +9,8 @@ import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
 import { looksLikePlan, analyzeImages } from './planimg.js?v=55';
 import { dwgToDxf } from './dwg.js?v=53';
 import { LIB, COLORS, buildItem } from './furniture3d.js?v=55';
-import { Look, dressModel } from './look3d.js?v=52';
+import { Look, dressModel } from './look3d.js?v=56';
+import { pageLayout, markOn, pageTitle } from './scenes.js?v=56';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -346,8 +347,9 @@ export class Viewer {
     this._hint(); this._sideMode();
   }
   // A spot inside the building on the lowest floor, away from walls; otherwise just outside the front.
-  _startPoint(y0) {
-    const b = this.box, base = y0 != null ? y0 : b.min.y, c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()), cols = this._colliders();
+  _startPoint(y0, rect) {
+    const b = this.box, base = y0 != null ? y0 : b.min.y, cols = this._colliders();
+    const c = rect ? new THREE.Vector3((rect.x0 + rect.x1) / 2, 0, (rect.z0 + rect.z1) / 2) : b.getCenter(new THREE.Vector3()), s = rect ? new THREE.Vector3(rect.x1 - rect.x0, 0, rect.z1 - rect.z0) : b.getSize(new THREE.Vector3());
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([x, z]) => new THREE.Vector3(x, 0, z)), cand = [];
     for (let i = -9; i <= 9; i++) for (let j = -9; j <= 9; j++) cand.push([c.x + s.x * i / 20, c.z + s.z * j / 20]);
     cand.sort((p, q) => Math.hypot(p[0] - c.x, p[1] - c.z) - Math.hypot(q[0] - c.x, q[1] - c.z));
@@ -359,14 +361,15 @@ export class Viewer {
       for (const [k, d] of dirs.entries()) {
         this.ray.set(new THREE.Vector3(x, g + 1.0, z), d); this.ray.far = 40;
         const h = this.ray.intersectObjects(cols, false)[0];
-        if (!h || h.distance < 0.7) { ok = false; break; } near = Math.min(near, h.distance); if (h.distance > far) { far = h.distance; best = k; }
+        if (!h || h.distance < 0.7) { ok = false; break; } near = Math.min(near, h.distance);
+        const view = rect ? Math.min(h.distance, [rect.x1 - x, x - rect.x0, rect.z1 - z, z - rect.z0][k] + 1) : h.distance; if (view > far) { far = view; best = k; }
       }
       if (!ok) continue;
       this.ray.set(new THREE.Vector3(x, g + 1.0, z), up); this.ray.far = 8; const roofed = this.ray.intersectObjects(cols, false).length > 0;
-      const score = near + (roofed ? 3 : 0) - Math.hypot(x - c.x, z - c.z) * 0.02;
+      const score = (rect ? Math.min(near, 2.5) : near) + (roofed ? 3 : 0) - Math.hypot(x - c.x, z - c.z) * (rect ? 0.25 : 0.02);
       if (!pick || score > pick.score) pick = { score, pos: new THREE.Vector3(x, g + 1.6, z), yaw: [-Math.PI / 2, Math.PI / 2, Math.PI, 0][best] };
     }
-    if (pick) return pick;
+    if (pick || rect) return pick;
     return { pos: new THREE.Vector3(c.x, b.min.y + 1.6, b.max.z + 2.5), yaw: 0 };
   }
   _colliders() { return this.meshes.filter(m => m.visible && !m.userData.noCollide).concat(this.itemMeshes.filter(m => !m.userData.noCollide && m.parent && m.parent.parent && m.parent.parent.visible !== false && m.parent.visible !== false)); }
@@ -776,22 +779,38 @@ export class Viewer {
   /* ----- plans that are pictures: key plans inside a presentation, scans, exported images ----- */
   // every picture in the PDF that looks like a floor plan (white paper, grey and black lines), once each, in page order
   async _pdfImages(L, doc) {
-    const O = L.OPS, out = [], sig = new Set(), n = Math.min(doc.numPages, 60);
+    const O = L.OPS, out = [], sig = new Map(), n = Math.min(doc.numPages, 60), scenes = [];
     for (let i = 1; i <= n; i++) {
       this.msg('جاري البحث عن المخططات المصوّرة… صفحة ' + i + ' من ' + n); await new Promise(r => setTimeout(r, 0));
       let page, ol; try { page = await doc.getPage(i); ol = await page.getOperatorList(); } catch (e) { console.warn(e); continue; }
+      let lay = { imgs: [], marks: [] }; try { lay = pageLayout(O, ol); } catch (e) { console.warn(e); }
+      const boxAt = new Map(lay.imgs.map(m => [m.j, m.box])), view = page.view, pw = view[2] - view[0], ph = view[3] - view[1], placed = [];
       for (let j = 0; j < ol.fnArray.length; j++) {
         const f = ol.fnArray[j]; if (f !== O.paintImageXObject && f !== O.paintInlineImageXObject) continue;
         let im = ol.argsArray[j][0];
         if (typeof im === 'string') { const name = im, objs = name.startsWith('g_') ? page.commonObjs : page.objs; im = await new Promise(res => { try { objs.get(name, res); } catch (e) { res(null); } setTimeout(() => res(null), 3000); }); }
         const pic = im && this._picture(im); if (!pic) continue;
         const key = pic.width + 'x' + pic.height + ':' + Array.from({ length: 48 }, (_, q) => pic.data[(((q * 7919) % (pic.width * pic.height)) * 4)] >> 3).join(',');
-        if (sig.has(key)) continue; sig.add(key);
-        if (looksLikePlan(pic)) out.push({ ...pic, page: i });
+        let plan = sig.get(key);
+        if (plan === undefined) { plan = out.length < 6 && looksLikePlan(pic) ? out.push({ ...pic, page: i }) - 1 : -1; sig.set(key, plan); }
+        const box = boxAt.get(j); if (box) placed.push({ box, plan, pic });
       }
-      if (out.length >= 6) break;
+      // a design view: the biggest picture on the page that is not the plan nor the page background, with a red frame on the key plan
+      const marks = lay.marks.map(m => { for (const q of placed) { if (q.plan < 0) continue; const r = markOn(m, q.box); if (r && r.u1 - r.u0 > 0.02 && r.v1 - r.v0 > 0.02 && r.u1 - r.u0 < 0.95) return { plan: q.plan, ...r }; } return null; }).filter(Boolean);
+      const ren = placed.filter(q => q.plan < 0 && q.box.x1 - q.box.x0 < pw * 0.9 && (q.box.x1 - q.box.x0) * (q.box.y1 - q.box.y0) > pw * ph * 0.12).sort((p, q) => (q.box.x1 - q.box.x0) * (q.box.y1 - q.box.y0) - (p.box.x1 - p.box.x0) * (p.box.y1 - p.box.y0))[0];
+      if (marks.length && ren) {
+        let title = ''; try { title = pageTitle((await page.getTextContent()).items, view); } catch (e) { }
+        scenes.push({ page: i, title, mark: marks[0], jpg: this._jpeg(ren.pic, 1024, 0.8), thumb: this._jpeg(ren.pic, 260, 0.7) });
+      }
     }
+    out.scenes = scenes;
     return out;
+  }
+  // a picture as a JPEG data URL, at most max px on its long side
+  _jpeg(pic, max, q) {
+    const t = document.createElement('canvas'); t.width = pic.width; t.height = pic.height; t.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pic.data), pic.width, pic.height), 0, 0);
+    const s = Math.min(1, max / Math.max(pic.width, pic.height)), cv = document.createElement('canvas'); cv.width = Math.round(pic.width * s); cv.height = Math.round(pic.height * s);
+    const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(t, 0, 0, cv.width, cv.height); return cv.toDataURL('image/jpeg', q || 0.8);
   }
   // a decoded image (pdf.js gives raw pixels or a bitmap) as RGBA, at most 1600 px on its long side
   _picture(im) {
@@ -822,6 +841,8 @@ export class Viewer {
     let set = null; try { set = await this._work('analyzeImages', imgs, opt || {}); } catch (e) { console.warn(e); }
     if (!set || !set.storeys.length) return false;
     this.rasterImgs = imgs; this.rasterOpt = opt || {}; this.set = set; this.texCache = {};
+    this.areas = this._areas(imgs.scenes || []); this.looks = null;
+    if (this.areas.length && this.opts.looks) { try { this.looks = (await this.opts.looks.load()) || null; } catch (e) { console.warn(e); } }
     await this._buildSheets(); return true;
   }
   async rebuildRaster(opt) {
@@ -831,6 +852,55 @@ export class Viewer {
     this.rasterOpt = o; this.set = set; this.texCache = {};
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
+  }
+  /* ----- interior design views (renders in the presentation, each framed in red on the key plan) ----- */
+  // views of the same place (same plan, same frame) make one area; at most 4 pictures each are read
+  _areas(scenes) {
+    const A = new Map();
+    scenes.forEach(sc => { const m = sc.mark, key = 'p' + m.plan + ':' + [m.u0, m.u1, m.v0, m.v1].map(v => Math.round(v * 100)).join(',') + ':' + (sc.title || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, '').slice(0, 40);
+      const a = A.get(key) || { key, plan: m.plan, mark: m, title: sc.title, views: [] }; a.views.push(sc); if (!a.title && sc.title) a.title = sc.title; A.set(key, a); });
+    return [...A.values()];
+  }
+  // an area's frame in world metres on its storey
+  _areaRect(a) {
+    const S = this.set, st = S.storeys.find(s => s.img === a.plan), im = this.rasterImgs && this.rasterImgs[a.plan]; if (!st || !im) return null;
+    const k = S.k, [pcx, pcy] = S.center, m = a.mark, X = u => (u * im.width + st.off[0] - pcx) * k, Z = v => (v * im.height + st.off[1] - pcy) * k;
+    return { lvl: S.storeys.indexOf(st), x0: X(m.u0), x1: X(m.u1), z0: Z(m.v0), z1: Z(m.v1) };
+  }
+  // read the finishes of every area not read yet (Claude, through the analyze-renders function), then repaint
+  async readLooks(force) {
+    const L = this.opts.looks; if (!L || !L.analyze || !this.areas || !this.areas.length || this.reading) return;
+    const todo = this.areas.filter(a => force || !(this.looks && this.looks[a.key])); if (!todo.length) return;
+    this.reading = true; let done = 0, fail = '';
+    const note = () => { const e = this.side.querySelector('[data-lknote]'); if (e) e.textContent = 'جاري قراءة صور التصميم… ' + done + ' من ' + todo.length + (fail ? ' · ' + fail : ''); };
+    note();
+    const one = async a => {
+      const pick = a.views.length <= 4 ? a.views : [0, 1, 2, 3].map(i => a.views[Math.round(i * (a.views.length - 1) / 3)]);
+      try { const r = await L.analyze({ key: a.key, title: a.title, images: pick.map(v => v.jpg.split(',')[1]), force: !!force });
+        if (r && r.look) this.looks = { ...(this.looks || {}), [a.key]: r.look }; }
+      catch (e) { fail = e.message || String(e); console.warn(e); }
+      done++; note();
+    };
+    const q = todo.slice(), run = async () => { while (q.length) await one(q.shift()); };
+    await Promise.all([run(), run(), run()]);
+    this.reading = false;
+    if (fail && done && !Object.keys(this.looks || {}).length) { const e = this.side.querySelector('[data-lknote]'); if (e) e.textContent = fail; return; }
+    await this.repaint();
+  }
+  async repaint() {
+    this.msg('جاري تطبيق التشطيبات…'); await new Promise(r => setTimeout(r, 20));
+    this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
+    await this._buildSheets(); this._finish();
+  }
+  // walk to an area: stand in the middle of its frame on its storey
+  goArea(key) {
+    const a = (this.areas || []).find(x => x.key === key), R = a && this._areaRect(a); if (!R) return;
+    this.storeySel = String(R.lvl); this.setMode('walk');
+    const st = this.set.storeys[R.lvl], sp = this._startPoint(st.base, R);
+    if (sp) { this.camera.position.copy(sp.pos); this.yaw = sp.yaw; }
+    else { this.camera.position.set((R.x0 + R.x1) / 2, st.base + (R.lvl ? 0 : 0.15) + 1.6, (R.z0 + R.z1) / 2); this.yaw = 0; }
+    this.pitch = -0.05;
+    this._mapMake(); this.dirty = true; this._side();
   }
   // the plan picture placed on the shared grid, a little sharper than the original
   _rasterTex(i) {
@@ -876,11 +946,25 @@ export class Viewer {
     const quads = (list, y) => { const pos = [], uvs = [], idx = []; list.forEach(r => { const b = pos.length / 3; [[r.x0, r.z0], [r.x0, r.z1], [r.x1, r.z1], [r.x1, r.z0]].forEach(([x, z]) => { pos.push(x, y, z); uvs.push(...uv(x, z)); }); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); });
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); g.setIndex(idx); g.computeVertexNormals(); return g; };
     const counts = { walls: 0, windows: 0, doors: 0, floor: 0, roof: 0 };
+    // finishes read from the design renders: each area's frame on its storey, smallest frame wins where they overlap
+    const looks = this.looks || {}, hex = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : null, lm = {};
+    const AR = S.raster ? (this.areas || []).map(a => ({ a, look: looks[a.key], R: this._areaRect(a) })).filter(x => x.look && x.R)
+      .map(x => ({ ...x.R, look: x.look, key: x.a.key, nv: x.a.views.length, A: (x.R.x1 - x.R.x0) * (x.R.z1 - x.R.z0) })).sort((p, q) => q.A - p.A || q.nv - p.nv) : [];
+    const areaAt = (i, x, z) => { let best = null; AR.forEach(r => { if (r.lvl === i && x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 - 0.05 && z <= r.z1 + 0.05 && (!best || r.A < best.A)) best = r; }); return best; };
+    const fin = (c, look, o) => { const k = c + look + JSON.stringify(o || {}); return lm[k] || (lm[k] = tag(new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...(o || {}) }), look)); };
+    const WM = { paint: 'plaster', concrete: 'concrete', wood_slats: 'slats', wood_panel: 'wood', tile: 'tile', wallpaper: 'fabric', stone: 'stone', glass: 'plaster' };
+    const FM = { carpet: 'carpet', tile: 'tile', polished_concrete: 'concrete', terrazzo: 'terrazzo', wood: 'wood', vinyl: 'wood', marble: 'marble', epoxy: 'floor' };
+    if (AR.length) { const fr = {}; AR.forEach(r => { const c = hex(r.look.glass_frame); if (c) fr[c] = (fr[c] || 0) + r.A; }); const top = Object.keys(fr).sort((p, q) => fr[q] - fr[p])[0]; if (top) MAT.frame.color.set(top); }
     for (let i = 0; i < n; i++) {
       const s = S.storeys[i], b = s.base, t = s.top, ud = { lvl: i };
       this.msg('جاري بناء ' + s.name + '…'); await new Promise(r => setTimeout(r, 0));
       const W = [], GL = [], FR = [], DR = [], SL = [];
-      s.walls.forEach(r => box(W, r.x0, r.x1, b, t, r.z0, r.z1));
+      const WA = new Map();
+      s.walls.forEach(r => { const ar = AR.length ? areaAt(i, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2) : null; if (!ar) { box(W, r.x0, r.x1, b, t, r.z0, r.z1); return; } (WA.get(ar) || WA.set(ar, []).get(ar)).push(r); });
+      // walls in a designed area take its colours: the longest stretches get the feature finish, up to its share
+      WA.forEach((rs, ar) => { const wl = ar.look.walls || {}, acc = hex(wl.accent_color) && wl.accent_share > 0.04 ? Math.min(0.7, wl.accent_share) : 0, len = r => Math.max(r.x1 - r.x0, r.z1 - r.z0), tot = rs.reduce((q, r) => q + len(r), 0); let got = 0; const MW = [], AW = [];
+        rs.slice().sort((p, q) => len(q) - len(p)).forEach(r => { const to = got < tot * acc ? AW : MW; if (to === AW) got += len(r); box(to, r.x0, r.x1, b, t, r.z0, r.z1); });
+        add(MW, fin(hex(wl.color) || '#efe8dc', WM[wl.material] || 'plaster', { roughness: 0.9 }), { ...ud, cat: 'walls' }); if (AW.length) add(AW, fin(hex(wl.accent_color), WM[wl.accent_material] || 'plaster', { roughness: 0.8 }), { ...ud, cat: 'walls' }); });
       const lint = Math.min(b + 2.2, t - 0.05);
       s.opens.forEach(o => {
         if (t - lint > 0.02) box(W, o.x0, o.x1, lint, t, o.z0, o.z1); // lintel
@@ -918,7 +1002,9 @@ export class Viewer {
           else if (it.t === 'table') q = { t: 'otable', sx: L, sz: W, r: turn }; else if (it.t === 'desk') q = { t: 'desk', sx: L, sz: W, r: turn };
           else if (it.t === 'rtable') q = { t: 'rtable', d: it.d }; else if (it.t === 'cabinet') q = { t: 'cabinet', sx: L, sz: W, r: turn };
           else if (it.t === 'ltable') q = { t: 'ltable', sx: L, sz: W, r: turn }; else if (it.t === 'sofa') q = { t: 'sofa', sx: L / 2.2, r: turn };
-          const g = q && buildItem({ ...q, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
+          const ar = q && AR.length ? areaAt(i, it.x, it.z) : null, fc = (ar && ar.look.furniture) || {};
+          const col = ar && hex({ chair: fc.chair, armchair: fc.armchair || fc.sofa, table: fc.table, desk: fc.desk, rtable: fc.table, cabinet: fc.cabinet, ltable: fc.table, sofa: fc.sofa || fc.armchair }[it.t]);
+          const g = q && buildItem({ ...q, c: col || undefined, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
         grp.updateMatrixWorld(true);
         grp.traverse(o => { if (!o.isMesh) return; const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld); (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(g); o.geometry.dispose(); });
         byMat.forEach((gs, mat) => { for (let k2 = 0; k2 < gs.length; k2 += 3000) { const m = new THREE.Mesh(mergeGeometries(gs.slice(k2, k2 + 3000), false), mat); m.castShadow = true; m.receiveShadow = true; m.userData = { ...ud, cat: 'furniture', noCollide: true }; this.model.add(m); } gs.forEach(g => g.dispose()); });
@@ -932,6 +1018,15 @@ export class Viewer {
       add(DR, MAT.door, { ...ud, cat: 'doors', noCollide: true }); add(SL, MAT.slab, { ...ud, cat: 'floor' });
       const tex = S.raster ? this._rasterTex(s.img) : await this._sheetTex(s.page, s.off).catch(e => { console.warn(e); return null; });
       if (tex && s.slab.length) { const m = new THREE.Mesh(quads(s.slab, sy1 + 0.003), new THREE.MeshStandardMaterial({ map: tex, color: '#efe7d8', roughness: 0.55 })); m.userData = { ...ud, cat: 'floor', noCollide: true }; this.model.add(m); }
+      // floor finish and ceiling of each designed area on this storey
+      AR.filter((r, q) => r.lvl === i && AR.findIndex(o => o.key.split(':').slice(0, 2).join(':') === r.key.split(':').slice(0, 2).join(':')) === q).forEach((ar, n2) => {
+        const cut = (rs, pad) => { const qs = []; rs.forEach(r => { const x0 = Math.max(r.x0, ar.x0), x1 = Math.min(r.x1, ar.x1), z0 = Math.max(r.z0, ar.z0), z1 = Math.min(r.z1, ar.z1); if (x1 - x0 > pad && z1 - z0 > pad) qs.push({ x0, x1, z0, z1 }); }); return qs; };
+        const fl = ar.look.floor || {}, qs = cut(s.slab, 0.05);
+        if (qs.length) { const m = new THREE.Mesh(quads(qs, sy1 + 0.006 + n2 * 0.0015), fin(hex(fl.color) || '#d9d6d0', FM[fl.material] || 'floor', { roughness: fl.material === 'carpet' ? 1 : 0.5 })); m.userData = { ...ud, cat: 'finish', noCollide: true }; m.receiveShadow = true; this.model.add(m); }
+        const above = i + 1 < n ? S.storeys[i + 1].slab : S.roof ? S.roof.slab : [], cy = i + 1 < n ? t - 0.23 : t - 0.26, ce = ar.look.ceiling || {}, qc = cut(above, 0.05);
+        if (qc.length) { const m = new THREE.Mesh(quads(qc, cy - n2 * 0.0015), fin(hex(ce.color) || '#f2f2f0', ce.type === 'exposed' ? 'concrete' : 'plaster', { roughness: 0.95, side: THREE.DoubleSide })); m.userData = { ...ud, cat: 'finish', noCollide: true, ceil: true }; this.model.add(m); }
+        counts.finish = (counts.finish || 0) + 1;
+      });
       if (i === 0 && tex) { // the site around the building (parking, paving, landscape) from the ground floor sheet
         const g = quads([S.raster ? { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: (rg.Y0 - pcy) * k, z1: (rg.Y1 - pcy) * k } : { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: -(rg.Y1 - pcy) * k, z1: -(rg.Y0 - pcy) * k }], 0.004);
         const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, color: '#ddd8cc', roughness: 0.95 })); m.userData = { cat: 'floor', noCollide: true, site: true }; this.model.add(m);
@@ -977,6 +1072,7 @@ export class Viewer {
       let on = true;
       if (u.cat && this.catOn[u.cat] === false) on = false;
       if (u.part && this.catOn[u.part] === false) on = false;
+      if (on && u.ceil && this.mode !== 'walk') on = false; // ceilings only from inside
       if (on && selE != null && u.lvl != null) { const s = this.storeys[u.lvl]; on = !!s && s.elev <= selE + 0.01; }
       if (on && selE != null && u.ifc) { const s = this.ifc.storeys[u.st]; on = !!s && s.elev <= selE + 0.01; }
       if (o.userData.ifc != null || u.cat || u.part) o.visible = on;
@@ -1072,6 +1168,21 @@ export class Viewer {
     this.infoEl.querySelector('.v3-x').onclick = () => { this.infoEl.hidden = true; if (this.hl) { this.scene.remove(this.hl); this.hl = null; } };
     if (box && !box.isEmpty()) { this.hl = new THREE.Box3Helper(box, 0xff5a1f); this.scene.add(this.hl); }
   }
+  // the design views found in the presentation, each with what was read from it and a way to walk there
+  _areasHtml() {
+    const A = this.areas, L = this.looks || {}, n = A.reduce((q, a) => q + a.views.length, 0), left = A.filter(a => !L[a.key]).length, can = !!(this.opts.looks && this.opts.looks.analyze);
+    const sw = c => /^#[0-9a-f]{6}$/i.test(c || '') ? '<i class="v3-chip" style="background:' + c + '"></i>' : '';
+    let h = '<div class="v3-cats v3-areas"><b>🎨 التصميم الداخلي (من صور العرض)</b><span class="v3-note">لقيت ' + n + ' صورة تصميم لـ ' + A.length + ' أماكن، وعرفت مكان كل صورة من الإطار الأحمر على المخطط الصغير.' +
+      (left ? (can ? ' اضغط الزر تحت عشان Claude يقرأ الأرضيات والجدران والأسقف وألوان الأثاث من الصور ويطبقها على المجسم. القراءة مرة وحدة وتنحفظ مع المستند.' : ' قراءة الخامات والألوان من الصور يشغّلها مدير النظام أو صاحب الشركة أو المدير العام.') : ' الخامات والألوان مطبّقة على المجسم، امش فيه وشوف.') + '</span>';
+    if (left && can) h += '<div class="v3-modes"><button type="button" data-lkread="1"' + (this.reading ? ' disabled' : '') + '>✨ اقرأ التصميم من الصور (' + left + ')</button></div>';
+    h += '<span class="v3-note" data-lknote="1"></span>';
+    h += A.map(a => { const lk = L[a.key], v = a.views[0];
+      return '<div class="v3-area"><img src="' + v.thumb + '" alt="" loading="lazy"><div><b>' + esc((lk && lk.room_ar) || a.title || 'صفحة ' + v.page) + '</b><small>ص' + a.views.map(x => x.page).join('، ') + '</small>' +
+        (lk ? '<span>' + sw(lk.floor && lk.floor.color) + sw(lk.walls && lk.walls.color) + sw(lk.walls && lk.walls.accent_color) + sw(lk.ceiling && lk.ceiling.color) + '</span><small>' + esc(lk.notes_ar || '') + '</small>' : '') +
+        '</div><button type="button" data-goarea="' + esc(a.key) + '" title="امش هنا">🚶</button></div>'; }).join('');
+    if (!left && can) h += '<button type="button" class="v3-link" data-lkredo="1">↻ إعادة قراءة الصور</button>';
+    return h + '</div>';
+  }
   /* ----- side panel ----- */
   _sideMode() { this.side.querySelectorAll('[data-m]').forEach(b => b.classList.toggle('on', b.dataset.m === this.mode)); }
   _side() {
@@ -1091,7 +1202,7 @@ export class Viewer {
       const S = this.set;
       if (this.storeys.length > 1) h += '<label class="v3-f"><span>الأدوار</span><select data-st="1"><option value="all">كل المبنى</option>' + this.storeys.map(x => '<option value="' + x.id + '"' + (String(x.id) === String(this.storeySel) ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></label><span class="v3-note">في وضع المشي: اختار الدور وينقلك له.</span>';
       h += '<div class="v3-modes"><button type="button" data-all="1">👁 إظهار كل التفاصيل</button></div>';
-      const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك والزجاج', doors: 'الأبواب', stairs: 'الدرج', furniture: 'الأثاث (من المخطط)', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
+      const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك والزجاج', doors: 'الأبواب', stairs: 'الدرج', furniture: 'الأثاث (من المخطط)', finish: 'التشطيبات من صور التصميم', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
       h += '<div class="v3-cats"><b>عناصر المبنى</b>' + Object.keys(CL).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '>' + CL[c] + ' <small>' + this.counts[c] + '</small></label>').join('') +
         (S.raster ? '<label class="v3-f"><span>عرض المبنى (م)</span><input type="number" min="3" max="400" step="0.1" value="' + S.width + '" data-rw="1"></label><label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="12" step="0.1" value="' + S.height + '" data-rh="1"></label>' :
         '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>') +
@@ -1108,6 +1219,7 @@ export class Viewer {
         '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
         Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
+    if (this.areas && this.areas.length) h += this._areasHtml();
     h += '<label class="v3-hq"><input type="checkbox" data-hq="1"' + (this.hq ? ' checked' : '') + '> ✨ جودة عالية (إضاءة وظلال وخامات واقعية، أبطأ على الأجهزة الضعيفة)</label><span class="v3-note" data-hqnote="1"' + (this.look.noAO && this.hq ? '' : ' hidden') + '>جهازك أخف من اللازم لظلال الزوايا، فشلتها تلقائياً عشان الحركة تبقى ناعمة.</span>';
     h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>وقت المشي تطلع خريطة صغيرة في الزاوية تبين مكانك بالضبط والسهم اتجاه نظرك، واضغط على أي مكان فيها عشان تنتقل له.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
@@ -1121,6 +1233,9 @@ export class Viewer {
         else { this.applyVis(); this._side(); }
       }
       if (b.dataset.auto && this.pdf) { this.pdfRoles = guessPdfRoles(Object.keys(this.dxfCount)); this.rebuildPdf(); }
+      if (b.dataset.goarea) this.goArea(b.dataset.goarea);
+      if (b.dataset.lkread) this.readLooks(false);
+      if (b.dataset.lkredo) this.readLooks(true);
       if (b.dataset.fs) { const fs = document.fullscreenElement; if (fs) document.exitFullscreen(); else if (this.el.requestFullscreen) this.el.requestFullscreen(); setTimeout(() => this.resize(), 200); }
     };
     this.side.onchange = e => {
