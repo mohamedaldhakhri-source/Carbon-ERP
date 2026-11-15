@@ -5,8 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
-import { readSheet, analyzeSet } from './plan2d.js?v=47';
-import { LIB, COLORS, buildItem } from './furniture3d.js?v=48';
+import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=49';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=49';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -206,7 +206,8 @@ export function guessPdfRoles(layers) {
       : /verdure|arbre|tree|planter|شجر|نبات/.test(n) ? 'plant'
       : /poch/.test(n) && !/ma[cç]on/.test(n) || /bench|banc|planter box|jardini[eè]re|جلسة|حوض/.test(n) ? 'low'
       : /wall|wals|poch|gypsum|mur|cloison|ma[cç]on|جدار|حائط/.test(n) ? 'wall'
-      : /floor|sol|revetement|jardin|am[ée]nagement|ffe|furn|storage|mobilier|piscine|water|cach[ée]|ارضي|أرضي|أثاث|اثاث/.test(n) ? 'plan'
+      : /am[ée]nagement(?!.*piscine)|ffe|furn|mobilier|أثاث|اثاث/.test(n) ? 'furniture'
+      : /floor|sol|revetement|jardin|am[ée]nagement|storage|piscine|water|cach[ée]|ارضي|أرضي/.test(n) ? 'plan'
       : 'skip'; });
   return r;
 }
@@ -216,8 +217,9 @@ export class Viewer {
   constructor(opts) {
     this.opts = opts || {};
     this.el = document.createElement('div'); this.el.className = 'v3';
-    this.el.innerHTML = '<div class="v3-stage"><div class="v3-msg">جاري تجهيز العارض…</div><div class="v3-joy" hidden><i></i></div><div class="v3-hint" hidden></div><div class="v3-info" hidden></div></div><aside class="v3-side"></aside>';
+    this.el.innerHTML = '<div class="v3-stage"><div class="v3-msg">جاري تجهيز العارض…</div><div class="v3-joy" hidden><i></i></div><canvas class="v3-map" hidden title="مكانك على المخطط · اضغط على أي مكان في الخريطة عشان تنتقل له"></canvas><div class="v3-hint" hidden></div><div class="v3-info" hidden></div></div><aside class="v3-side"></aside>';
     this.stage = this.el.querySelector('.v3-stage'); this.side = this.el.querySelector('.v3-side');
+    this.mapEl = this.el.querySelector('.v3-map');
     this.msgEl = this.el.querySelector('.v3-msg'); this.infoEl = this.el.querySelector('.v3-info'); this.hintEl = this.el.querySelector('.v3-hint');
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -289,6 +291,12 @@ export class Viewer {
         this.orbit.target.lerpVectors(from.t, to.t, s); this.camera.position.lerpVectors(from.c, to.c, s); if (k < 1) requestAnimationFrame(step); };
       step();
     });
+    // the small map: tap a spot to go there
+    this.mapEl.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); const m = this.mapView; if (!m || this.mode !== 'walk') return;
+      const r = this.mapEl.getBoundingClientRect(), p = this.camera.position, x = m.x0 + (e.clientX - r.left) / r.width * m.w, z = m.z0 + (e.clientY - r.top) / r.height * m.h, g0 = this._groundAt(p), floor = g0 != null ? g0 : p.y - 1.6;
+      // land on open floor at this level, a step away if the spot itself is a wall, a seat or a planter
+      for (let d = 0; d <= 2; d += 0.25) for (let i = 0; i < (d ? 12 : 1); i++) { const q = new THREE.Vector3(x + Math.cos(i * Math.PI / 6) * d, p.y, z + Math.sin(i * Math.PI / 6) * d), g = this._groundAt(q);
+        if (g == null || (g < floor + 0.3 && g > floor - 1.2)) { p.x = q.x; p.z = q.z; if (g != null) p.y = g + 1.6; this.vy = 0; return; } } });
     // phone joystick
     const joy = this.el.querySelector('.v3-joy'), knob = joy.querySelector('i'); let jid = null, jc = null;
     joy.addEventListener('pointerdown', e => { jid = e.pointerId; const r = joy.getBoundingClientRect(); jc = { x: r.left + r.width / 2, y: r.top + r.height / 2, R: r.width / 2 }; joy.setPointerCapture(e.pointerId); e.preventDefault(); });
@@ -310,12 +318,14 @@ export class Viewer {
     this.mode = m; const c = this.box.getCenter(new THREE.Vector3()), s = this.box.getSize(new THREE.Vector3()), R = Math.max(s.x, s.y, s.z);
     this.el.querySelector('.v3-joy').hidden = !(m === 'walk' && matchMedia('(pointer:coarse)').matches);
     if (document.pointerLockElement) document.exitPointerLock();
-    this.head.intensity = m === 'walk' ? 2.2 : 0;
+    this.head.intensity = m === 'walk' ? 2.2 : 0; this.mapEl.hidden = m !== 'walk';
     if (m === 'walk') {
       this.orbit.enabled = false;
       // Start just outside the front of the building, at eye height on the lowest floor, facing it.
       const st = this._startPoint(this.set && this.storeySel !== 'all' && this.storeys[+this.storeySel] ? this.storeys[+this.storeySel].elev : null);
       this.camera.position.copy(st.pos); this.yaw = st.yaw; this.pitch = 0; this.vy = 0;
+      if (this.storeys && this.storeys.length) this.applyVis();
+      this._mapMake();
     } else {
       this.orbit.enabled = true;
       if (m === 'top') { this.camera.position.set(c.x, this.box.max.y + R * 1.2, c.z + 0.001); this.orbit.target.copy(c); }
@@ -385,8 +395,49 @@ export class Viewer {
         else if (g != null) { this.vy = (this.vy || 0) + 9.8 * dt; p.y = Math.max(g + 1.6, p.y - this.vy * dt); if (p.y === g + 1.6) this.vy = 0; }
       }
       this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+      if (this.map && Math.abs(p.y - 0.4 - this.map.cut) > 1.2 && performance.now() - this.map.t > 800) this._mapMake(); // another floor: redraw its plan
+      this._mapDraw();
     } else this.orbit.update();
     this.renderer.render(this.scene, this.camera);
+  }
+  /* ----- small map while walking: the plan seen from above, cut a little below eye level, with you on it ----- */
+  _mapMake() {
+    const b = this.box; if (!b || b.isEmpty()) return;
+    const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()), hx = s.x / 2 * 1.04 + 0.5, hz = s.z / 2 * 1.04 + 0.5, cut = this.camera.position.y - 0.4;
+    const S = Math.min(2048, Math.max(640, Math.ceil(Math.max(hx, hz) * 2 * 20))), W = hx >= hz ? S : Math.round(S * hx / hz), H = hx >= hz ? Math.round(S * hz / hx) : S;
+    const cam = new THREE.OrthographicCamera(-hx, hx, hz, -hz, 0.1, s.y + 400); cam.up.set(0, 0, -1); cam.position.set(c.x, b.max.y + 100, c.z); cam.lookAt(c.x, b.min.y, c.z);
+    const r = this.renderer, size = r.getSize(new THREE.Vector2()), bg = this.scene.background, head = this.head.intensity, hl = this.hl, sun = this.sun.intensity, vis = [];
+    const hemi = this.scene.children.find(o => o.isHemisphereLight), hemiI = hemi ? hemi.intensity : 0;
+    const dark = this._mapMat || (this._mapMat = new THREE.MeshBasicMaterial({ color: '#3b3b3b', side: THREE.DoubleSide, depthTest: false }));
+    r.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), cut)]; this.scene.background = new THREE.Color('#f4f1ea'); this.head.intensity = 0; this.sun.intensity = 0; if (hemi) hemi.intensity = hemiI + sun * 0.8; if (hl) hl.visible = false;
+    try {
+      this.scene.traverse(o => { if (o.isMesh || o.isLine || o.isLineSegments) { vis.push([o, o.visible]); if (o.userData.ground) o.visible = false; } });
+      r.setSize(W, H, false); r.render(this.scene, cam);
+      // second pass: the walls standing at this height, filled dark like on a printed plan
+      const bx = new THREE.Box3();
+      vis.forEach(([o, v]) => { o.visible = v && ['walls', 'doors', 'windows'].includes(o.userData.cat) && (bx.setFromObject(o), bx.min.y <= cut && bx.max.y > cut - 1.2); });
+      this.scene.overrideMaterial = dark; this.scene.background = null; r.autoClear = false; r.render(this.scene, cam);
+      const base = this.mapBase || (this.mapBase = document.createElement('canvas')); base.width = W; base.height = H; base.getContext('2d').drawImage(r.domElement, 0, 0, W, H);
+    } finally {
+      vis.forEach(([o, v]) => { o.visible = v; }); this.scene.overrideMaterial = null; r.autoClear = true; if (hemi) hemi.intensity = hemiI;
+      r.clippingPlanes = []; this.scene.background = bg; this.head.intensity = head; this.sun.intensity = sun; if (hl) hl.visible = true; r.setSize(size.x, size.y, false);
+    }
+    const zoom = Math.max(hx, hz) * 2 > 40; // a big site: the map follows you, about 32 m across
+    this.mapEl.width = zoom ? 480 : Math.min(W, 640); this.mapEl.height = zoom ? 360 : Math.round(this.mapEl.width * H / W);
+    this.map = { x0: c.x - hx, z0: c.z - hz, w: hx * 2, h: hz * 2, cut, zoom, t: performance.now() };
+  }
+  _mapDraw() {
+    const m = this.map, cv = this.mapEl, base = this.mapBase; if (!m || cv.hidden || !base) return;
+    const ctx = cv.getContext('2d'), p = this.camera.position, a = Math.atan2(-Math.cos(this.yaw), -Math.sin(this.yaw));
+    let vw = m.w, vh = m.h, vx = m.x0, vz = m.z0;
+    if (m.zoom) { vw = 32; vh = 24; vx = Math.max(m.x0, Math.min(m.x0 + m.w - vw, p.x - vw / 2)); vz = Math.max(m.z0, Math.min(m.z0 + m.h - vh, p.z - vh / 2)); }
+    this.mapView = { x0: vx, z0: vz, w: vw, h: vh };
+    ctx.fillStyle = '#f4f1ea'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(base, (vx - m.x0) / m.w * base.width, (vz - m.z0) / m.h * base.height, vw / m.w * base.width, vh / m.h * base.height, 0, 0, cv.width, cv.height);
+    const u = (p.x - vx) / vw * cv.width, v = (p.z - vz) / vh * cv.height, R = cv.width / 7;
+    ctx.fillStyle = 'rgba(255,90,31,.28)'; ctx.beginPath(); ctx.moveTo(u, v); ctx.arc(u, v, R, a - 0.55, a + 0.55); ctx.closePath(); ctx.fill(); // what you are looking at
+    ctx.save(); ctx.translate(u, v); ctx.rotate(a); ctx.scale(cv.width / 512, cv.width / 512); ctx.fillStyle = '#ff5a1f'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-12, 13); ctx.lineTo(-5, 0); ctx.lineTo(-12, -13); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
   }
   /* ----- loading ----- */
   async load(buf, ext) {
@@ -598,7 +649,6 @@ export class Viewer {
     }));
     use('window').forEach(p => { for (let i = 0; i + 1 < p.pts.length; i++) { const a = W(p.pts[i]), b = W(p.pts[i + 1]); const g = seg(a, b, 0.03, 0.02, H - 0.35), f = seg(a, b, 0.08, H - 0.35, H); if (g) glass.push(g); if (f) frames.push(f); } });
     use('door').forEach(p => { if (p.curve) return; for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), 0.045, 0, 2.2); if (s && s.L >= 0.6 && s.L <= 1.6) doors.push(s); } });
-    use('furniture').forEach(p => { if (p.closed && p.pts.length >= 3) addShape(p.pts, 0.75, furn); });
     const low = []; use('low').forEach(p => { if (p.closed && p.pts.length >= 3) addShape(p.pts, 0.9, low, 3); else for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), 0.12, 0, 0.9); if (s) thinLow.push(s); } });
     // trees and planters: one plant per outline, merged when close together
     const trees = [], cell = {};
@@ -621,7 +671,19 @@ export class Viewer {
     this._boxes(doors, MAT.door, 'doors', true);
     if (low.length) { const m = new THREE.Mesh(mergeGeometries(low, false), MAT.stone); m.userData = { cat: 'low' }; this.model.add(m); low.forEach(g => g.dispose()); }
     this._boxes(thinLow, MAT.stone, 'low');
-    if (furn.length) { const m = new THREE.Mesh(mergeGeometries(furn, false), MAT.wood); m.userData = { cat: 'furniture', noCollide: true }; this.model.add(m); furn.forEach(g => g.dispose()); }
+    // furniture read from the drawing itself: each table with its chairs, sofas, lounge chairs and plants, where and how they are drawn
+    const fp = use('furniture').filter(p => p.pts.length >= 2).map(p => ({ pts: p.pts, closed: p.closed, curve: p.pts.length > 8 }));
+    this.furnRead = null;
+    if (fp.length) {
+      this.msg('جاري قراءة الأثاث من المخطط…'); await new Promise(r => setTimeout(r, 0));
+      let rec = []; try { rec = recognizeFurniture(fp, k); } catch (e) { console.warn(e); }
+      const grp = new THREE.Group(), byMat = new Map();
+      rec.forEach(it => { const f = it.face || [0, 1], g = buildItem({ ...it, x: (it.x - cx) * k, y: 0, z: -(it.y - cy) * k, r: Math.atan2(f[0], -f[1]) }); if (g) grp.add(g); });
+      grp.updateMatrixWorld(true);
+      grp.traverse(o => { if (!o.isMesh) return; const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld); (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(g); o.geometry.dispose(); });
+      byMat.forEach((gs, mat) => { for (let i = 0; i < gs.length; i += 3000) { const m = new THREE.Mesh(mergeGeometries(gs.slice(i, i + 3000), false), mat); m.castShadow = true; m.receiveShadow = true; m.userData = { cat: 'furniture', noCollide: true }; this.model.add(m); } gs.forEach(g => g.dispose()); });
+      this.furnRead = rec.reduce((a, it) => (a[it.t] = (a[it.t] || 0) + 1, a), {}); furn.length = rec.length;
+    }
     if (trees.length) {
       const list = trees.slice(0, 800), n = list.length, d = new THREE.Object3D(), col = new THREE.Color();
       const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.1, 1, 6), new THREE.MeshStandardMaterial({ color: '#6b4a2b', roughness: 0.9 }), n);
@@ -875,7 +937,7 @@ export class Viewer {
     let h = '<div class="v3-modes"><button type="button" data-m="orbit">🔄 لفّ حول المبنى</button><button type="button" data-m="walk">🚶 مشي داخل المبنى</button><button type="button" data-m="top">⬇ من فوق</button><button type="button" data-fs="1">⛶ ملء الشاشة</button></div>';
     h += '<div class="v3-dim">المقاسات تقريباً: ' + s.x.toFixed(1) + ' × ' + s.z.toFixed(1) + ' م، والارتفاع ' + s.y.toFixed(1) + ' م</div>';
     if (this.opts.canEdit !== false) h += '<div class="v3-cats v3-lib"><b>🪑 إضافة أثاث وعناصر</b><span class="v3-note">اختار عنصر واضغط على الأرضية مكان ما تبيه. اضغط على أي عنصر مضاف عشان تدوّره أو تنقله أو تنسخه أو تحذفه. كل شي ينحفظ مع المستند.</span>' +
-      '<div class="v3-libgrid">' + Object.entries(LIB).map(([k, d]) => '<button type="button" data-tool="' + k + '"' + (this.tool === k ? ' class="on"' : '') + '><i>' + d.i + '</i>' + esc(d.l) + '</button>').join('') + '</div>' +
+      '<div class="v3-libgrid">' + Object.entries(LIB).filter(([, d]) => !d.hide).map(([k, d]) => '<button type="button" data-tool="' + k + '"' + (this.tool === k ? ' class="on"' : '') + '><i>' + d.i + '</i>' + esc(d.l) + '</button>').join('') + '</div>' +
       '<label class="v3-f"><span>المادة / اللون</span><select data-tc="1"><option value="">حسب التصميم</option>' + COLORS.map(([c, l]) => '<option value="' + c + '"' + (this.toolColor === c ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
       '<span class="v3-note" data-istat="1">' + this._itemStat() + '</span></div>';
     if (this.ext === 'ifc') {
@@ -898,10 +960,11 @@ export class Viewer {
         (pdf ? '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>' :
         '<label class="v3-f"><span>وحدة الرسم في الملف</span><select data-du="1">' + [[4, 'ملم (mm)'], [5, 'سم (cm)'], [6, 'متر (m)'], [1, 'إنش'], [2, 'قدم']].map(([k, l]) => '<option value="' + k + '"' + (+this.dxfUnits === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>') +
         (pdf ? '<div class="v3-modes" style="margin-top:6px"><button type="button" data-all="1">👁 إظهار كل التفاصيل</button><button type="button" data-auto="1">↺ الإعداد التلقائي</button></div>' : '') +
+        (this.furnRead ? '<b style="margin-top:6px">🪑 الأثاث المقروء من المخطط</b><span class="v3-note">' + Object.entries({ rtable: 'طاولة دائرية', otable: 'طاولة طويلة / بيضاوية', chair: 'كرسي', armchair: 'كرسي لاونج', sofa: 'كنبة', pot: 'نبتة' }).filter(([t]) => this.furnRead[t]).map(([t, l]) => l + ': ' + this.furnRead[t]).join('، ') + '. كل قطعة في مكانها واتجاهها حسب الرسم.</span>' : '') +
         '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
         Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
-    h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
+    h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>وقت المشي تطلع خريطة صغيرة في الزاوية تبين مكانك بالضبط والسهم اتجاه نظرك، واضغط على أي مكان فيها عشان تنتقل له.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
     this.side.onclick = e => {
       const b = e.target.closest('button'); if (!b) return;

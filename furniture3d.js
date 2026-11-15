@@ -65,12 +65,19 @@ export const LIB = {
   lamp: { l: 'إنارة طاولة كروية', i: '🔆', build: (g) => { cyl(g, 0.012, 0.012, 0.4, 0, 0.2, 0, M.brass(), 8); const s = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 14), M.glow()); s.position.y = 0.5; g.add(s); } },
   ropes: { l: 'فاصل حبال معلّقة', i: '🧵', build: (g, a) => { const r = prim(a, M.rope()); for (let i = 0; i < 10; i++) cyl(g, 0.022, 0.022, 2.7, -0.9 + i * 0.2, 1.35, (i % 2) * 0.06, r, 6); box(g, 2.1, 0.06, 0.12, 0, 2.73, 0.03, M.walnut()); } },
   pebbles: { l: 'ممر حصى', i: '🪨', build: (g) => { box(g, 2.0, 0.03, 0.8, 0, 0.015, 0, mat('#e8e1d3', { roughness: 1 })); for (let i = 0; i < 40; i++) { const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.05 + (i % 4) * 0.015, 0), M.pebble()); p.position.set(((i * 0.618) % 1 - 0.5) * 1.9, 0.04, ((i * 0.382) % 1 - 0.5) * 0.7); p.scale.y = 0.5; g.add(p); } } },
+  // pieces read from a drawing, built to the size drawn (kept out of the library list)
+  rtable: { hide: true, build: (g, a, it) => { const d = Math.max(0.4, Math.min(2.2, it.d || 0.9)); table(g, a, d / 2, d < 0.62 ? 0.5 : 0.75); } },
+  otable: { hide: true, build: (g, a, it) => { const L = Math.max(0.8, it.sx || 1.6), W = Math.max(0.5, it.sz || 0.8), top = prim(a, M.oak());
+    if (it.oval) { const t = cyl(g, 0.5, 0.5, 0.04, 0, 0.73, 0, top, 48); t.scale.set(L, 1, W); } else box(g, L, 0.04, W, 0, 0.73, 0, top);
+    [-1, 1].forEach(s => { cyl(g, 0.05, 0.06, 0.69, s * L * 0.3, 0.355, 0, M.black(), 12); box(g, 0.08, 0.03, W * 0.6, s * L * 0.3, 0.015, 0, M.black()); }); } },
   parasol: { l: 'مظلة جلسة خارجية', i: '⛱', build: (g, a) => { cyl(g, 0.03, 0.03, 2.4, 0, 1.2, 0, M.walnut(), 8); const c = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.45, 8, 1, true), prim(a, M.fabric())); c.position.y = 2.5; c.material.side = THREE.DoubleSide; g.add(c); cyl(g, 0.3, 0.32, 0.08, 0, 0.04, 0, M.black(), 16); } }
 };
 
 export function buildItem(it) {
   const def = LIB[it.t]; if (!def) return null;
-  const g = new THREE.Group(); def.build(g, it.c || null);
+  const g = new THREE.Group(); def.build(g, it.c || null, it);
+  if (it.t === 'sofa' && it.sx) g.children.forEach(o => { o.position.x *= it.sx; o.scale.x *= it.sx; });
+  if (it.t === 'pot' && it.d) { const s = Math.max(0.6, Math.min(2.5, it.d / 0.5)); g.scale.set(s, s, s); }
   g.position.set(it.x, it.y, it.z); g.rotation.y = it.r || 0;
   g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   g.userData = { item: it };

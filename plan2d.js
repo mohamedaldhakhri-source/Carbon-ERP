@@ -366,3 +366,124 @@ export function analyzeSet(sheets, opt) {
   res.sheets = info;
   return res;
 }
+
+/* ---------- furniture symbols -> pieces ---------- */
+// Reads a furniture layer: round tables (circles), the chairs drawn around them (found by angle around each table),
+// and loose chairs, lounge chairs and sofas (by their outline size). Page units in, page units out; k = metres per unit.
+// Returns [{t, x, y, face:[dx,dy], d?, sx?}] — face is the direction the piece looks towards, in page axes.
+export function recognizeFurniture(paths, k) {
+  paths = paths.slice();
+  const tabs = [], rest = [], ovals = [];
+  const bb = P => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; P.forEach(([x, y]) => { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }); return { x0, y0, x1, y1 }; };
+  const pca = pts => { const mx = pts.reduce((s, p) => s + p[0], 0) / pts.length, my = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    let sxx = 0, syy = 0, sxy = 0; pts.forEach(([x, y]) => { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); });
+    const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy), u = [Math.cos(ang), Math.sin(ang)], v = [-u[1], u[0]];
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity; pts.forEach(([x, y]) => { const a = (x - mx) * u[0] + (y - my) * u[1], b = (x - mx) * v[0] + (y - my) * v[1]; a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); });
+    return { u, v, L: (a1 - a0) * k, W: (b1 - b0) * k, x: mx + u[0] * (a0 + a1) / 2 + v[0] * (b0 + b1) / 2, y: my + u[1] * (a0 + a1) / 2 + v[1] * (b0 + b1) / 2 }; };
+  // a table drawn as two or more arcs that meet end to end: join them into one outline
+  const tol0 = 0.03 / k, big = paths.filter(p => !p.closed && p.pts.length >= 2 && (b => Math.max(b.x1 - b.x0, b.y1 - b.y0) * k >= 0.25)(bb(p.pts))), joined = new Set(), loops = [];
+  const near0 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < tol0, ek = q => Math.round(q[0] / tol0) + ',' + Math.round(q[1] / tol0), ends = new Map();
+  big.forEach(p => [p.pts[0], p.pts[p.pts.length - 1]].forEach(q => { const [gx, gy] = ek(q).split(',').map(Number);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const kk = (gx + i) + ',' + (gy + j); (ends.get(kk) || ends.set(kk, []).get(kk)).push(p); } }));
+  big.forEach(p => { if (!p.curve || joined.has(p)) return; let pts = p.pts.slice(); const used = [p];
+    for (let grew = true; grew && used.length < 8 && !(used.length > 1 && near0(pts[0], pts[pts.length - 1]));) { grew = false; const e = pts[pts.length - 1];
+      for (const q of ends.get(ek(e)) || []) { if (used.includes(q) || joined.has(q)) continue;
+        if (near0(e, q.pts[0])) pts = pts.concat(q.pts.slice(1)); else if (near0(e, q.pts[q.pts.length - 1])) pts = pts.concat(q.pts.slice().reverse().slice(1)); else continue;
+        used.push(q); grew = true; break; } }
+    if (used.length > 1 && near0(pts[0], pts[pts.length - 1])) { used.forEach(q => joined.add(q)); loops.push({ pts, closed: true, curve: true }); } });
+  paths = paths.filter(p => !joined.has(p)).concat(loops);
+  paths.forEach(p => {
+    const P = p.pts, b = bb(P), w = (b.x1 - b.x0) * k, h = (b.y1 - b.y0) * k, end = Math.hypot(P[0][0] - P[P.length - 1][0], P[0][1] - P[P.length - 1][1]) * k;
+    const roundish = () => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, r = (b.x1 - b.x0 + b.y1 - b.y0) / 4; return P.every(([x, y]) => Math.abs(Math.hypot(x - cx, y - cy) - r) < r * 0.1); };
+    const area = () => { let a = 0; for (let i = 0; i < P.length; i++) { const p0 = P[i], p1 = P[(i + 1) % P.length]; a += p0[0] * p1[1] - p1[0] * p0[1]; } return Math.abs(a) / 2 * k * k; };
+    if (p.curve && (p.closed || end < 0.03) && Math.abs(w - h) < 0.12 * Math.max(w, h) && w >= 0.35 && w <= 2.2 && roundish()) {
+      const t = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, r: (w + h) / 4 / k };
+      if (!tabs.some(o => Math.hypot(o.x - t.x, o.y - t.y) * k < 0.08 && Math.abs(o.r - t.r) * k < 0.08)) tabs.push(t);
+    } else if (p.curve && (p.closed || end < 0.03) && (o => o.L >= 1.0 && o.L <= 4 && o.W >= 0.55 && o.L / o.W >= 1.2 && o.L / o.W <= 4 && area() >= Math.PI / 4 * o.L * o.W * 0.9 && !ovals.some(q => Math.hypot(q.x - o.x, q.y - o.y) * k < 0.1) && ovals.push({ ...o, oval: true }))(pca(P))) {
+      // an oval table (or a long one with rounded ends)
+    } else rest.push(p);
+  });
+  // vertices of everything else, on a grid for quick lookups
+  const V = [], cs = 0.5 / k, grid = new Map(), key = (x, y) => Math.floor(x / cs) + ',' + Math.floor(y / cs);
+  rest.forEach((p, pi) => p.pts.forEach(([x, y]) => { const i = V.length; V.push({ x, y, pi }); const kk = key(x, y); (grid.get(kk) || grid.set(kk, []).get(kk)).push(i); }));
+  const near = (x, y, R) => { const out = [], n = Math.ceil(R / cs); const gx = Math.floor(x / cs), gy = Math.floor(y / cs);
+    for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) (grid.get((gx + i) + ',' + (gy + j)) || []).forEach(v => { if (Math.hypot(V[v].x - x, V[v].y - y) <= R) out.push(v); }); return out; };
+  const usedPath = new Set(), items = [];
+  tabs.sort((a, b) => b.r - a.r).forEach(t => {
+    const r0 = t.r - 0.05 / k, r1 = t.r + 0.8 / k, B = 72, hist = new Array(B).fill(0), dists = Array.from({ length: B }, () => []), pidx = Array.from({ length: B }, () => []);
+    // a vertex closer to the next table belongs to its chair, not ours
+    const others = tabs.filter(o => o !== t && Math.hypot(o.x - t.x, o.y - t.y) < r1 + o.r + 0.8 / k);
+    near(t.x, t.y, r1).forEach(v => { const d = Math.hypot(V[v].x - t.x, V[v].y - t.y); if (d < r0) return;
+      if (others.some(o => Math.hypot(V[v].x - o.x, V[v].y - o.y) - o.r < d - t.r)) return; const a = Math.atan2(V[v].y - t.y, V[v].x - t.x), b = ((Math.floor((a + Math.PI) / (2 * Math.PI) * B)) % B + B) % B; hist[b]++; dists[b].push(d); pidx[b].push(V[v].pi); });
+    // strokes all round inside the circle: a potted plant seen from above, not a table top
+    const inner = new Set(); near(t.x, t.y, t.r * 0.75).forEach(v => inner.add(Math.floor((Math.atan2(V[v].y - t.y, V[v].x - t.x) + Math.PI) / (2 * Math.PI) * 12) % 12));
+    if (inner.size >= 9) { items.push({ t: 'pot', x: t.x, y: t.y, face: [0, 1], d: +(t.r * 2 * k).toFixed(2) }); near(t.x, t.y, t.r * 1.05).forEach(v => usedPath.add(V[v].pi)); t.plant = true; return; }
+    const mx = Math.max(...hist), occ0 = hist.map(v => v >= Math.max(2, mx * 0.08));
+    // a chair drawn as an outline leaves empty directions in its middle: close gaps up to ~25°
+    const occ = occ0.map((v, b) => v || ([1, 2, 3].some(j => occ0[(b - j + B) % B]) && [1, 2, 3].some(j => occ0[(b + j) % B])));
+    if (mx > 0 && occ.filter(Boolean).length > B * 0.9 && hist.filter(v => v > mx * 0.5).length > B * 0.6) return; // lines all round (a plant or a pattern), not a table with chairs
+    // each run of occupied directions is one chair, or several side by side when the run is long
+    const runs = []; const start = occ.indexOf(false); if (start < 0) return;
+    for (let i = 1, cur = null; i <= B; i++) { const b = (start + i) % B; if (occ[b]) { if (!cur) runs.push(cur = []); cur.push(b); } else cur = null; }
+    const chairs = [];
+    runs.forEach(run => {
+      const ds = run.flatMap(b => dists[b]).sort((p, q) => p - q); if (ds.length < 8 || (ds[ds.length - 1] - ds[0]) * k < 0.25) return; // a thin curve passing by
+      run.forEach(b => pidx[b].forEach(pi => usedPath.add(pi)));
+      const dmid = Math.max(t.r + 0.3 / k, (ds[0] + ds[ds.length - 1]) / 2), arc = run.length * (2 * Math.PI / B) * dmid * k, n = Math.max(1, Math.min(6, Math.round(arc / 0.95)));
+      const a0 = run[0] / B * 2 * Math.PI - Math.PI, span = run.length / B * 2 * Math.PI;
+      for (let j = 0; j < n; j++) { const a = a0 + span * (j + 0.5) / n; chairs.push({ a, x: t.x + Math.cos(a) * dmid, y: t.y + Math.sin(a) * dmid }); }
+    });
+    t.ring = chairs.length ? chairs.reduce((s, c) => s + Math.hypot(c.x - t.x, c.y - t.y), 0) / chairs.length : t.r + 0.32 / k; t.chairs = chairs;
+    const dm = t.r * 2 * k;
+    items.push({ t: 'rtable', x: t.x, y: t.y, face: [0, 1], d: +dm.toFixed(2) });
+    t.seat = dm < 0.62 ? 'armchair' : 'chair';
+    chairs.forEach(c => items.push({ t: t.seat, x: c.x, y: c.y, face: [t.x - c.x, t.y - c.y] }));
+  });
+  // loose pieces: group the remaining strokes that touch, then judge each group by its size
+  const inOval = (x, y) => ovals.some(o => Math.abs((x - o.x) * o.u[0] + (y - o.y) * o.u[1]) * k < o.L / 2 - 0.1 && Math.abs((x - o.x) * o.v[0] + (y - o.y) * o.v[1]) * k < o.W / 2 - 0.1);
+  const left = rest.map((p, i) => i).filter(i => !usedPath.has(i) && (() => { const b = bb(rest[i].pts); return Math.max(b.x1 - b.x0, b.y1 - b.y0) * k < 2.6 && !inOval((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2); })());
+  const par = new Map(left.map(i => [i, i])), find = i => { while (par.get(i) !== i) { par.set(i, par.get(par.get(i))); i = par.get(i); } return i; };
+  const tol = 0.03 / k, boxes = new Map(left.map(i => { const b = bb(rest[i].pts); return [i, b]; }));
+  // strokes that touch: bucket them by the small cells their box covers, then compare within each cell
+  const cell2 = 0.25 / k, g2 = new Map();
+  left.forEach(i => { const b = boxes.get(i); for (let gx = Math.floor((b.x0 - tol) / cell2); gx <= Math.floor((b.x1 + tol) / cell2); gx++) for (let gy = Math.floor((b.y0 - tol) / cell2); gy <= Math.floor((b.y1 + tol) / cell2); gy++) { const kk = gx + ',' + gy; (g2.get(kk) || g2.set(kk, []).get(kk)).push(i); } });
+  for (const list of g2.values()) for (let x = 0; x < list.length; x++) { const i = list[x], b = boxes.get(i);
+    for (let y = x + 1; y < list.length; y++) { const j = list[y], o = boxes.get(j); if (b.x0 - tol <= o.x1 && o.x0 - tol <= b.x1 && b.y0 - tol <= o.y1 && o.y0 - tol <= b.y1) { const ri = find(i), rj = find(j); if (ri !== rj) par.set(ri, rj); } } }
+  const groups = new Map(); left.forEach(i => { const r = find(i); (groups.get(r) || groups.set(r, []).get(r)).push(i); });
+  const loose = [], long = [];
+  for (const g of groups.values()) {
+    const pts = g.flatMap(i => rest[i].pts); if (pts.length < 6) continue;
+    const { u, v, L, W, x: cx, y: cy } = pca(pts);
+    if (ovals.some(o => Math.abs((cx - o.x) * o.u[0] + (cy - o.y) * o.u[1]) * k < o.L / 2 - 0.1 && Math.abs((cx - o.x) * o.v[0] + (cy - o.y) * o.v[1]) * k < o.W / 2 - 0.1)) continue; // drawn on a table top
+    // look towards the closest table, otherwise across the short side
+    let face = v, best = 2.5 / k; tabs.forEach(t => { if (t.plant) return; const d = Math.hypot(t.x - cx, t.y - cy) - t.r; if (d < best) { best = d; face = [t.x - cx, t.y - cy]; } });
+    if (face === v && L >= 1.2) face = v;
+    if (tabs.some(t => Math.hypot(t.x - cx, t.y - cy) < t.r + (t.plant ? 0.6 : 0.15) / k)) continue; // leftovers of a table already read
+    if (L <= 0.75 && W >= 0.32) loose.push({ t: 'chair', x: cx, y: cy, face });
+    else if (L <= 1.1 && W >= 0.6) loose.push({ t: 'armchair', x: cx, y: cy, face });
+    else if (L >= 1.2 && L <= 3.6 && W >= 0.55 && W <= 1.4) long.push({ x: cx, y: cy, u, v, L, W, face });
+  }
+  // seats left near a round table belong to it: put them on its ring, facing it, and merge the pieces of one chair
+  tabs.forEach(t => {
+    const mine = loose.filter(c => !c.taken && Math.hypot(c.x - t.x, c.y - t.y) < t.r + 1.0 / k && tabs.every(o => o === t || Math.hypot(c.x - o.x, c.y - o.y) - o.r >= Math.hypot(c.x - t.x, c.y - t.y) - t.r));
+    if (!mine.length || !t.chairs) return;
+    const gap = 0.6 / k / t.ring, angs = t.chairs.map(c => c.a), fresh = [];
+    mine.forEach(c => { c.taken = true; const a = Math.atan2(c.y - t.y, c.x - t.x), da = b => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+      if (angs.some(b => da(b) < gap)) return; const f = fresh.find(q => da(Math.atan2(q.s, q.c)) < gap * 1.2);
+      if (f) { f.s += Math.sin(a); f.c += Math.cos(a); } else fresh.push({ s: Math.sin(a), c: Math.cos(a) }); });
+    fresh.forEach(q => { const a = Math.atan2(q.s, q.c), x = t.x + Math.cos(a) * t.ring, y = t.y + Math.sin(a) * t.ring; items.push({ t: t.seat, x, y, face: [t.x - x, t.y - y] }); });
+  });
+  ovals.forEach(o => long.push({ ...o, face: o.v }));
+  // a long piece with chairs along it is a table; otherwise a sofa or bench
+  long.forEach(o => {
+    const n = loose.filter(c => !c.taken && c.t !== 'sofa' && Math.abs((c.x - o.x) * o.u[0] + (c.y - o.y) * o.u[1]) * k < o.L / 2 + 0.4 && Math.abs((c.x - o.x) * o.v[0] + (c.y - o.y) * o.v[1]) * k < o.W / 2 + 0.75);
+    if (n.length >= 2 || o.oval) { items.push({ t: 'otable', x: o.x, y: o.y, face: o.v, sx: +o.L.toFixed(2), sz: +o.W.toFixed(2), oval: !!o.oval }); n.forEach(c => { const a = (c.x - o.x) * o.v[0] + (c.y - o.y) * o.v[1], b = (c.x - o.x) * o.u[0] + (c.y - o.y) * o.u[1];
+        c.face = Math.abs(b) * k > o.L / 2 ? [-o.u[0] * Math.sign(b), -o.u[1] * Math.sign(b)] : [-o.v[0] * Math.sign(a), -o.v[1] * Math.sign(a)]; }); }
+    else { const f = o.face, back = (f[0] * o.v[0] + f[1] * o.v[1]) >= 0 ? o.v : [-o.v[0], -o.v[1]]; items.push({ t: 'sofa', x: o.x, y: o.y, face: back, sx: +(o.L / 2.2).toFixed(2) }); }
+  });
+  loose.forEach(c => { if (!c.taken) items.push(c); });
+  // one seat per spot
+  const out = [];
+  items.forEach(it => { if ((it.t === 'chair' || it.t === 'armchair') && out.some(o => (o.t === 'chair' || o.t === 'armchair') && Math.hypot(o.x - it.x, o.y - it.y) * k < 0.4)) return; out.push(it); });
+  return out;
+}

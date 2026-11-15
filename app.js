@@ -602,13 +602,10 @@ async function mount3d() {
   if (V3) { V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=48'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=49'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
-  // furniture and pieces people added in the viewer are kept per document
-  let items = []; try { const r = await sb.from('doc_scenes').select('items').eq('doc_id', id).maybeSingle(); if (r && r.data && Array.isArray(r.data.items)) items = r.data.items; } catch (e) { console.warn(e); }
-  if (V3 !== me3) return;
-  const viewer = me3.viewer = new mod.Viewer({ items, canEdit: !!me,
-    onItems: async list => { const { error } = await sb.from('doc_scenes').upsert({ doc_id: id, items: list, updated_by: me.id, updated_at: new Date().toISOString() }); if (error) { console.warn(error); return false; } return true; },
+  // furniture comes from the drawing itself (read automatically), nothing is added by hand
+  const viewer = me3.viewer = new mod.Viewer({ canEdit: false,
     pdfjs: async () => { const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib'); L.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; return L; } });
   (document.getElementById('v3d-mount') || mt).appendChild(viewer.el); viewer.resize();
   viewer.msg('جاري تنزيل الملف…');

@@ -440,3 +440,6 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .v3-sw button.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--surface) inset}
 .v3-cats label input[type=checkbox]{width:auto;flex:none;margin:0;padding:0}
 .v3-cats label{justify-content:flex-start;text-align:start}
+.v3-stage canvas.v3-map{position:absolute;top:52px;inset-inline-start:12px;width:240px!important;height:auto!important;border-radius:10px;border:2px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,.25);background:#f4f1ea;cursor:crosshair;touch-action:none}
+.v3-stage canvas.v3-map[hidden]{display:none}
+@media (max-width:700px),(pointer:coarse){.v3-stage canvas.v3-map{width:150px!important;top:48px}}
