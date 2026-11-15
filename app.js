@@ -596,13 +596,13 @@ function vModel3d(id) {
 }
 async function mount3d() {
   const mt = document.getElementById('v3d-mount');
-  if (!mt) { if (V3) { V3.viewer.dispose(); V3 = null; } return; }
+  if (!mt) { if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; } return; }
   const id = mt.dataset.doc;
   if (V3 && V3.doc === id) { mt.appendChild(V3.viewer.el); V3.viewer.resize(); return; }
-  if (V3) { V3.viewer.dispose(); V3 = null; }
+  if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=51'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=52'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   const viewer = me3.viewer = new mod.Viewer({ canEdit: false,

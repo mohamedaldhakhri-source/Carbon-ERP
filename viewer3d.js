@@ -5,9 +5,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
-import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=50';
+import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=52';
 import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
-import { Look, dressModel } from './look3d.js?v=51';
+import { Look, dressModel } from './look3d.js?v=52';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -260,7 +260,7 @@ export class Viewer {
     document.removeEventListener('pointerlockchange', this._plc); document.removeEventListener('mousemove', this._mm);
     this.model.traverse(o => { if (o.geometry) { o.geometry.disposeBoundsTree && o.geometry.boundsTree && o.geometry.disposeBoundsTree(); o.geometry.dispose(); } if (o.material) [].concat(o.material).forEach(m => m.dispose()); });
     document.removeEventListener('keydown', this._ki);
-    this.look.dispose(); this.renderer.dispose(); this.el.remove();
+    if (this.worker) this.worker.terminate(); this.worker = null; this.look.dispose(); this.renderer.dispose(); this.el.remove();
   }
   _bind() {
     this._onResize = () => this.resize(); window.addEventListener('resize', this._onResize);
@@ -274,6 +274,9 @@ export class Viewer {
       else if (this.sel && (e.code === 'Delete' || e.code === 'Backspace')) { e.preventDefault(); this._itemAct('del'); } };
     document.addEventListener('keydown', this._ki);
     const cv = this.renderer.domElement;
+    // if the graphics card gives up, say so plainly and come back in the lighter mode next time
+    cv.addEventListener('webglcontextlost', e => { e.preventDefault(); this.alive = false; try { localStorage.setItem('v3-hq', '0'); } catch (er) { } this.msg('كرت الشاشة في جهازك ما تحمّل العرض. حدّث الصفحة وبيفتح بجودة أخف.'); });
+    this.look.onAuto = () => { const n = this.side.querySelector('[data-hqnote]'); if (n) n.hidden = false; };
     ['pointerdown', 'pointerup', 'wheel', 'click'].forEach(ev => this.stage.addEventListener(ev, () => { this.redraw = true; }, { passive: true }));
     this._plc = () => { this.locked = document.pointerLockElement === cv; this._hint(); };
     this._mm = e => { if (this.locked) this._look(e.movementX, e.movementY, 0.0022); };
@@ -403,6 +406,7 @@ export class Viewer {
       if (this.map && Math.abs(p.y - 0.4 - this.map.cut) > 1.2 && performance.now() - this.map.t > 800) this._mapMake(); // another floor: redraw its plan
       this._mapDraw();
     } else this.orbit.update();
+    if (this.warming) return;
     // draw only when something moves (or twice a second), so the realistic mode stays light when you just look
     const cm = this.camera.matrixWorld.elements, key = cm.join(',') + this.camera.projectionMatrix.elements[0], now = performance.now(), moving = key !== this._lastKey;
     if (this.dirty) this.renderer.shadowMap.needsUpdate = true; // the sun does not move: redo its shadows only when the model or what is shown changes
@@ -416,19 +420,32 @@ export class Viewer {
     if (dt > 200) { p.n = 0; p.sum = 0; return; } p.n++; p.sum += dt;
     if (p.n >= 30) { if (p.sum / p.n > 40) this.look.slower(); p.n = 0; p.sum = 0; }
   }
+  // heavy reading of drawings runs in a background worker, so the page stays responsive; the same code runs here if workers are not available
+  _work(fn, ...args) {
+    const direct = () => (fn === 'analyzeSet' ? analyzeSet : recognizeFurniture)(...args);
+    if (!this.worker && !this.noWorker) {
+      try {
+        this.worker = new Worker(new URL('./plan2d-worker.js?v=52', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
+        this.worker.onmessage = e => { const q = this.wq.get(e.data.id); if (!q) return; this.wq.delete(e.data.id); if (e.data.ok) q.res(e.data.r); else q.rej(new Error(e.data.err)); };
+        this.worker.onerror = e => { e.preventDefault && e.preventDefault(); const qs = [...this.wq.values()]; this.wq.clear(); this.worker && this.worker.terminate(); this.worker = null; this.noWorker = true; qs.forEach(q => q.fail()); };
+      } catch (e) { this.noWorker = true; this.worker = null; }
+    }
+    if (!this.worker) return new Promise(res => setTimeout(res, 0)).then(direct);
+    return new Promise((res, rej) => { const id = ++this.wid; this.wq.set(id, { res, rej, fail: () => { try { res(direct()); } catch (er) { rej(er); } } }); this.worker.postMessage({ id, fn, args }); });
+  }
   /* ----- small map while walking: the plan seen from above, cut a little below eye level, with you on it ----- */
   _mapMake() {
     const b = this.box; if (!b || b.isEmpty()) return;
     const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()), hx = s.x / 2 * 1.04 + 0.5, hz = s.z / 2 * 1.04 + 0.5, cut = this.camera.position.y - 0.4;
-    const S = Math.min(2048, Math.max(640, Math.ceil(Math.max(hx, hz) * 2 * 20))), W = hx >= hz ? S : Math.round(S * hx / hz), H = hx >= hz ? Math.round(S * hz / hx) : S;
+    const S = Math.min(1024, Math.max(512, Math.ceil(Math.max(hx, hz) * 2 * 16))), W = hx >= hz ? S : Math.round(S * hx / hz), H = hx >= hz ? Math.round(S * hz / hx) : S;
     const cam = new THREE.OrthographicCamera(-hx, hx, hz, -hz, 0.1, s.y + 400); cam.up.set(0, 0, -1); cam.position.set(c.x, b.max.y + 100, c.z); cam.lookAt(c.x, b.min.y, c.z);
-    const r = this.renderer, size = r.getSize(new THREE.Vector2()), bg = this.scene.background, head = this.head.intensity, hl = this.hl, sun = this.sun.intensity, vis = [];
+    const r = this.renderer, size = r.getSize(new THREE.Vector2()), pr = r.getPixelRatio(), bg = this.scene.background, head = this.head.intensity, hl = this.hl, sun = this.sun.intensity, vis = [];
     const hemi = this.scene.children.find(o => o.isHemisphereLight), hemiI = hemi ? hemi.intensity : 0;
     const dark = this._mapMat || (this._mapMat = new THREE.MeshBasicMaterial({ color: '#3b3b3b', side: THREE.DoubleSide, depthTest: false }));
     r.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), cut)]; this.look.sky.visible = false; this.scene.background = new THREE.Color('#f4f1ea'); this.head.intensity = 0; this.sun.intensity = 0; if (hemi) hemi.intensity = hemiI + sun * 0.8; if (hl) hl.visible = false;
     try {
       this.scene.traverse(o => { if (o.isMesh || o.isLine || o.isLineSegments) { vis.push([o, o.visible]); if (o.userData.ground) o.visible = false; } });
-      r.setSize(W, H, false); r.render(this.scene, cam);
+      r.setPixelRatio(1); r.setSize(W, H, false); r.render(this.scene, cam);
       // second pass: the walls standing at this height, filled dark like on a printed plan
       const bx = new THREE.Box3();
       vis.forEach(([o, v]) => { o.visible = v && ['walls', 'doors', 'windows'].includes(o.userData.cat) && (bx.setFromObject(o), bx.min.y <= cut && bx.max.y > cut - 1.2); });
@@ -436,7 +453,7 @@ export class Viewer {
       const base = this.mapBase || (this.mapBase = document.createElement('canvas')); base.width = W; base.height = H; base.getContext('2d').drawImage(r.domElement, 0, 0, W, H);
     } finally {
       vis.forEach(([o, v]) => { o.visible = v; }); this.scene.overrideMaterial = null; r.autoClear = true; if (hemi) hemi.intensity = hemiI;
-      r.clippingPlanes = []; this.look.sky.visible = true; this.scene.background = bg; this.head.intensity = head; this.sun.intensity = sun; if (hl) hl.visible = true; r.setSize(size.x, size.y, false);
+      r.clippingPlanes = []; this.look.sky.visible = true; this.scene.background = bg; this.head.intensity = head; this.sun.intensity = sun; if (hl) hl.visible = true; r.setPixelRatio(pr); r.setSize(size.x, size.y, false); this.redraw = true;
     }
     const zoom = Math.max(hx, hz) * 2 > 40; // a big site: the map follows you, about 32 m across
     this.mapEl.width = zoom ? 480 : Math.min(W, 640); this.mapEl.height = zoom ? 360 : Math.round(this.mapEl.width * H / W);
@@ -480,10 +497,12 @@ export class Viewer {
     gnd.receiveShadow = true;
     const sn = this.sun; sn.position.set(c.x + R * 0.5, c.y + R * 1.1, c.z + R * 0.35); sn.target.position.copy(c); this.scene.add(sn.target);
     this.look.placeSun(sn.position.clone().sub(c));
-    sn.castShadow = true; sn.shadow.mapSize.set(4096, 4096); const sc = sn.shadow.camera, e = R * 0.8; sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 0.5; sc.far = R * 4; sc.updateProjectionMatrix(); sn.shadow.bias = -0.0004; sn.shadow.normalBias = 0.02;
+    sn.castShadow = true; const sm = this.look.weak ? 2048 : 4096; if (sn.shadow.mapSize.x !== sm) { sn.shadow.mapSize.set(sm, sm); if (sn.shadow.map) { sn.shadow.map.dispose(); sn.shadow.map = null; } } const sc = sn.shadow.camera, e = R * 0.8; sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 0.5; sc.far = R * 4; sc.updateProjectionMatrix(); sn.shadow.bias = -0.0004; sn.shadow.normalBias = 0.02;
     gnd.rotation.x = -Math.PI / 2; gnd.position.set(c.x, this.box.min.y - 0.01, c.z); gnd.userData.ground = true; this.scene.add(gnd); this.meshes.push(gnd); gnd.geometry.computeBoundsTree();
     if (!this.look.ready) { this.look.ready = true; this.look.setQuality(this.hq); } else dressModel(this.scene, this.hq);
     this.msg(''); this._renderItems(); this.setMode('orbit'); this._side();
+    // prepare all the lighting programs on the graphics card in the background, instead of freezing on the first frame
+    if (this.renderer.compileAsync) { this.warming = true; Promise.race([this.renderer.compileAsync(this.scene, this.camera), new Promise(r => setTimeout(r, 4000))]).catch(() => { }).then(() => { this.warming = false; this.redraw = true; }); }
   }
   async _loadGltf(buf) {
     this.msg('جاري فتح النموذج…');
@@ -695,7 +714,7 @@ export class Viewer {
     this.furnRead = null;
     if (fp.length) {
       this.msg('جاري قراءة الأثاث من المخطط…'); await new Promise(r => setTimeout(r, 0));
-      let rec = []; try { rec = recognizeFurniture(fp, k); } catch (e) { console.warn(e); }
+      let rec = []; try { rec = await this._work('recognizeFurniture', fp, k); } catch (e) { console.warn(e); }
       const grp = new THREE.Group(), byMat = new Map();
       rec.forEach(it => { const f = it.face || [0, 1], g = buildItem({ ...it, x: (it.x - cx) * k, y: 0, z: -(it.y - cy) * k, r: Math.atan2(f[0], -f[1]) }); if (g) grp.add(g); });
       grp.updateMatrixWorld(true);
@@ -728,13 +747,13 @@ export class Viewer {
     const n = Math.min(doc.numPages, 40), sheets = [];
     for (let i = 1; i <= n; i++) { this.msg('جاري قراءة صفحات المخطط… ' + i + ' من ' + n); await new Promise(r => setTimeout(r, 0)); sheets.push(await readSheet(L, await doc.getPage(i))); }
     this.msg('جاري تحليل الجدران والأبواب والشبابيك…'); await new Promise(r => setTimeout(r, 30));
-    const set = analyzeSet(sheets); if (!set || !set.storeys.length) return false;
+    const set = await this._work('analyzeSet', sheets); if (!set || !set.storeys.length) return false;
     this.sheetDoc = doc; this.sheets = sheets; this.set = set; this.pdfScale = set.scale; this.texCache = {};
     await this._buildSheets(); return true;
   }
   async rebuildSheets() {
     this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
-    const set = analyzeSet(this.sheets, { scale: this.pdfScale }); if (!set) { this.msg('ما قدرت أبني المخطط بهذا المقياس.'); return; }
+    const set = await this._work('analyzeSet', this.sheets, { scale: this.pdfScale }); if (!set) { this.msg('ما قدرت أبني المخطط بهذا المقياس.'); return; }
     this.set = set; this.texCache = {};
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
@@ -825,7 +844,7 @@ export class Viewer {
   async _pdfFloor(bb, cx, cy, k) {
     const { page, doc, names } = this.pdf, view = page.view, pad = 6 / k;
     const r = { x0: Math.max(view[0], bb.x0 - pad), y0: Math.max(view[1], bb.y0 - pad), x1: Math.min(view[2], bb.x1 + pad), y1: Math.min(view[3], bb.y1 + pad) };
-    const w = r.x1 - r.x0, h = r.y1 - r.y0, max = Math.min(8192, this.renderer.capabilities.maxTextureSize || 4096, 6144);
+    const w = r.x1 - r.x0, h = r.y1 - r.y0, max = Math.min(this.renderer.capabilities.maxTextureSize || 4096, this.look.weak ? 2048 : 4096);
     const s = Math.min(max / w, max / h, 8), cw = Math.round(w * s), ch = Math.round(h * s);
     const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch; const ctx = cv.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cw, ch);
     const cfg = await doc.getOptionalContentConfig(); const show = new Set(['plan', 'furniture', 'plant', 'door']);
@@ -984,7 +1003,7 @@ export class Viewer {
         '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
         Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
-    h += '<label class="v3-hq"><input type="checkbox" data-hq="1"' + (this.hq ? ' checked' : '') + '> ✨ جودة عالية (إضاءة وظلال وخامات واقعية، أبطأ على الأجهزة الضعيفة)</label>';
+    h += '<label class="v3-hq"><input type="checkbox" data-hq="1"' + (this.hq ? ' checked' : '') + '> ✨ جودة عالية (إضاءة وظلال وخامات واقعية، أبطأ على الأجهزة الضعيفة)</label><span class="v3-note" data-hqnote="1"' + (this.look.noAO && this.hq ? '' : ' hidden') + '>جهازك أخف من اللازم لظلال الزوايا، فشلتها تلقائياً عشان الحركة تبقى ناعمة.</span>';
     h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>وقت المشي تطلع خريطة صغيرة في الزاوية تبين مكانك بالضبط والسهم اتجاه نظرك، واضغط على أي مكان فيها عشان تنتقل له.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
     this.side.onclick = e => {
