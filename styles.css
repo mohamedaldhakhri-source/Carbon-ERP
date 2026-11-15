@@ -428,3 +428,15 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .v3-help{display:flex;flex-direction:column;gap:4px;font-size:.78rem;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
 .v3-help b{color:var(--ink)}
 @media (max-width:900px){.v3{grid-template-columns:1fr;grid-template-rows:62vh auto;height:auto}.v3-side{max-height:none}}
+/* 3D viewer: furniture library */
+.v3-libgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.v3-libgrid button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:6px 3px;cursor:pointer;font:inherit;font-size:.7rem;line-height:1.25;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:56px}
+.v3-libgrid button i{font-style:normal;font-size:1.15rem}
+.v3-libgrid button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.v3-ibtn{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px}
+.v3-ibtn button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:6px 4px;cursor:pointer;font:inherit;font-size:.78rem}
+.v3-sw{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.v3-sw button{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
+.v3-sw button.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--surface) inset}
+.v3-cats label input[type=checkbox]{width:auto;flex:none;margin:0;padding:0}
+.v3-cats label{justify-content:flex-start;text-align:start}

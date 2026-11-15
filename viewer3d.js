@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
 import { readSheet, analyzeSet } from './plan2d.js?v=47';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=48';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -228,9 +229,12 @@ export class Viewer {
     const sun = this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2); sun.position.set(30, 60, 20); this.scene.add(sun);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.model = new THREE.Group(); this.scene.add(this.model);
+    // furniture and landscape pieces the user adds (saved with the document)
+    this.items = (this.opts.items || []).filter(it => it && LIB[it.t]); this.itemGroup = new THREE.Group(); this.scene.add(this.itemGroup); this.itemMeshes = []; this.tool = null; this.toolColor = '';
     // a soft light that travels with the walker, so rooms under a roof are not left in the dark
     this.head = new THREE.PointLight(0xfff3e0, 0, 16, 1); this.camera.add(this.head); this.scene.add(this.camera);
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement); this.orbit.enableDamping = true;
+    this.orbit.zoomToCursor = true; this.orbit.screenSpacePanning = true; // zoom goes where the mouse points, not to the middle
     this.mode = 'orbit'; this.keys = {}; this.yaw = 0; this.pitch = 0; this.move = { x: 0, y: 0 };
     this.catOn = {}; this.storeys = []; this.storeySel = 'all'; this.meshes = [];
     this.ray = new THREE.Raycaster(); this.ray.firstHitOnly = true;
@@ -249,6 +253,7 @@ export class Viewer {
     this.alive = false; window.removeEventListener('resize', this._onResize); document.removeEventListener('keydown', this._kd); document.removeEventListener('keyup', this._ku);
     document.removeEventListener('pointerlockchange', this._plc); document.removeEventListener('mousemove', this._mm);
     this.model.traverse(o => { if (o.geometry) { o.geometry.disposeBoundsTree && o.geometry.boundsTree && o.geometry.disposeBoundsTree(); o.geometry.dispose(); } if (o.material) [].concat(o.material).forEach(m => m.dispose()); });
+    document.removeEventListener('keydown', this._ki);
     this.renderer.dispose(); this.el.remove();
   }
   _bind() {
@@ -257,6 +262,11 @@ export class Viewer {
     this._kd = e => { if (this.mode !== 'walk' || /INPUT|SELECT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName)) return; this.keys[e.code] = true; if (/Arrow|Space/.test(e.code)) e.preventDefault(); };
     this._ku = e => { this.keys[e.code] = false; };
     document.addEventListener('keydown', this._kd); document.addEventListener('keyup', this._ku);
+    this._ki = e => { if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName) || !this.el.isConnected) return;
+      if (e.code === 'Escape' && (this.tool || this.moving)) { this.tool = null; this.moving = null; this._hint(); this._libMark(); }
+      else if (this.sel && e.code === 'KeyR' && this.mode !== 'walk') { this._itemAct('rot', Math.PI / 12); }
+      else if (this.sel && (e.code === 'Delete' || e.code === 'Backspace')) { e.preventDefault(); this._itemAct('del'); } };
+    document.addEventListener('keydown', this._ki);
     const cv = this.renderer.domElement;
     this._plc = () => { this.locked = document.pointerLockElement === cv; this._hint(); };
     this._mm = e => { if (this.locked) this._look(e.movementX, e.movementY, 0.0022); };
@@ -266,8 +276,18 @@ export class Viewer {
     cv.addEventListener('pointermove', e => { if (this.mode === 'walk' && e.pointerType !== 'mouse' && down && down.id === e.pointerId) { this._look(e.clientX - down.x, e.clientY - down.y, 0.005); down.x = e.clientX; down.y = e.clientY; down.moved = true; } });
     cv.addEventListener('pointerup', e => {
       if (!down) return; const moved = down.moved || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5; const d0 = down; down = null;
-      if (this.mode === 'walk' && e.pointerType === 'mouse' && !this.locked) { cv.requestPointerLock && cv.requestPointerLock(); return; }
+      if (this.mode === 'walk' && e.pointerType === 'mouse' && !this.locked && !this.tool && !this.moving) { cv.requestPointerLock && cv.requestPointerLock(); return; }
       if (!moved && Date.now() - d0.t < 400) this._pick(e);
+    });
+    // double-click (or double-tap) a room: fly the view to it
+    cv.addEventListener('dblclick', e => {
+      if (this.mode === 'walk' || this.tool || this.moving) return;
+      const r = cv.getBoundingClientRect(); this.ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera); this.ray.far = Infinity;
+      const h = this.ray.intersectObjects(this.meshes.filter(m => m.visible && !m.userData.ground), false)[0]; if (!h) return;
+      const from = { t: this.orbit.target.clone(), c: this.camera.position.clone() }, to = { t: h.point.clone(), c: h.point.clone().add(this.camera.position.clone().sub(h.point).multiplyScalar(0.45)) };
+      const t0 = performance.now(), step = () => { const k = Math.min(1, (performance.now() - t0) / 450), s = k * k * (3 - 2 * k);
+        this.orbit.target.lerpVectors(from.t, to.t, s); this.camera.position.lerpVectors(from.c, to.c, s); if (k < 1) requestAnimationFrame(step); };
+      step();
     });
     // phone joystick
     const joy = this.el.querySelector('.v3-joy'), knob = joy.querySelector('i'); let jid = null, jc = null;
@@ -278,6 +298,7 @@ export class Viewer {
   }
   _look(dx, dy, k) { this.yaw -= dx * k; this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - dy * k)); }
   _hint() {
+    if (this.tool || this.moving) { this.hintEl.hidden = false; this.hintEl.textContent = this.moving ? 'اضغط المكان الجديد للعنصر · Esc للإلغاء' : 'اضغط على الأرضية عشان تحط: ' + LIB[this.tool].l + ' · تقدر تحط أكثر من واحد · Esc للإنهاء'; return; }
     const touch = matchMedia('(pointer:coarse)').matches;
     if (this.mode !== 'walk') { this.hintEl.hidden = true; return; }
     this.hintEl.hidden = false;
@@ -328,7 +349,7 @@ export class Viewer {
     if (pick) return pick;
     return { pos: new THREE.Vector3(c.x, b.min.y + 1.6, b.max.z + 2.5), yaw: 0 };
   }
-  _colliders() { return this.meshes.filter(m => m.visible && !m.userData.noCollide); }
+  _colliders() { return this.meshes.filter(m => m.visible && !m.userData.noCollide).concat(this.itemMeshes.filter(m => !m.userData.noCollide && m.parent && m.parent.parent && m.parent.parent.visible !== false && m.parent.visible !== false)); }
   _groundAt(p) {
     this.ray.set(new THREE.Vector3(p.x, p.y + 0.4, p.z), new THREE.Vector3(0, -1, 0)); this.ray.far = 6;
     const h = this.ray.intersectObjects(this._colliders(), false)[0]; return h ? h.point.y : null;
@@ -392,7 +413,7 @@ export class Viewer {
     const sn = this.sun; sn.position.set(c.x + R * 0.5, c.y + R * 1.1, c.z + R * 0.35); sn.target.position.copy(c); this.scene.add(sn.target);
     sn.castShadow = true; sn.shadow.mapSize.set(4096, 4096); const sc = sn.shadow.camera, e = R * 0.8; sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 0.5; sc.far = R * 4; sc.updateProjectionMatrix(); sn.shadow.bias = -0.0004; sn.shadow.normalBias = 0.02;
     gnd.rotation.x = -Math.PI / 2; gnd.position.set(c.x, this.box.min.y - 0.01, c.z); gnd.userData.ground = true; this.scene.add(gnd); this.meshes.push(gnd); gnd.geometry.computeBoundsTree();
-    this.msg(''); this.setMode('orbit'); this._side();
+    this.msg(''); this._renderItems(); this.setMode('orbit'); this._side();
   }
   async _loadGltf(buf) {
     this.msg('جاري فتح النموذج…');
@@ -756,13 +777,73 @@ export class Viewer {
       if (on && selE != null && u.ifc) { const s = this.ifc.storeys[u.st]; on = !!s && s.elev <= selE + 0.01; }
       if (o.userData.ifc != null || u.cat || u.part) o.visible = on;
     });
+    this.itemGroup.children.forEach(g => { g.visible = selE == null || g.userData.item.y < selE + 2; });
     // GLB parts are groups: toggle the group itself
     (this.parts || []).forEach(p => { p.o.visible = this.catOn[p.k] !== false; });
   }
+  /* ----- added furniture ----- */
+  _itemStat() { return this.items.length ? 'العناصر المضافة: ' + this.items.length + (this.saveNote ? ' · ' + this.saveNote : '') : 'ما في عناصر مضافة للحين.'; }
+  _libMark() { this.side.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === this.tool)); }
+  _renderItems() {
+    this.itemGroup.children.slice().forEach(g => { this.itemGroup.remove(g); g.traverse(o => { if (o.geometry) { o.geometry.boundsTree && o.geometry.disposeBoundsTree(); o.geometry.dispose(); } }); });
+    this.itemMeshes = [];
+    this.items.forEach(it => { const g = buildItem(it); if (!g) return; this.itemGroup.add(g); g.traverse(o => { if (o.isMesh) { o.geometry.computeBoundsTree(); this.itemMeshes.push(o); } }); });
+    if (this.storeys && this.storeys.length) this.applyVis();
+    if (this.sel && !this.items.includes(this.sel)) this.sel = null;
+    this._selBox();
+  }
+  _selBox() {
+    if (this.hl) { this.scene.remove(this.hl); this.hl.geometry.dispose(); this.hl = null; }
+    if (!this.sel) return; const g = this.itemGroup.children.find(x => x.userData.item === this.sel); if (!g) return;
+    this.hl = new THREE.Box3Helper(new THREE.Box3().setFromObject(g), 0xff5a1f); this.scene.add(this.hl);
+  }
+  _place() {
+    const targets = this.meshes.filter(m => m.visible && m.parent && m.parent.visible !== false).concat(this.itemMeshes.filter(m => m.parent && m.parent.visible !== false && (!this.moving || m.parent.userData.item !== this.moving)));
+    const hits = this.ray.intersectObjects(targets, false), n = new THREE.Vector3();
+    const h = hits.find(x => x.face && n.copy(x.face.normal).transformDirection(x.object.matrixWorld).y > 0.6);
+    if (!h) { this.hintEl.hidden = false; this.hintEl.textContent = 'اضغط على أرضية أو سطح مستوي.'; return; }
+    const p = h.point, cam = this.camera.position;
+    if (this.moving) { Object.assign(this.moving, { x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3) }); this.sel = this.moving; this.moving = null; this._hint(); }
+    else { const it = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: this.tool, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), r: +Math.atan2(cam.x - p.x, cam.z - p.z).toFixed(3) };
+      if (this.toolColor) it.c = this.toolColor; this.items.push(it); this.sel = it; }
+    this._changed(); this._select(this.sel);
+  }
+  _select(it) {
+    this.sel = it; this._selBox(); if (!it) { this.infoEl.hidden = true; return; }
+    const d = LIB[it.t];
+    this.infoEl.innerHTML = '<b>' + d.i + ' ' + esc(d.l) + '</b><span>عنصر مضاف</span><div class="v3-ibtn"><button type="button" data-ia="rot">⟳ تدوير</button><button type="button" data-ia="move">✥ نقل</button><button type="button" data-ia="copy">📋 نسخ</button><button type="button" data-ia="del">🗑 حذف</button></div>' +
+      '<div class="v3-sw">' + [['', 'حسب التصميم']].concat(COLORS).map(([c, l]) => '<button type="button" data-ic="' + c + '" title="' + l + '"' + ((it.c || '') === c ? ' class="on"' : '') + ' style="background:' + (c || 'linear-gradient(135deg,#c79a63 50%,#e4dccd 50%)') + '"></button>').join('') + '</div>' +
+      '<button type="button" class="v3-x" aria-label="إغلاق">×</button>';
+    this.infoEl.hidden = false;
+    this.infoEl.onclick = e => { const b = e.target.closest('button'); if (!b) return;
+      if (b.classList.contains('v3-x')) { this.sel = null; this._selBox(); this.infoEl.hidden = true; return; }
+      if (b.dataset.ia) this._itemAct(b.dataset.ia, Math.PI / 4); else if (b.dataset.ic != null) { if (b.dataset.ic) it.c = b.dataset.ic; else delete it.c; this._changed(); this._select(it); } };
+  }
+  _itemAct(a, ang) {
+    const it = this.sel; if (!it) return;
+    if (a === 'rot') { it.r = +(((it.r || 0) + ang) % (Math.PI * 2)).toFixed(3); this._changed(); this._selBox(); }
+    else if (a === 'move') { this.moving = it; this.tool = null; this._libMark(); this._hint(); }
+    else if (a === 'copy') { this.tool = it.t; this.toolColor = it.c || ''; this.moving = null; this._libMark(); this._hint(); const sel = this.side.querySelector('[data-tc]'); if (sel) sel.value = this.toolColor; }
+    else if (a === 'del') { this.items = this.items.filter(x => x !== it); this.sel = null; this.infoEl.hidden = true; this._changed(); }
+  }
+  _changed() {
+    this._renderItems(); const st = this.side.querySelector('[data-istat]');
+    if (!this.opts.onItems) { if (st) st.textContent = this._itemStat(); return; }
+    this.saveNote = 'جاري الحفظ…'; if (st) st.textContent = this._itemStat();
+    clearTimeout(this._svT); this._svT = setTimeout(async () => {
+      let ok = true; try { ok = (await this.opts.onItems(this.items.map(x => ({ ...x })))) !== false; } catch (e) { ok = false; }
+      this.saveNote = ok ? '✓ محفوظ' : '⚠ ما انحفظ، جرّب مرة ثانية'; const s2 = this.side.querySelector('[data-istat]'); if (s2) s2.textContent = this._itemStat();
+    }, 700);
+  }
   /* ----- picking ----- */
   _pick(e) {
-    const r = this.renderer.domElement.getBoundingClientRect(), v = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    const r = this.renderer.domElement.getBoundingClientRect(), v = this.locked ? new THREE.Vector2(0, 0) : new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(v, this.camera); this.ray.far = Infinity;
+    if (this.tool || this.moving) { this._place(); return; }
+    { const ih = this.ray.intersectObjects(this.itemMeshes.filter(m => m.parent && m.parent.visible !== false && m.parent.parent && m.parent.parent.visible !== false), false)[0];
+      const mh = this.ray.intersectObjects(this.meshes.filter(m => m.visible && !m.userData.ground), false)[0];
+      if (ih && (!mh || ih.distance <= mh.distance + 0.01)) { let o = ih.object; while (o && !(o.userData && o.userData.item)) o = o.parent; if (o) { this._select(o.userData.item); return; } } }
+    this.sel = null;
     const hits = this.ray.intersectObjects(this.meshes.filter(m => m.visible && !m.userData.ground && m.parent && m.parent.visible !== false), true);
     if (this.hl) { this.scene.remove(this.hl); this.hl.geometry.dispose(); this.hl = null; }
     const h = hits[0]; if (!h) { this.infoEl.hidden = true; return; }
@@ -793,6 +874,10 @@ export class Viewer {
     const s = this.box.getSize(new THREE.Vector3());
     let h = '<div class="v3-modes"><button type="button" data-m="orbit">🔄 لفّ حول المبنى</button><button type="button" data-m="walk">🚶 مشي داخل المبنى</button><button type="button" data-m="top">⬇ من فوق</button><button type="button" data-fs="1">⛶ ملء الشاشة</button></div>';
     h += '<div class="v3-dim">المقاسات تقريباً: ' + s.x.toFixed(1) + ' × ' + s.z.toFixed(1) + ' م، والارتفاع ' + s.y.toFixed(1) + ' م</div>';
+    if (this.opts.canEdit !== false) h += '<div class="v3-cats v3-lib"><b>🪑 إضافة أثاث وعناصر</b><span class="v3-note">اختار عنصر واضغط على الأرضية مكان ما تبيه. اضغط على أي عنصر مضاف عشان تدوّره أو تنقله أو تنسخه أو تحذفه. كل شي ينحفظ مع المستند.</span>' +
+      '<div class="v3-libgrid">' + Object.entries(LIB).map(([k, d]) => '<button type="button" data-tool="' + k + '"' + (this.tool === k ? ' class="on"' : '') + '><i>' + d.i + '</i>' + esc(d.l) + '</button>').join('') + '</div>' +
+      '<label class="v3-f"><span>المادة / اللون</span><select data-tc="1"><option value="">حسب التصميم</option>' + COLORS.map(([c, l]) => '<option value="' + c + '"' + (this.toolColor === c ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+      '<span class="v3-note" data-istat="1">' + this._itemStat() + '</span></div>';
     if (this.ext === 'ifc') {
       if (this.storeys.length > 1) h += '<label class="v3-f"><span>الطوابق</span><select data-st="1"><option value="all">كل المبنى</option>' + this.storeys.map(x => '<option value="' + x.id + '"' + (String(x.id) === String(this.storeySel) ? ' selected' : '') + '>لين ' + esc(x.name) + '</option>').join('') + '</select></label>';
       h += '<div class="v3-cats"><b>الأنظمة في النموذج</b>' + Object.keys(CATS).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '><i style="background:' + CATS[c].c + '"></i>' + CATS[c].l + ' <small>' + this.counts[c] + '</small></label>').join('') + '</div>';
@@ -816,11 +901,12 @@ export class Viewer {
         '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
         Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
-    h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
+    h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
     this.side.onclick = e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.m) this.setMode(b.dataset.m);
+      if (b.dataset.tool) { this.tool = this.tool === b.dataset.tool ? null : b.dataset.tool; this.moving = null; if (document.pointerLockElement) document.exitPointerLock(); this._hint(); this._libMark(); }
       if (b.dataset.all) { // everything at once: every element on, every layer shown (hidden layers get printed on the floor)
         Object.keys(this.catOn).forEach(c => { this.catOn[c] = true; }); this.storeySel = 'all';
         if (this.ext === 'pdf' && !this.set) { Object.keys(this.pdfRoles).forEach(l => { if (this.pdfRoles[l] === 'skip') this.pdfRoles[l] = 'plan'; }); this.rebuildPdf(); }
@@ -832,6 +918,7 @@ export class Viewer {
     this.side.onchange = e => {
       const t = e.target;
       if (t.dataset.cat) { this.catOn[t.dataset.cat] = t.checked; this.applyVis(); }
+      else if (t.dataset.tc != null) { this.toolColor = t.value; }
       else if (t.dataset.st) { this.storeySel = t.value; if (this.mode === 'walk') this.setMode('walk'); else this.applyVis(); }
       else if (t.dataset.layer != null) { if (this.ext === 'pdf') { this.pdfRoles[t.dataset.layer] = t.value; this.rebuildPdf(); } else { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); } }
       else if (t.dataset.dh) { this.dxfH = Math.max(2, Math.min(12, +t.value || 3)); if (this.ext === 'pdf') this.rebuildPdf(); else this.rebuildDxf(); }
