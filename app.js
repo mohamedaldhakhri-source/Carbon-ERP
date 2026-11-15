@@ -55,7 +55,7 @@ const daysBetween = (a, b) => Math.round((b - a) / 864e5);
 const P = id => S.projects.find(p => p.id === id) || S.pending.find(p => p.id === id);
 const canApprove = () => me && ['gm', 'owner', 'admin'].includes(me.role);
 const canNewProject = () => isAdmin() || (me && me.role === 'head');
-const DOCK = { contract: 'العقد', boq: 'جدول الكميات BOQ', drawing: 'مخططات', ministry: 'موافقة الوزارة / العميل', other: 'مستند آخر' };
+const DOCK = { contract: 'العقد', boq: 'جدول الكميات BOQ', drawing: 'مخططات', model3d: 'نموذج 3D (IFC / GLB / DXF)', ministry: 'موافقة الوزارة / العميل', other: 'مستند آخر' };
 const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
@@ -256,6 +256,7 @@ function views() {
   if (h === 'suppliers') return vSuppliers();
   if (h === 'receipts') return vReceipts();
   if (h === 'reports') return vReports();
+  if (h.startsWith('v3d-')) return vModel3d(h.slice(4));
   if (h.startsWith('rep-')) return vReport(h.slice(4));
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
@@ -308,7 +309,7 @@ function vProject(id) {
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
   const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + 'مشروع ' + KIND[p.kind] + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (p.client ? ' · العميل ' + esc(p.client) : '') + (p.kind !== 'gov' && (p.cPhone || p.cId || p.cCr || p.cEmail) ? ' · <span dir="ltr">' + esc(p.cPhone || '') + (p.cEmail ? ' · ' + esc(p.cEmail) : '') + '</span>' + (p.cCr ? ' · س.ت ' + esc(p.cCr) : '') + (p.cId ? ' · البطاقة ' + esc(p.cId) : '') : '') + '</span>' + (p.cIdFile ? ' ' + fileLink(p.cIdFile, p.kind === 'company' ? 'نسخة السجل التجاري' : 'نسخة البطاقة الشخصية') : '') + '<span class="muted small">' + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span></div>' +
-    '<div class="actions">' + (p.approval === 'approved' && !ended(p) ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ Variation Order (VO)</button>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
+    '<div class="actions">' + (p.approval === 'approved' && !ended(p) ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ Variation Order (VO)</button>' : '') + (S.docs.find(x => x.pid === id && ext3d(x.path)) ? '<a class="btn" href="#v3d-' + S.docs.filter(x => x.pid === id && ext3d(x.path)).pop().id + '">🧊 المبنى 3D</a>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
   if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
   else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
   else if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
@@ -578,8 +579,38 @@ function docsTab(p) {
   const ds = S.docs.filter(x => x.pid === p.id);
   let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></div>';
   if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
-  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+  h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DXF ويتحول 3D تلقائياً.</p>';
+  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (ext3d(d.path) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : /\.dwg$/i.test(d.path) ? '<div class="muted small">لعرضه 3D احفظه من AutoCAD بصيغة DXF وارفعه</div>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
+/* ---------- 3D viewer ---------- */
+const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
+let V3 = null;
+function vModel3d(id) {
+  const d = S.docs.find(x => x.id === id); if (!d) return '<div class="empty">المستند غير موجود.</div>';
+  const p = P(d.pid), others = S.docs.filter(x => x.pid === d.pid && ext3d(x.path));
+  return '<div class="head"><div class="t"><span class="crumb"><a href="#p-' + d.pid + '" data-act="goDocs" data-v="' + d.pid + '">' + esc(pName(p)) + '</a> / عرض 3D</span><h1>' + esc(d.title) + '</h1><span class="muted small">' + ({ ifc: 'نموذج IFC', glb: 'نموذج GLB', gltf: 'نموذج glTF', dxf: 'مخطط AutoCAD (DXF) محوّل تلقائياً' })[ext3d(d.path)] + '</span></div><div class="actions">' +
+    (others.length > 1 ? '<select id="v3-doc" aria-label="النموذج">' + others.map(x => '<option value="' + x.id + '"' + (x.id === id ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>' : '') +
+    '<button class="btn" data-act="v3shot">📷 صورة</button>' + fileLink(d.path, 'تنزيل الملف') + '</div></div><div id="v3d-mount" data-doc="' + id + '"></div>';
+}
+async function mount3d() {
+  const mt = document.getElementById('v3d-mount');
+  if (!mt) { if (V3) { V3.viewer.dispose(); V3 = null; } return; }
+  const id = mt.dataset.doc;
+  if (V3 && V3.doc === id) { mt.appendChild(V3.viewer.el); V3.viewer.resize(); return; }
+  if (V3) { V3.viewer.dispose(); V3 = null; }
+  const d = S.docs.find(x => x.id === id); if (!d) return;
+  const me3 = V3 = { doc: id, viewer: null };
+  let mod; try { mod = await import('./viewer3d.js?v=44'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  if (V3 !== me3) return;
+  const viewer = me3.viewer = new mod.Viewer();
+  (document.getElementById('v3d-mount') || mt).appendChild(viewer.el); viewer.resize();
+  viewer.msg('جاري تنزيل الملف…');
+  const { data, error } = await sb.storage.from('attachments').download(d.path);
+  if (V3 !== me3) return;
+  if (error) { viewer.msg('ما قدرت أنزّل الملف: ' + errMsg(error)); return; }
+  await viewer.load(await data.arrayBuffer(), ext3d(d.path));
+}
+
 /* ---------- reports (GM, owner, admin) ---------- */
 const canReports = () => me && ['gm', 'owner', 'admin'].includes(me.role);
 const BRAND = '<div class="brandmark"><img src="assets/mark.svg" alt="شعار كربون"><div><b>CARBON</b><span>ENGINEERING DESIGN</span></div></div>';
@@ -1216,6 +1247,8 @@ const A2 = {
   schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r, dp: b.dept || '', dp0: b.dept || '' })) }; render(); },
   print: () => window.print(),
   repCsv: d => repCsv(d.v),
+  goDocs: d => { ui.tab = 'docs'; location.hash = 'p-' + d.v; },
+  v3shot: () => { if (!V3 || !V3.viewer) return; const a = document.createElement('a'); a.href = V3.viewer.renderer.domElement.toDataURL('image/png'); a.download = 'Carbon-3D-' + iso(today) + '.png'; document.body.appendChild(a); a.click(); a.remove(); },
   repClear: () => { ui.rf = { pid: '', from: '', to: '', sup: '' }; render(); },
   secRename: d => { const p = P(d.p), sec = p.sections.find(x => x[0] === d.v) || [d.v, '']; modal('اسم القسم ' + d.v, '<form class="f" data-form="secRename" data-p="' + p.id + '" data-v="' + esc(d.v) + '"><label class="fld"><span>اسم القسم</span><input id="sr-n" required value="' + esc(sec[1] && !/^قسم /.test(sec[1]) ? sec[1] : '') + '" placeholder="مثال: الأعمال الإنشائية"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   logReload: () => { ui.logRows = null; render(); },
@@ -1404,6 +1437,7 @@ document.addEventListener('change', async e => {
   if (e.target.id === 'nu-role') { document.getElementById('nu-dwrap').innerHTML = deptChecks('nu-dept', [], e.target.value); return; }
   if (e.target.id && e.target.id.startsWith('ur-')) { const cell = e.target.closest('tr').children[3], uid = e.target.id.slice(3), u = S.profiles.find(x => x.id === uid); cell.innerHTML = deptChecks('ud-' + uid, myDepts(u), e.target.value); return; }
   if (e.target.dataset && e.target.dataset.logf != null) { ui.logF[e.target.dataset.logf] = e.target.value; ui.logRows = null; render(); return; }
+  if (e.target.id === 'v3-doc') { location.hash = 'v3d-' + e.target.value; return; }
   if (['rp-p', 'rp-f', 'rp-t', 'rp-s'].includes(e.target.id)) { rf()[{ 'rp-p': 'pid', 'rp-f': 'from', 'rp-t': 'to', 'rp-s': 'sup' }[e.target.id]] = e.target.value; render(); return; }
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   if (e.target.id === 'sup-q') { ui.supQ = e.target.value; render(); return; }
@@ -1565,7 +1599,7 @@ function render() {
   if (!me) { root.innerHTML = '<div class="loading">جاري التحميل...</div>'; return; }
   if (me.role === 'pending') { root.innerHTML = vPending(); return; }
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
-  const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h.startsWith('rep-') ? 'reports' : h;
+  const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h.startsWith('rep-') ? 'reports' : h.startsWith('v3d-') ? 'projects' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
@@ -1579,6 +1613,7 @@ function render() {
     '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
     '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + greet() + views() + '</div></main>' +
     '<nav class="bnav">' + items.filter(x => x[0] !== 'users').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
+  mount3d();
 }
 
 function greet() {
