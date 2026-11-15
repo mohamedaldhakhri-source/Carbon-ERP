@@ -40,7 +40,7 @@ const ico = k => '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 
 /* ---------- state ---------- */
 let session = null, me = null;
-let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [], suppliers: [] };
+let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [], suppliers: [], cinv: [], cpay: [] };
 let ui = { filter: 'all', tab: 'boq', reqFilter: 'mine', authMode: 'login', authErr: '' };
 
 /* ---------- helpers ---------- */
@@ -73,6 +73,16 @@ const canSeeSup = () => me && ['admin', 'owner', 'gm', 'procurement', 'qs', 'fin
 const canEditSup = () => me && ['admin', 'owner', 'gm', 'procurement'].includes(me.role);
 const SUP = id => S.suppliers.find(x => x.id === id);
 const supOptions = () => '<option value="">اختر المورّد من القائمة</option>' + S.suppliers.filter(x => x.active).map(x => '<option value="' + x.id + '">' + esc(x.name) + ' · سجل ' + esc(x.cr) + '</option>').join('');
+const canSeeRec = () => me && ['finance', 'owner', 'gm', 'admin'].includes(me.role);
+const canEditRec = () => me && ['finance', 'admin'].includes(me.role);
+const PAYM = { transfer: 'تحويل بنكي', cheque: 'شيك', cash: 'نقداً' };
+function recStats(p) {
+  const inv = S.cinv.filter(x => x.pid === p.id), pay = S.cpay.filter(x => x.pid === p.id);
+  const value = contract(p) + varsApproved(p), invoiced = inv.reduce((a, x) => a + x.amt, 0), received = pay.reduce((a, x) => a + x.amt, 0);
+  const last = pay.map(x => x.date).sort().pop() || null;
+  return { inv, pay, value, invoiced, received, due: invoiced - received, last };
+}
+const invPaid = id => S.cpay.filter(x => x.inv === id).reduce((a, x) => a + x.amt, 0);
 const canFinance = () => me && ['finance', 'admin', 'gm', 'owner'].includes(me.role);
 const myItem = b => !['head', 'site'].includes(me.role) || inMyDept(b.dept);
 const planN = p => p.boq.filter(b => b.ps && b.pe).length || p.tasks.length;
@@ -183,9 +193,11 @@ async function loadAll() {
   const q = t => sb.from(t).select('*');
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
-    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at'), q('suppliers').order('name')]);
+    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on')]);
   const bad = res.find(r => r.error); if (bad) throw bad.error;
-  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups] = res.map(r => r.data);
+  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups, cinv, cpay] = res.map(r => r.data);
+  S.cinv = (cinv || []).map(x => ({ id: x.id, pid: x.project_id, no: x.invoice_no, date: x.invoice_date, amt: +x.amount, desc: x.work_desc, pct: x.work_pct == null ? null : +x.work_pct, file: x.file_path, byId: x.created_by }));
+  S.cpay = (cpay || []).map(x => ({ id: x.id, pid: x.project_id, inv: x.invoice_id, amt: +x.amount, date: x.received_on, method: x.method, ref: x.reference, note: x.note, file: x.file_path, byId: x.created_by }));
   S.suppliers = (sups || []).map(x => ({ id: x.id, name: x.name, cr: x.cr_no, crPath: x.cr_path, act: x.activity, contact: x.contact_name, phone: x.phone, email: x.email, addr: x.address, bank: x.bank_name, accName: x.account_name, acc: x.bank_account, iban: x.iban, notes: x.notes, active: x.active }));
   S.docs = docs.map(d => ({ id: d.id, pid: d.project_id, kind: d.kind, title: d.title, path: d.path, byId: d.uploaded_by, date: d.created_at }));
   S.profiles = profs;
@@ -240,6 +252,7 @@ function views() {
   if (h === 'petty') return vPetty();
   if (h === 'expenses') return vExpenses();
   if (h === 'suppliers') return vSuppliers();
+  if (h === 'receipts') return vReceipts();
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
   if (h === 'log') return vLog();
@@ -301,7 +314,7 @@ function vProject(id) {
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (ended(p) ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
-  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]].concat(me.role === 'admin' ? [['log', 'السجل', '']] : []);
+  const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length]].concat(canSeeRec() ? [['rec', 'المبالغ المستلمة', S.cpay.filter(x => x.pid === p.id).length]] : []).concat(me.role === 'admin' ? [['log', 'السجل', '']] : []);
   const showTime = planN(p) || isAdmin() || canDates(p) || (ui.ted && ui.ted.pid === p.id);
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
   h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
@@ -334,6 +347,7 @@ function vProject(id) {
   else if (ui.tab === 'pc') h += pettyTable(pcs, false);
   else if (ui.tab === 'vo') h += voTab(p, vos) + (vos.length ? voTable(vos, false) : '<div class="empty">لا توجد Variation Orders لهذا المشروع.</div>') + '<p class="muted small">العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها يعتمده المدير العام ويُضاف لقيمة المشروع وميزانيته.</p>';
   else if (ui.tab === 'docs') h += docsTab(p);
+  else if (ui.tab === 'rec' && canSeeRec()) h += recTab(p);
   else if (ui.tab === 'log' && me.role === 'admin') {
     ui.plog = ui.plog || {};
     if (!ui.plog[p.id]) { ui.plog[p.id] = 'busy'; sb.from('audit_log').select('*').eq('project_id', p.id).order('at', { ascending: false }).limit(300).then(({ data }) => { ui.plog[p.id] = data || []; render(); }); }
@@ -506,6 +520,56 @@ function voTable(list, showProj) {
           (canApprove() ? (v.file ? '<span class="actions"><button class="btn sm ok" data-act="voOk" data-v="' + v.id + '">اعتماد</button><button class="btn sm bad" data-act="voNo" data-v="' + v.id + '">رفض</button></span>' : '<span class="muted small">بانتظار إرفاق الموافقة</span>') : '<span class="pill p-warn">بانتظار المدير العام</span>')) + '</td>' +
         '<td class="small">' + fd(v.date) + '</td>' + (me.role === 'admin' ? '<td>' + '<button class="x" data-act="adminDel" data-t="variations" data-v="' + v.id + '" data-l="' + esc('Variation Order ' + v.no) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' + '</td>' : '') + '</tr>'; }).join('') + '</tbody></table></div>';
 }
+function recKpis(t) {
+  return '<div class="kpis"><div class="kpi"><span class="l">قيمة العقد + VO المعتمدة</span><span class="v">' + money(t.value) + ' <small>ر.ع</small></span><span class="s">بدون الضريبة</span></div>' +
+    '<div class="kpi"><span class="l">الفواتير المسلمة للعميل</span><span class="v">' + money(t.invoiced) + ' <small>ر.ع</small></span><span class="s">' + (t.value ? Math.round(t.invoiced / t.value * 100) : 0) + '% من القيمة</span></div>' +
+    '<div class="kpi"><span class="l">المبالغ المستلمة</span><span class="v" style="color:var(--ok)">' + money(t.received) + ' <small>ر.ع</small></span><span class="s">' + (t.last ? 'آخر مبلغ ' + fd(t.last) : 'ما وصل شي بعد') + '</span></div>' +
+    '<div class="kpi' + (t.due > 0 ? ' alert' : '') + '"><span class="l">باقي عند العميل</span><span class="v">' + money(t.due) + ' <small>ر.ع</small></span><span class="s">فواتير مسلمة وما انستلمت</span></div></div>';
+}
+function invTable(list, showProj) {
+  if (!list.length) return '<div class="empty">ما في فواتير مسلمة للعميل بعد.</div>';
+  return '<div class="tbl"><table><thead><tr><th>رقم الفاتورة</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التاريخ</th><th>العمل المنجز</th><th class="n">مبلغ الفاتورة</th><th class="n">المستلم</th><th class="n">الباقي</th><th>الحالة</th><th></th></tr></thead><tbody>' +
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(x => { const pd = invPaid(x.id), rest = x.amt - pd;
+      return '<tr><td class="num"><b>' + esc(x.no) + '</b></td>' + (showProj ? '<td class="small"><a href="#p-' + x.pid + '">' + esc(pName(P(x.pid))) + '</a></td>' : '') + '<td class="small">' + fd(x.date) + '</td><td class="small">' + esc(x.desc || '—') + (x.pct != null ? '<div class="muted">نسبة الإنجاز ' + x.pct + '%</div>' : '') + '</td><td class="n">' + money(x.amt) + '</td><td class="n">' + money(pd) + '</td><td class="n">' + money(rest) + '</td><td>' +
+        (rest <= 0.0005 ? '<span class="pill p-ok">مستلمة بالكامل</span>' : pd > 0 ? '<span class="pill p-warn">مستلمة جزئياً</span>' : '<span class="pill p-idle">بانتظار الدفع</span>') + '</td><td class="small">' + fileLink(x.file, 'الفاتورة') +
+        (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="client_invoices" data-v="' + x.id + '" data-l="' + esc('الفاتورة ' + x.no) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+}
+function payTable(list, showProj) {
+  if (!list.length) return '<div class="empty">ما في مبالغ مستلمة بعد.</div>';
+  return '<div class="tbl"><table><thead><tr><th>تاريخ الاستلام</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th class="n">المبلغ</th><th>مقابل الفاتورة</th><th>طريقة الدفع</th><th>المرجع</th><th>سجّله</th><th></th></tr></thead><tbody>' +
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(x => { const iv = S.cinv.find(i => i.id === x.inv);
+      return '<tr><td class="small"><b>' + fd(x.date) + '</b></td>' + (showProj ? '<td class="small"><a href="#p-' + x.pid + '">' + esc(pName(P(x.pid))) + '</a></td>' : '') + '<td class="n"><b>' + money(x.amt) + '</b></td><td class="num small">' + (iv ? esc(iv.no) : '<span class="muted">بدون فاتورة</span>') + '</td><td class="small">' + (PAYM[x.method] || '—') + '</td><td class="small">' + esc(x.ref || '') + (x.note ? '<div class="muted">' + esc(x.note) + '</div>' : '') + '</td><td class="small">' + esc(nameOf(x.byId)) + '</td><td class="small">' + fileLink(x.file, 'الإيصال') +
+        (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="client_payments" data-v="' + x.id + '" data-l="' + esc('مبلغ ' + money(x.amt) + ' ر.ع') + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+}
+function recTab(p) {
+  const t = recStats(p);
+  return '<div class="ch" style="margin-bottom:8px"><span class="muted small">الفواتير اللي تسلمت للعميل حسب العمل المنجز، والمبالغ اللي وصلت مقابلها.</span>' + (canEditRec() ? '<div class="actions"><button class="btn" data-act="invNew" data-v="' + p.id + '">+ فاتورة للعميل</button><button class="btn pri" data-act="payNew" data-v="' + p.id + '">+ مبلغ مستلم</button></div>' : '') + '</div>' +
+    recKpis(t) + '<h2 style="margin-top:14px">الفواتير المسلمة للعميل</h2>' + invTable(t.inv, false) + '<h2 style="margin-top:14px">المبالغ المستلمة</h2>' + payTable(t.pay, false);
+}
+function vReceipts() {
+  if (!canSeeRec()) return '<div class="empty">المبالغ المستلمة للمالية والإدارة.</div>';
+  const ps = S.projects.map(p => Object.assign({ p }, recStats(p)));
+  const tot = ps.reduce((a, x) => ({ value: a.value + x.value, invoiced: a.invoiced + x.invoiced, received: a.received + x.received, due: a.due + x.due, last: [a.last, x.last].filter(Boolean).sort().pop() || null }), { value: 0, invoiced: 0, received: 0, due: 0, last: null });
+  let h = '<div class="head"><div class="t"><h1>المبالغ المستلمة</h1><span class="muted">من العملاء لكل المشاريع. اضغط على أي مشروع تشوف تفاصيل فواتيره ومبالغه.</span></div></div>' + recKpis(tot);
+  h += '<div class="card"><h2>حسب المشروع</h2><div class="tbl"><table><thead><tr><th>المشروع</th><th class="n">قيمة العقد + VO</th><th class="n">المفوتر</th><th class="n">المستلم</th><th>نسبة المستلم</th><th class="n">باقي عند العميل</th><th>آخر مبلغ</th></tr></thead><tbody>' +
+    ps.sort((a, b) => b.received - a.received).map(x => '<tr class="click" data-go="p-' + x.p.id + '" data-tab="rec"><td><b>' + esc(pName(x.p)) + '</b><div class="muted small">' + KIND[x.p.kind] + '</div></td><td class="n">' + money(x.value) + '</td><td class="n">' + money(x.invoiced) + '</td><td class="n" style="color:var(--ok)"><b>' + money(x.received) + '</b></td><td style="min-width:120px"><div class="barrow">' + bar(x.value ? x.received / x.value * 100 : 0, '') + '<span>' + (x.value ? Math.round(x.received / x.value * 100) : 0) + '%</span></div></td><td class="n"' + (x.due > 0 ? ' style="color:var(--warn)"' : '') + '>' + money(x.due) + '</td><td class="small">' + (x.last ? fd(x.last) : '—') + '</td></tr>').join('') + '</tbody></table></div></div>';
+  h += '<div class="card"><h2>آخر المبالغ المستلمة</h2>' + payTable(S.cpay.slice(), true) + '</div>';
+  return h;
+}
+function invForm(pid) {
+  modal('فاتورة للعميل - ' + pName(P(pid)), '<form class="f" data-form="cinv" data-v="' + pid + '"><div class="fr"><label class="fld"><span>رقم الفاتورة</span><input id="ci-no" required dir="ltr"></label><label class="fld"><span>تاريخ الفاتورة</span><input id="ci-d" type="date" required value="' + iso(today) + '"></label></div>' +
+    '<div class="fr"><label class="fld"><span>مبلغ الفاتورة (ر.ع)</span><input id="ci-a" type="number" min="0.001" step="0.001" required></label><label class="fld"><span>نسبة الإنجاز في الفاتورة % (اختياري)</span><input id="ci-p" type="number" min="0" max="100" step="any"></label></div>' +
+    '<label class="fld"><span>العمل المنجز اللي تشمله الفاتورة</span><input id="ci-w" placeholder="مثال: الدفعة الثانية - أعمال الهيكل"></label><label class="fld"><span>نسخة الفاتورة (اختياري)</span><input id="ci-f" type="file" accept="image/*,.pdf"></label>' +
+    '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+}
+function payForm(pid) {
+  const open = S.cinv.filter(x => x.pid === pid && x.amt - invPaid(x.id) > 0.0005);
+  modal('مبلغ مستلم - ' + pName(P(pid)), '<form class="f" data-form="cpay" data-v="' + pid + '"><label class="fld"><span>مقابل الفاتورة</span><select id="cp-i">' + open.map(x => '<option value="' + x.id + '">' + esc(x.no) + ' · ' + fd(x.date) + ' · باقي ' + money(x.amt - invPaid(x.id)) + ' ر.ع</option>').join('') + '<option value="">بدون فاتورة (دفعة مقدمة أو غيرها)</option></select></label>' +
+    '<div class="fr"><label class="fld"><span>المبلغ المستلم (ر.ع)</span><input id="cp-a" type="number" min="0.001" step="0.001" required></label><label class="fld"><span>تاريخ الاستلام</span><input id="cp-d" type="date" required value="' + iso(today) + '"></label></div>' +
+    '<div class="fr"><label class="fld"><span>طريقة الدفع</span><select id="cp-m">' + Object.entries(PAYM).map(([k, l]) => '<option value="' + k + '">' + l + '</option>').join('') + '</select></label><label class="fld"><span>رقم المرجع (التحويل أو الشيك)</span><input id="cp-r" dir="ltr"></label></div>' +
+    '<label class="fld"><span>ملاحظة</span><input id="cp-n"></label><label class="fld"><span>إيصال أو إشعار التحويل (اختياري)</span><input id="cp-f" type="file" accept="image/*,.pdf"></label>' +
+    '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+}
 function docsTab(p) {
   const ds = S.docs.filter(x => x.pid === p.id);
   let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></div>';
@@ -532,7 +596,7 @@ function deptChecks(id, sel, role) {
   return '<div class="dchk" id="' + id + '"><label><input type="checkbox" value="*"' + (all ? ' checked' : '') + '> <b>الكل</b></label>' + Object.entries(DEPTS).map(([k, l]) => '<label><input type="checkbox" value="' + k + '"' + (all || sel.includes(k) ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>';
 }
 /* ---------- activity log (admin) ---------- */
-const LOG_T = { projects: 'مشروع', boq_sections: 'قسم BOQ', boq_items: 'بند BOQ', tasks: 'مهمة', material_requests: 'طلب مواد', request_items: 'مادة في طلب', quotes: 'عرض سعر', petty_cash: 'بيتي كاش', variations: 'Variation Order', project_docs: 'مستند', profiles: 'مستخدم', suppliers: 'مورّد' };
+const LOG_T = { projects: 'مشروع', boq_sections: 'قسم BOQ', boq_items: 'بند BOQ', tasks: 'مهمة', material_requests: 'طلب مواد', request_items: 'مادة في طلب', quotes: 'عرض سعر', petty_cash: 'بيتي كاش', variations: 'Variation Order', project_docs: 'مستند', profiles: 'مستخدم', suppliers: 'مورّد', client_invoices: 'فاتورة عميل', client_payments: 'مبلغ مستلم' };
 const LOG_A = { insert: ['أضاف', 'p-ok'], update: ['عدّل', 'p-warn'], delete: ['حذف', 'p-bad'], login: ['سجّل دخول', 'p-idle'], logout: ['سجّل خروج', 'p-idle'], session: ['فتح البرنامج', 'p-idle'] };
 const LOG_F = { name: 'الاسم', short_name: 'الاسم المختصر', client: 'العميل', type: 'النوع', client_type: 'نوع العميل', client_phone: 'هاتف العميل', client_email: 'بريد العميل', client_id_no: 'رقم البطاقة', client_id_path: 'نسخة البطاقة/السجل', client_cr: 'السجل التجاري', status: 'الحالة', stage: 'المرحلة', amount: 'المبلغ', qty: 'الكمية', unit: 'الوحدة', rate: 'سعر الوحدة', total: 'الإجمالي', start_date: 'البداية', end_date: 'النهاية', progress: 'الإنجاز %', description: 'الوصف', dept: 'القسم', depts: 'الأقسام', role: 'الدور', full_name: 'الاسم', email: 'البريد', approval: 'الاعتماد', approval_note: 'ملاحظة الاعتماد', gm_status: 'اعتماد المدير العام', gm_note: 'ملاحظة المدير العام', client_status: 'موافقة العميل', approval_path: 'ملف الموافقة', invoice_path: 'الفاتورة', receipt_path: 'مرفق الطلب', unit_price: 'سعر الوحدة', selected: 'العرض المختار', supplier: 'المورّد', po_no: 'رقم أمر الشراء', po_date: 'تاريخ أمر الشراء', title: 'العنوان', code: 'الرقم', no: 'الرقم', governorate: 'المحافظة', wilayat: 'الولاية', location_note: 'تفاصيل الموقع', stop_reason: 'سبب التوقف', schedule_status: 'حالة الجدول', need_by: 'مطلوب قبل', note: 'ملاحظة', decision_note: 'ملاحظة القرار', terms: 'الشروط', delivery_days: 'أيام التوريد', kind: 'النوع', path: 'الملف', section_code: 'القسم', prior_spent: 'مصروف سابق' };
 const LOG_SKIP = ['id', 'created_at', 'updated_at', 'project_id', 'request_id', 'requested_by', 'created_by', 'uploaded_by', 'decided_by', 'decided_at', 'gm_by', 'gm_at', 'approval_by', 'approval_at', 'requested_at', 'sort', 'boq_item_id', 'invoice_at', 'schedule_approved_by', 'schedule_approved_at'];
@@ -1111,11 +1175,13 @@ const A = {
   file: d => openFile(d.v),
   adminDel: d => modal('حذف نهائي', '<p>بيتم حذف <b>' + esc(d.l) + '</b> نهائياً' + (d.t === 'material_requests' ? ' مع مواده وعروض الأسعار وسجل إجراءاته' : '') + '. ما يمكن التراجع عن الحذف، لكن العملية تنسجل في سجل النشاط.</p><div class="actions"><button class="btn bad" data-act="adminDelGo" data-t="' + d.t + '" data-v="' + d.v + '">حذف نهائي</button><button class="btn" data-act="close">إلغاء</button></div>'),
   adminDelGo: async (d, el) => {
-    if (!['petty_cash', 'variations', 'material_requests', 'suppliers'].includes(d.t) || me.role !== 'admin') return;
+    if (!['petty_cash', 'variations', 'material_requests', 'suppliers', 'client_invoices', 'client_payments'].includes(d.t) || me.role !== 'admin') return;
     el.disabled = true;
     try { await run(sb.from(d.t).delete().eq('id', d.v), 'تم الحذف'); } catch (e) { el.disabled = false; return; }
     closeModal(); if (d.t === 'material_requests' && location.hash.startsWith('#r-')) location.hash = 'requests'; refresh();
   },
+  invNew: d => invForm(d.v),
+  payNew: d => payForm(d.v),
   supNew: () => supForm(null),
   supEdit: d => supForm(d.v),
   printPO: () => { document.body.classList.add('print-po'); const off = () => { document.body.classList.remove('print-po'); window.removeEventListener('afterprint', off); }; window.addEventListener('afterprint', off); window.print(); },
@@ -1219,6 +1285,14 @@ document.addEventListener('submit', async e => {
       if (res) { if (res.id && (ds.length > 1 || !ds.length)) await run(sb.rpc('set_user_depts', { p_user: res.id, p_depts: ds })); f.reset(); refresh(); }
     } else if (kind === 'secRename') {
       await run(sb.rpc('rename_section', { p_project: f.dataset.p, p_code: f.dataset.v, p_name: v('sr-n') }), 'تم تعديل اسم القسم'); closeModal(); refresh();
+    } else if (kind === 'cinv') {
+      const path = await upload(fileOf('ci-f'), 'invoices');
+      await run(sb.from('client_invoices').insert({ project_id: f.dataset.v, invoice_no: v('ci-no'), invoice_date: v('ci-d'), amount: +v('ci-a'), work_pct: v('ci-p') === '' ? null : +v('ci-p'), work_desc: v('ci-w') || null, file_path: path, created_by: me.id }), 'انسجلت الفاتورة');
+      closeModal(); ui.tab = 'rec'; refresh();
+    } else if (kind === 'cpay') {
+      const path = await upload(fileOf('cp-f'), 'receipts');
+      await run(sb.from('client_payments').insert({ project_id: f.dataset.v, invoice_id: v('cp-i') || null, amount: +v('cp-a'), received_on: v('cp-d'), method: v('cp-m'), reference: v('cp-r') || null, note: v('cp-n') || null, file_path: path, created_by: me.id }), 'انسجل المبلغ المستلم');
+      closeModal(); ui.tab = 'rec'; refresh();
     } else if (kind === 'sup') {
       const id = f.dataset.v; let path = null;
       if (fileOf('sp-crf')) { path = await upload(fileOf('sp-crf'), 'suppliers'); if (!path) return; } else if (!id) return toast('ارفق نسخة السجل التجاري', true);
@@ -1323,6 +1397,7 @@ function render() {
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
+  if (canSeeRec()) items.splice(items.findIndex(x => x[0] === 'petty'), 0, ['receipts', 'المبالغ المستلمة', 'cash', 'المستلم']);
   if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';

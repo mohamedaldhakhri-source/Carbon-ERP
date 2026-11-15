@@ -1,5 +1,4 @@
 -- End-to-end test of the Carbon ERP database: every role, the full workflows, and permission checks.
--- Run against a scratch Postgres that has the auth stub and all migrations applied (never against the live project).
 \set ON_ERROR_STOP on
 create table public.t_res(n serial, sec text, label text, ok bool, detail text);
 create table public.t_users(name text primary key, id uuid);
@@ -202,6 +201,24 @@ select public.t_no('ما يحذف المستند', $$delete from public.project_
 select public.t_as('gm');
 select public.t_ok('المدير العام يعتمد الـ VO', $$select public.decide_variation((select id from public.variations where title='غرفة إضافية'), true, null)$$);
 select public.t_eq('قيمة العقد الأصلية ما تغيرت بعد الـ VO', $$select (sum(total) = 16500)::text from public.boq_items b join public.projects p on p.id=b.project_id where p.name='فيلا تجريبية'$$, 'true');
+
+-- ===== 5b. client invoices and receipts =====
+select public.t_s('5ب المبالغ المستلمة');
+select public.t_as('site');
+select public.t_no('مهندس الموقع ما يسجل فاتورة عميل', $$insert into public.client_invoices(project_id,invoice_no,invoice_date,amount,created_by) select id,'X','2026-11-10',1,public.t_id('site') from public.projects where name='فيلا تجريبية'$$);
+select public.t_as('fin');
+select public.t_ok('المالية تسجل فاتورة للعميل (دفعة 1)', $$insert into public.client_invoices(project_id,invoice_no,invoice_date,amount,work_desc,work_pct,created_by) select id,'INV-001','2026-11-10',5000,'أعمال الهيكل',30,public.t_id('fin') from public.projects where name='فيلا تجريبية'$$);
+select public.t_no('رقم الفاتورة ما يتكرر في نفس المشروع', $$insert into public.client_invoices(project_id,invoice_no,invoice_date,amount,created_by) select id,'INV-001','2026-11-11',1,public.t_id('fin') from public.projects where name='فيلا تجريبية'$$);
+select public.t_ok('المالية تسجل مبلغ مستلم مقابل الفاتورة', $$insert into public.client_payments(project_id,invoice_id,amount,received_on,method,reference,created_by) select p.id,i.id,3000,'2026-11-14','transfer','TRX-1',public.t_id('fin') from public.projects p join public.client_invoices i on i.project_id=p.id where p.name='فيلا تجريبية'$$);
+select public.t_no('ما يربط المبلغ بفاتورة مشروع ثاني', $$insert into public.client_payments(project_id,invoice_id,amount,received_on,created_by) select p.id,(select id from public.client_invoices limit 1),1,'2026-11-14',public.t_id('fin') from public.projects p where p.name<>'فيلا تجريبية' limit 1$$);
+select public.t_as('owner');
+select public.t_eq('صاحب الشركة يشوف المستلم', $$select sum(amount)::int::text from public.client_payments$$, '3000');
+select public.t_eq('ويشوف رقم الفاتورة', $$select i.invoice_no from public.client_payments c join public.client_invoices i on i.id=c.invoice_id$$, 'INV-001');
+select public.t_no('صاحب الشركة ما يعدل المبالغ (للمالية)', $$update public.client_payments set amount=1$$);
+select public.t_as('head');
+select public.t_eq('رئيس القسم ما يشوف المبالغ المستلمة', $$select count(*)::text from public.client_payments$$, '0');
+select public.t_as('fin');
+select public.t_no('المالية ما تحذف (الحذف للأدمن)', $$delete from public.client_payments$$);
 
 -- ===== 6. finance, audit log, admin =====
 select public.t_s('6 المالية والسجل والأدمن');
