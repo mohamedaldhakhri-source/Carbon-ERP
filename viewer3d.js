@@ -219,6 +219,8 @@ export function guessPdfRoles(layers) {
 
 const tag = (m, look) => { m.userData.look = look; return m; };
 /* ---------- viewer ---------- */
+// the key a browser reading of a drawing set is kept under; the number changes when the reading itself changes
+const LOCAL_SHEETS = 'local:sheets:59';
 export class Viewer {
   constructor(opts) {
     this.opts = opts || {};
@@ -484,8 +486,11 @@ export class Viewer {
     const pic = ['pdf', 'png', 'jpg', 'jpeg', 'webp'].includes(ext);
     try {
       // a plan the AI already read for this document opens straight away, with no new cost
-      let saved = null; if (pic && this.opts.looks) { try { const lk = await this.opts.looks.load(); saved = lk && lk.layout; } catch (e) { console.warn(e); } }
-      if (saved) this._loadLayout(saved);
+      let lk = null; if (pic && this.opts.looks) { try { this.msg('جاري فتح المخطط…'); lk = await this.opts.looks.load(); } catch (e) { console.warn(e); } }
+      const saved = lk && lk.layout, kept = lk && lk[LOCAL_SHEETS];
+      if (saved) await this._loadLayout(saved);
+      // a drawing this program already read once opens from that reading, without going through the pages again
+      else if (ext === 'pdf' && kept && kept.set && await this._openKept(buf, kept.set)) { }
       else if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
@@ -839,18 +844,33 @@ export class Viewer {
     ['walls', 'windows', 'doors', 'plants', 'furniture', 'floor', 'low'].forEach(c => { if (this.catOn[c] == null) this.catOn[c] = true; });
   }
   /* ----- plotted sheet sets without layers (municipality drawings) ----- */
-  async _loadSheets(L, doc) {
+  async _readSheets(L, doc) {
     const n = Math.min(doc.numPages, 40), sheets = [];
     for (let i = 1; i <= n; i++) { this.msg('جاري قراءة صفحات المخطط… ' + i + ' من ' + n); await new Promise(r => setTimeout(r, 0)); sheets.push(await readSheet(L, await doc.getPage(i))); }
+    return sheets;
+  }
+  async _loadSheets(L, doc) {
+    const sheets = await this._readSheets(L, doc);
     this.msg('جاري تحليل الجدران والأبواب والشبابيك…'); await new Promise(r => setTimeout(r, 30));
     const set = await this._work('analyzeSet', sheets); if (!set || !set.storeys.length) return false;
     this.sheetDoc = doc; this.sheets = sheets; this.set = set; this.pdfScale = set.scale; this.texCache = {};
-    await this._buildSheets(); return true;
+    await this._buildSheets(); this._keep(); return true;
+  }
+  // keep the reading with the file (for everyone, on any device), so the next opening skips it
+  _keep() { const lk = this.opts.looks; if (lk && lk.keep && this.set) lk.keep(LOCAL_SHEETS, { set: this.set, at: new Date().toISOString() }).catch(e => console.warn(e)); }
+  async _openKept(buf, set) {
+    try {
+      const L = this.opts.pdfjs ? await this.opts.pdfjs() : window.pdfjsLib; if (!L || !set.storeys || !set.storeys.length) return false;
+      const doc = await L.getDocument({ data: new Uint8Array(buf.slice(0)), disableFontFace: true, isEvalSupported: false }).promise;
+      this.sheetDoc = doc; this.sheets = null; this.set = set; this.pdfScale = set.scale; this.texCache = {};
+      await this._buildSheets(); return true;
+    } catch (e) { console.warn(e); this.model.clear(); this.meshes = []; this.set = null; return false; }
   }
   async rebuildSheets() {
     this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
+    if (!this.sheets) { const L = this.opts.pdfjs ? await this.opts.pdfjs() : window.pdfjsLib; this.sheets = await this._readSheets(L, this.sheetDoc); this.msg('جاري تحديث المجسم…'); }
     const set = await this._work('analyzeSet', this.sheets, { scale: this.pdfScale }); if (!set) { this.msg('ما قدرت أبني المخطط بهذا المقياس.'); return; }
-    this.set = set; this.texCache = {};
+    this.set = set; this.texCache = {}; this._keep();
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
   }

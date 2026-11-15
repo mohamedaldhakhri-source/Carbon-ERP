@@ -605,11 +605,20 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=58'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=59'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   // finishes read from the design renders in the file (Claude, once per document, saved for everyone)
-  const looks = { load: async () => { const { data } = await sb.from('project_docs').select('look').eq('id', id).single(); return (data && data.look) || null; } };
+  // what was read before for this file (by the AI or in a browser) comes back with it, so a drawing is read only once,
+  // even when it is uploaded again as a new document. The file is known by the SHA-256 of its bytes.
+  let fileHash = null;
+  const looks = {
+    load: async () => {
+      if (fileHash) { const { data, error } = await sb.rpc('doc_open', { p_doc: id, p_hash: fileHash }); if (!error) return data || null; console.warn(error); }
+      const { data } = await sb.from('project_docs').select('look').eq('id', id).single(); return (data && data.look) || null;
+    },
+    keep: async (key, val) => { if (!fileHash) return; const { error } = await sb.rpc('file_read_put', { p_hash: fileHash, p_key: key, p_val: val }); if (error) console.warn(error); },
+  };
   const aiCall = async body => { const { data, error } = await sb.functions.invoke('analyze-renders', { body: { doc_id: id, ...body } }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
   const ai = {}; // the paid AI steps: only the system admin, owner and general manager start them
   if (canAi()) { looks.analyze = aiCall; ai.plan = body => aiCall({ mode: 'plan', ...body }); ai.design = body => aiCall({ mode: 'design', ...body }); }
@@ -621,7 +630,10 @@ async function mount3d() {
   const { data, error } = await sb.storage.from('attachments').download(d.path);
   if (V3 !== me3) return;
   if (error) { viewer.msg('ما قدرت أنزّل الملف: ' + errMsg(error)); return; }
-  await viewer.load(await data.arrayBuffer(), ext3dDoc(d));
+  const buf = await data.arrayBuffer();
+  try { fileHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { console.warn(e); }
+  if (V3 !== me3) return;
+  await viewer.load(buf, ext3dDoc(d));
 }
 
 /* ---------- reports (GM, owner, admin) ---------- */
