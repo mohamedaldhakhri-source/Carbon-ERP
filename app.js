@@ -728,10 +728,10 @@ function timeTab(p) {
   let h = '';
   if (ui.ted && ui.ted.pid === p.id) {
     const idx = {}; ui.ted.list.forEach((r, i) => { idx[r.id] = i; });
-    const chg = r => r.start !== r.s0 || r.end !== r.e0 || +r.q !== +r.q0 || +r.r !== +r.r0;
+    const chg = r => r.start !== r.s0 || r.end !== r.e0 || +r.q !== +r.q0 || +r.r !== +r.r0 || (r.dp || '') !== (r.dp0 || '');
     const ch = ui.ted.list.filter(chg).length, pr = canPrice();
     const tot = ui.ted.list.reduce((a, r) => a + (+r.q || 0) * (+r.r || 0), 0), tot0 = p.boq.reduce((a, b) => a + b.t, 0);
-    h += '<div class="flag warn">وضع التعديل: غيّر البداية أو عدد الأيام' + (pr ? ' أو الكمية والسعر' : '') + ' لأي بند، والنهاية تنحسب تلقائياً. بعدها اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
+    h += '<div class="flag warn">وضع التعديل: غيّر البداية أو عدد الأيام' + (pr ? ' أو القسم أو الكمية والسعر' : '') + ' لأي بند، والنهاية تنحسب تلقائياً. بعدها اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
       '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + (pr && Math.abs(tot - tot0) > .001 ? ' · قيمة المشروع ' + money(tot0) + ' ← <b>' + money(tot) + '</b> ر.ع' : '') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
       '<div class="tbl"><table class="rv ted"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th>' + (pr ? '<th class="n">الكمية</th><th class="n">سعر الوحدة</th>' : '') + '<th class="n">القيمة</th><th>البداية</th><th class="n">الأيام</th><th>النهاية</th></tr></thead><tbody>';
     p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i)).forEach(([sc, sn]) => {
@@ -739,7 +739,7 @@ function timeTab(p) {
       h += '<tr class="sec"><td>' + esc(sc) + '</td><td colspan="' + (pr ? 8 : 6) + '">' + esc(sn) + '</td></tr>';
       it.forEach(b => {
         const i = idx[b.id], r = ui.ted.list[i], ok = myItem(b), dis = ok ? '' : ' disabled', days = durOf(r.start, r.end);
-        h += '<tr' + (chg(r) ? ' class="chg"' : '') + '><td class="num small">' + esc(b.c) + '</td><td class="small" title="' + esc(b.d) + '">' + esc(short(b.d)) + '</td><td>' + (b.dept ? '<span class="tag">' + DEPTS[b.dept] + '</span>' : '<span class="muted">—</span>') + '</td>' +
+        h += '<tr' + (chg(r) ? ' class="chg"' : '') + '><td class="num small">' + esc(b.c) + '</td><td class="small" title="' + esc(b.d) + '">' + esc(short(b.d)) + '</td><td>' + (pr ? '<select class="dsel" data-ted="' + i + '" data-k="dp" aria-label="قسم البند ' + esc(b.c) + '"><option value="">بدون قسم</option>' + Object.entries(DEPTS).map(([k, l]) => '<option value="' + k + '"' + (r.dp === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' : b.dept ? '<span class="tag">' + DEPTS[b.dept] + '</span>' : '<span class="muted">—</span>') + '</td>' +
           (pr ? '<td><input type="number" class="nm-in" min="0" step="any" data-ted="' + i + '" data-k="q" value="' + esc(r.q) + '" aria-label="كمية البند ' + esc(b.c) + '"> <span class="muted small">' + esc(b.u || '') + '</span></td><td><input type="number" class="nm-in" min="0" step="any" data-ted="' + i + '" data-k="r" value="' + esc(r.r) + '" aria-label="سعر البند ' + esc(b.c) + '"></td>' : '') +
           '<td class="n small">' + money((+r.q || 0) * (+r.r || 0)) + '</td>' +
           '<td><input type="date" class="dt" data-ted="' + i + '" data-k="start" value="' + esc(r.start) + '"' + dis + ' aria-label="بداية البند ' + esc(b.c) + '"></td>' +
@@ -982,7 +982,7 @@ const A2 = {
   },
   npClassify: () => { const n = npState(); npSync(); n.items.forEach(i => { i.dept = null; }); BOQ.classify(n.sections, n.items); addDepts(n); npPlan(n); render(); toast('تم توزيع البنود على الأقسام'); },
   npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
-  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r })) }; render(); },
+  schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r, dp: b.dept || '', dp0: b.dept || '' })) }; render(); },
   print: () => window.print(),
   secRename: d => { const p = P(d.p), sec = p.sections.find(x => x[0] === d.v) || [d.v, '']; modal('اسم القسم ' + d.v, '<form class="f" data-form="secRename" data-p="' + p.id + '" data-v="' + esc(d.v) + '"><label class="fld"><span>اسم القسم</span><input id="sr-n" required value="' + esc(sec[1] && !/^قسم /.test(sec[1]) ? sec[1] : '') + '" placeholder="مثال: الأعمال الإنشائية"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   logReload: () => { ui.logRows = null; render(); },
@@ -992,12 +992,12 @@ const A2 = {
   schedAuto: d => {
     const p = P(d.v); const items = p.boq.map(b => ({ id: b.id, code: b.c, desc: b.d, total: b.t, dept: b.dept, sec: b.s }));
     BOQ.classify(p.sections, items, true); BOQ.schedule(items, p.start, p.end);
-    ui.ted = { pid: p.id, list: items.map(i => { const b = p.boq.find(x => x.id === i.id); return { id: i.id, start: i.start, end: i.end, s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r }; }) };
+    ui.ted = { pid: p.id, list: items.map(i => { const b = p.boq.find(x => x.id === i.id); return { id: i.id, start: i.start, end: i.end, s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r, dp: b.dept || '', dp0: b.dept || '' }; }) };
     render(); toast('انحسبت أيام تنفيذ البنود من جديد. راجعها واضغط حفظ');
   },
   schedSave: async (d, el) => {
-    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0), chp = ui.ted.list.filter(r => +r.q !== +r.q0 || +r.r !== +r.r0);
-    if (!ch.length && !chp.length) { ui.ted = null; render(); return; }
+    const ch = ui.ted.list.filter(r => r.start !== r.s0 || r.end !== r.e0), chp = ui.ted.list.filter(r => +r.q !== +r.q0 || +r.r !== +r.r0), chd = ui.ted.list.filter(r => (r.dp || '') !== (r.dp0 || ''));
+    if (!ch.length && !chp.length && !chd.length) { ui.ted = null; render(); return; }
     const bad = ch.find(r => !r.start || !r.end || r.end < r.start);
     if (bad) { const b = P(ui.ted.pid).boq.find(x => x.id === bad.id); return toast('راجع تواريخ البند ' + (b ? b.c : ''), true); }
     const badP = chp.find(r => r.q === '' || r.r === '' || +r.q < 0 || +r.r < 0);
@@ -1006,7 +1006,8 @@ const A2 = {
     try {
       if (ch.length) await run(sb.rpc('set_item_dates', { p_items: ch.map(r => ({ id: r.id, start: r.start, end: r.end })) }));
       if (chp.length) await run(sb.rpc('set_item_prices', { p_items: chp.map(r => ({ id: r.id, qty: +r.q, rate: +r.r })) }));
-      toast('تم حفظ ' + (ch.length + chp.length) + ' تعديل'); ui.ted = null; refresh();
+      if (chd.length) await run(sb.rpc('set_item_depts', { p_items: chd.map(r => ({ id: r.id, dept: r.dp || null })) }));
+      toast('تم حفظ ' + new Set(ch.concat(chp, chd).map(r => r.id)).size + ' بند'); ui.ted = null; refresh();
     } catch (e) { el.disabled = false; }
   },
   schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">مدد ' + p.boq.filter(b => b.ps).length + ' بند من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. مهندس الموقع يقدر يحدّث التواريخ بعد الاعتماد حسب سير العمل.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },

@@ -358,3 +358,4 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
   body.print-po .po{position:absolute;top:0;left:0;right:0;page:po;border:0}
   body.print-po .po .noprint{display:none}
 }
+.ted .dsel{min-width:110px;padding:6px 8px}
