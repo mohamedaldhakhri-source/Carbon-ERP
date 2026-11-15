@@ -303,7 +303,7 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .rep h1{font-size:1.3rem;margin:0 0 4px}
 .rep h2{font-size:1rem;margin:18px 0 8px}
 .rep-h{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:12px}
-.rep-logo{display:flex;align-items:center;gap:12px;text-align:end}.rep-logo img{height:84px;width:auto;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.rep-logo{display:flex;align-items:center;gap:12px;text-align:end}.rep-logo img{height:56px;width:auto}
 .rep .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle}
 @media print{
   .noprint,.greet{display:none!important}
@@ -348,7 +348,7 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
   #nr-lines .line.pr .l-d{grid-column:1/-1}
   .line.lh.pr{display:none}
 }
-.po-logo img{height:84px;width:auto;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.po-logo img{height:56px;width:auto}
 .po-sign{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;border-top:2px solid var(--ink);padding-top:12px}
 .po-sign>div{display:flex;flex-direction:column;gap:3px}
 @page po{size:A4 portrait;margin:12mm}
@@ -359,3 +359,41 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
   body.print-po .po .noprint{display:none}
 }
 .ted .dsel{min-width:110px;padding:6px 8px}
+
+/* Company letterhead (vector mark + wordmark) */
+.brandmark{display:flex;align-items:center;gap:12px;direction:ltr;text-align:left;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.brandmark img{height:56px;width:auto;display:block}
+.brandmark b{font-family:'Readex Pro',var(--display);font-size:1.55rem;font-weight:600;letter-spacing:.34em;color:var(--ink);line-height:1;display:block}
+.brandmark span{font-family:'Readex Pro',var(--display);font-size:.6rem;font-weight:500;letter-spacing:.46em;color:var(--muted);display:block;margin-top:6px;white-space:nowrap}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .brandmark img{background:#fff;padding:4px;border-radius:3px}}
+:root[data-theme="dark"] .brandmark img{background:#fff;padding:4px;border-radius:3px}
+/* Reports */
+.rhub{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.rcard{display:flex;flex-direction:column;gap:4px;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:6px;color:var(--ink);text-decoration:none;border-inline-start:3px solid var(--brand-y)}
+.rcard:nth-child(3n+2){border-inline-start-color:var(--brand-b)}.rcard:nth-child(3n){border-inline-start-color:var(--brand-r)}
+.rcard:hover{background:var(--sunk)}
+.rcard .rn{font-family:var(--display);font-size:.75rem;color:var(--muted)}
+.rcard b{font-size:1.05rem}
+.rfil{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px}
+.rfil .fld{min-width:150px;flex:1;max-width:300px}
+.lhd{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-bottom:12px}
+.lhd-m{text-align:end;color:var(--muted);display:flex;flex-direction:column;gap:2px}.lhd-m b{color:var(--ink)}
+.lhd-s{height:5px;margin-bottom:16px}
+.rtitle{margin-bottom:12px}.rtitle h1{font-size:1.4rem}
+.rk{margin:0 0 14px}
+.rdoc h2{margin:20px 0 6px;padding-inline-start:8px;border-inline-start:3px solid var(--ink)}
+.rtbl tfoot td{font-weight:700;border-top:2px solid var(--ink);background:var(--sunk)}
+.rfoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:20px;padding-top:8px}
+@media (max-width:700px){.lhd{flex-direction:column;align-items:flex-start}.lhd-m{text-align:start}.brandmark b{font-size:1.25rem}.rk{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media print{
+  .rdoc{border:0;padding:0}
+  .rdoc .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .rdoc .tbl{overflow:visible}
+  .rdoc table{font-size:10.5px}
+  .rdoc thead{display:table-header-group}
+  .rtbl tr{break-inside:avoid}
+  .rdoc a{color:inherit;text-decoration:none}
+  .brandmark b{color:#111}.brandmark img{background:none!important;padding:0!important}
+}
+.lhd-s i:nth-child(1){background:var(--ink)}
+@media print{.rdoc h2,.rdoc h2+p{break-after:avoid}}

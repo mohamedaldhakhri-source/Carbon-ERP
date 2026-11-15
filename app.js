@@ -33,6 +33,7 @@ const ICONS = {
   req: '<path d="M7 4h10l3 3v13H4V4h3m2 6h6m-6 4h6m-6 4h4" fill="none" stroke="currentColor" stroke-width="2"/>',
   cash: '<path d="M2 6h20v12H2zm10 3a3 3 0 100 6 3 3 0 000-6z"/>',
   inbox: '<path d="M3 13l3-9h12l3 9v7H3zm2 0h5a2 2 0 004 0h5" fill="none" stroke="currentColor" stroke-width="2"/>',
+  rep: '<path d="M5 3h10l4 4v14H5zM9 17v-4m3 4V9m3 8v-6" fill="none" stroke="currentColor" stroke-width="2"/>',
   users: '<path d="M9 11a4 4 0 100-8 4 4 0 000 8zm-7 10v-1a6 6 0 0112 0v1zm14-10a3 3 0 100-6m2 16v-1a5 5 0 00-3-4.6" fill="none" stroke="currentColor" stroke-width="2"/>'
 };
 const LOGO = '<div class="logo"><img src="assets/logo.png" alt="Carbon Engineering Design"></div><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div>';
@@ -253,6 +254,8 @@ function views() {
   if (h === 'expenses') return vExpenses();
   if (h === 'suppliers') return vSuppliers();
   if (h === 'receipts') return vReceipts();
+  if (h === 'reports') return vReports();
+  if (h.startsWith('rep-')) return vReport(h.slice(4));
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
   if (h === 'log') return vLog();
@@ -454,7 +457,7 @@ function poDoc(r, p) {
   const sig = (l, x) => '<div><span class="muted small">' + l + '</span><b>' + esc((x && x.by) || '—') + '</b><span class="small muted">' + (x && x.t ? fd(x.t) : '') + '</span></div>';
   const head = step(/^وافق رئيس القسم/), proc = step(/سعّر المواد|حدد المواد/), qs = step(/^راجع مهندس الكميات/), sp = SUP(q.supId), gm = step(/^اعتمد (المدير العام|صاحب الشركة)/), iss = step(/^أصدر أمر الشراء/);
   const priced = r.items.every(it => it.pr != null), tot = r.items.reduce((a, it) => a + (it.pr || 0) * it.q, 0);
-  return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">' + esc(r.po.no) + '</span><div class="muted small">التاريخ ' + fd(r.po.date) + '</div></div><div class="po-logo"><img src="assets/logo.png" alt="شعار كربون"></div></div>' +
+  return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">' + esc(r.po.no) + '</span><div class="muted small">التاريخ ' + fd(r.po.date) + '</div></div><div class="po-logo">' + BRAND + '</div></div>' +
     '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + (sp ? '<div class="small muted">سجل تجاري ' + esc(sp.cr) + ' · ' + esc(sp.phone) + (sp.email ? ' · ' + esc(sp.email) : '') + '</div>' + (sp.bank || sp.iban ? '<div class="small muted">' + esc([sp.bank, sp.accName, sp.acc, sp.iban].filter(Boolean).join(' · ')) + '</div>' : '') : '') + '</dd><dt>المشروع</dt><dd>' + esc(pName(p)) + '</dd><dt>موقع التوريد</dt><dd>' + esc(locText(p) || '—') + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + ' · قسم ' + DEPTS[r.dept] + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
     '<div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th>' + (priced ? '<th class="n">سعر الوحدة</th><th class="n">الإجمالي</th>' : '') + '</tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td>' + (priced ? '<td class="n">' + money(it.pr) + '</td><td class="n">' + money(it.pr * it.q) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' +
     '<div class="ch"><span class="noprint">' + (q.file ? fileLink(q.file, 'كوتيشن المورّد') : '') + '</span><b class="num">الإجمالي ' + money(priced ? tot : q.amt) + ' ر.ع</b></div>' +
@@ -576,6 +579,168 @@ function docsTab(p) {
   if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
   return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
+/* ---------- reports (GM, owner, admin) ---------- */
+const canReports = () => me && ['gm', 'owner', 'admin'].includes(me.role);
+const BRAND = '<div class="brandmark"><img src="assets/mark.svg" alt="شعار كربون"><div><b>CARBON</b><span>ENGINEERING DESIGN</span></div></div>';
+const REPORTS = [
+  ['projects', 'ملخص المشاريع', 'قيمة كل مشروع، الإنجاز، المصروف، المستلم من العميل، وموعد التسليم'],
+  ['suppliers', 'الموردين', 'بيانات كل مورّد، أوامر الشراء منه، المشاريع، وإجمالي المشتريات'],
+  ['purchases', 'المشتريات وأوامر الشراء', 'كل أمر شراء بالمواد والأسعار والمورّد، ومن طلب ومن اعتمد'],
+  ['workflow', 'سير طلبات المواد', 'وين واقف كل طلب وعند من ومن كم يوم، ومتوسط وقت كل خطوة'],
+  ['expenses', 'المصروفات', 'أوامر الشراء والبيتي كاش لكل مشروع مقابل ميزانيته'],
+  ['budget', 'الصرف حسب بنود BOQ', 'ميزانية كل بند والمصروف عليه والبنود المتجاوزة'],
+  ['petty', 'البيتي كاش', 'كل الطلبات بحالتها، ومن طلب، والفواتير الناقصة'],
+  ['vo', 'الأعمال الإضافية VO', 'الأعمال خارج العقد وموافقة العميل واعتماد المدير العام'],
+  ['receipts', 'الفواتير والمبالغ المستلمة', 'فواتير العملاء، المستلم منها، والباقي عند كل عميل']
+];
+const rf = () => (ui.rf = ui.rf || { pid: '', from: '', to: '', sup: '' });
+const inRange = d => { const f = rf(), x = String(d || '').slice(0, 10); return (!f.from || x >= f.from) && (!f.to || x <= f.to); };
+const inProj = pid => !rf().pid || pid === rf().pid;
+const poApprover = r => { const h = r.hist.filter(x => /^اعتمد/.test(x.a)).pop(); return h ? h.by : '—'; };
+const poSup = r => { const q = selQuote(r); return q ? (SUP(q.supId) ? SUP(q.supId).name : q.sup) : '—'; };
+const ageDays = d => Math.max(0, daysBetween(D(String(d).slice(0, 10)), today));
+const C = (t, h) => ({ t: t == null ? '' : String(t), h: h == null ? esc(t == null ? '' : t) : h });
+const projCell = pid => { const p = P(pid); return C(pName(p), esc(pName(p))); };
+
+function repData(k) {
+  const f = rf(), projs = S.projects.filter(p => inProj(p.id));
+  if (k === 'projects') {
+    const rec = canSeeRec(), rows = projs.map(p => { const h = health(p), st = recStats(p), b = budget(p), sp = spent(p), dl = daysLeft(p);
+      return [C(pName(p), '<b>' + esc(pName(p)) + '</b><div class="muted small">' + KIND[p.kind] + (p.client ? ' · ' + esc(p.client) : '') + '</div>'), contract(p), varsApproved(p), sp, sp / b * 100, progress(p), timePct(p)]
+        .concat(rec ? [st.invoiced, st.received, st.due] : []).concat([{ d: p.end }, ended(p) ? C('—') : C(dl, dl < 0 ? '<b style="color:var(--bad)">متأخر ' + (-dl) + '</b>' : dl), C(h.l, '<span class="pill ' + h.c + '">' + h.l + '</span>')]); });
+    const cols = [['المشروع'], ['قيمة العقد', 'n'], ['VO معتمد', 'n'], ['المصروف', 'n'], ['المصروف من الميزانية', 'p'], ['الإنجاز', 'p'], ['الوقت المنقضي', 'p']].concat(rec ? [['المفوتر للعميل', 'n'], ['المستلم', 'n'], ['الباقي عند العميل', 'n']] : []).concat([['التسليم', 'd'], ['باقي (يوم)'], ['الحالة']]);
+    const sum = fn => projs.reduce((a, p) => a + fn(p), 0), late = projs.filter(p => health(p).k === 'late').length, risk = projs.filter(p => health(p).k === 'risk').length;
+    return { kpis: [['عدد المشاريع', projs.length, projs.filter(p => !ended(p)).length + ' جاري'], ['قيمة العقود', money(sum(contract)) + ' ر.ع', 'بدون الضريبة'], ['المصروف', money(sum(spent)) + ' ر.ع', Math.round(sum(spent) / (sum(budget) || 1) * 100) + '% من الميزانيات'], rec ? ['المستلم من العملاء', money(sum(p => recStats(p).received)) + ' ر.ع', 'باقي ' + money(sum(p => recStats(p).due)) + ' ر.ع'] : ['متأخرة أو تحتاج اهتمام', late + risk, late + ' متأخر', late]],
+      secs: [{ cols, rows, foot: [C('الإجمالي'), sum(contract), sum(varsApproved), sum(spent), '', '', ''].concat(rec ? [sum(p => recStats(p).invoiced), sum(p => recStats(p).received), sum(p => recStats(p).due)] : []).concat(['', '', '']) }] };
+  }
+  const pos = S.requests.filter(r => r.po && inProj(r.pid) && inRange(r.po.date));
+  if (k === 'suppliers') {
+    const sups = S.suppliers.filter(s => !f.sup || s.id === f.sup);
+    const data = sups.map(s => { const mine = pos.filter(r => { const q = selQuote(r); return q && q.supId === s.id; }); const qs = S.requests.filter(r => inProj(r.pid)).reduce((a, r) => a + r.quotes.filter(q => q.supId === s.id).length, 0);
+      return { s, mine, qs, tot: mine.reduce((a, r) => a + reqAmt(r), 0), last: mine.map(r => r.po.date).sort().pop() }; }).sort((a, b) => b.tot - a.tot || a.s.name.localeCompare(b.s.name));
+    const all = data.reduce((a, x) => a + x.tot, 0), noBank = sups.filter(s => !s.iban && !s.acc);
+    const secs = [{ cols: [['المورّد'], ['السجل التجاري'], ['التواصل'], ['البيانات البنكية'], ['عروض الأسعار'], ['أوامر الشراء'], ['المشاريع'], ['إجمالي المشتريات', 'n'], ['النسبة', 'p'], ['آخر أمر شراء', 'd'], ['الحالة']],
+      rows: data.map(x => { const s = x.s, prj = [...new Set(x.mine.map(r => pName(P(r.pid))))].join('، ');
+        return [C(s.name, '<b>' + esc(s.name) + '</b>' + (s.act ? '<div class="muted small">' + esc(s.act) + '</div>' : '')), C(s.cr), C([s.contact, s.phone, s.email].filter(Boolean).join(' · '), esc(s.contact || '') + '<div dir="ltr" style="text-align:end">' + esc(s.phone || '') + '</div>'),
+          C([s.bank, s.iban || s.acc].filter(Boolean).join(' · ') || 'ناقصة', s.iban || s.acc ? esc(s.bank || '') + '<div class="num" dir="ltr" style="text-align:end">' + esc(s.iban || s.acc) + '</div>' : '<span style="color:var(--warn)">ناقصة</span>'),
+          C(x.qs), C(x.mine.length), C(prj || '—'), x.tot, all ? x.tot / all * 100 : 0, { d: x.last }, C(s.active ? 'فعّال' : 'موقوف')]; }),
+      foot: [C('الإجمالي'), '', '', '', C(data.reduce((a, x) => a + x.qs, 0)), C(pos.filter(r => data.some(x => x.mine.includes(r))).length), '', all, '', '', ''] }];
+    if (f.sup) secs.push(poSec(data[0] ? data[0].mine : [], 'أوامر الشراء من هذا المورّد'));
+    return { kpis: [['الموردين', sups.length, sups.filter(s => s.active).length + ' فعّال'], ['تعاملنا معهم', data.filter(x => x.mine.length).length, 'في الفترة المختارة'], ['إجمالي المشتريات', money(all) + ' ر.ع', pos.length + ' أمر شراء'], ['بيانات بنكية ناقصة', noBank.length, noBank.length ? 'لازم تكتمل قبل الدفع' : 'كلها مكتملة', noBank.length]], secs };
+  }
+  if (k === 'purchases') {
+    const list = pos.filter(r => !f.sup || (selQuote(r) || {}).supId === f.sup), tot = list.reduce((a, r) => a + reqAmt(r), 0);
+    const byT = t => list.filter(r => (selQuote(r) || {}).terms === t).reduce((a, r) => a + reqAmt(r), 0);
+    const byP = {}; list.forEach(r => { (byP[r.pid] = byP[r.pid] || []).push(r); });
+    return { kpis: [['أوامر الشراء', list.length, 'في الفترة المختارة'], ['الإجمالي', money(tot) + ' ر.ع', ''], ['دفعة مقدّمة', money(byT('advance')) + ' ر.ع', ''], ['آجل 30 يوم', money(byT('credit30')) + ' ر.ع', '']],
+      secs: [poSec(list, 'أوامر الشراء'), { h: 'حسب المشروع', cols: [['المشروع'], ['أوامر الشراء'], ['المبلغ', 'n'], ['من ميزانية المشروع', 'p']], rows: Object.keys(byP).map(pid => { const s = byP[pid].reduce((a, r) => a + reqAmt(r), 0); return [projCell(pid), C(byP[pid].length), s, s / budget(P(pid)) * 100]; }) }] };
+  }
+  if (k === 'workflow') {
+    const reqs = S.requests.filter(r => inProj(r.pid) && inRange(r.date)), open = reqs.filter(r => !['done', 'rejected'].includes(r.stage));
+    const since = r => ageDays(r.hist.length ? r.hist[r.hist.length - 1].t : r.date);
+    const waitOn = r => { if (r.clarify) return clName(r.clarify); const s = STAGES.find(x => x.k === r.stage); return s && s.role ? (s.role === 'head' ? 'رئيس القسم' : ROLES[s.role]) : '—'; };
+    const st = {}; reqs.forEach(r => { for (let i = 1; i < r.hist.length; i++) { const key = r.hist[i].role === 'owner' ? 'gm' : r.hist[i].role, dd = (new Date(r.hist[i].t) - new Date(r.hist[i - 1].t)) / 864e5; (st[key] = st[key] || []).push(dd); } });
+    const done = reqs.filter(r => r.stage === 'done' && r.hist.length > 1), avgAll = done.length ? done.reduce((a, r) => a + (new Date(r.hist[r.hist.length - 1].t) - new Date(r.hist[0].t)) / 864e5, 0) / done.length : null;
+    const slow = open.filter(r => since(r) > 3);
+    const d1 = n => n == null ? '—' : n < 1 ? 'أقل من يوم' : (Math.round(n * 10) / 10) + ' يوم';
+    return { kpis: [['طلبات مفتوحة', open.length, 'من ' + reqs.length + ' طلب'], ['متأخرة بخطوة أكثر من 3 أيام', slow.length, slow.length ? 'تحتاج متابعة' : 'ما في تأخير', slow.length], ['اكتملت (PO)', reqs.filter(r => r.stage === 'done').length, reqs.filter(r => r.stage === 'rejected').length + ' مرفوض'], ['متوسط مدة الطلب', d1(avgAll), 'من الإنشاء لإصدار PO']],
+      secs: [{ h: 'الطلبات المفتوحة: وين واقفة', note: 'مرتبة من الأطول انتظار. الأحمر = أكثر من 3 أيام في نفس الخطوة.', cols: [['الطلب'], ['المشروع'], ['القسم'], ['طلبه'], ['التاريخ', 'd'], ['الخطوة الحالية'], ['بانتظار'], ['في الخطوة من'], ['عمر الطلب'], ['المبلغ', 'n']],
+        rows: open.slice().sort((a, b) => since(b) - since(a)).map(r => { const s = since(r); return [C(r.no, '<a href="#r-' + r.id + '"><b>' + esc(r.no) + '</b></a>'), projCell(r.pid), C(r.dept ? DEPTS[r.dept] : '—'), C(r.by), { d: r.date }, C(stageInfo(r).l), C(waitOn(r)), C(s + ' يوم', '<b' + (s > 3 ? ' style="color:var(--bad)"' : '') + '>' + s + ' يوم</b>'), C(ageDays(r.date) + ' يوم'), reqAmt(r) || '']; }) },
+        { h: 'متوسط الوقت اللي تاخذه كل خطوة', note: 'محسوب من سجل كل طلب: الوقت من الإجراء السابق لين ما نفّذ صاحب الخطوة إجراءه.', cols: [['الخطوة'], ['عدد الإجراءات'], ['المتوسط'], ['الأطول']],
+          rows: ['head', 'procurement', 'qs', 'gm', 'admin'].filter(x => st[x]).map(x => [C(x === 'gm' ? 'المدير العام / صاحب الشركة' : x === 'head' ? 'رئيس القسم' : ROLES[x]), C(st[x].length), C(d1(st[x].reduce((a, b) => a + b, 0) / st[x].length)), C(d1(Math.max.apply(null, st[x])))]) },
+        { h: 'كل الطلبات حسب الحالة', cols: [['الحالة'], ['العدد'], ['المبلغ', 'n']], rows: STAGES.map(s => [s.k, s.k === 'done' ? 'أُرسل PO للمورّد' : 'بانتظار ' + s.l]).concat([['rejected', 'مرفوض']]).map(([k2, l]) => { const l2 = reqs.filter(r => r.stage === k2); return [C(l), C(l2.length), l2.reduce((a, r) => a + reqAmt(r), 0)]; }).filter(x => x[1].t !== '0') }] };
+  }
+  if (k === 'expenses') {
+    const pcs = S.petty.filter(c => c.status === 'approved' && inProj(c.pid) && inRange(c.date));
+    const rows = projs.map(p => { const a = pos.filter(r => r.pid === p.id).reduce((s, r) => s + reqAmt(r), 0), b = pcs.filter(c => c.pid === p.id).reduce((s, c) => s + c.amt, 0); return [projCell(p.id), budget(p), a, b, a + b, (a + b) / budget(p) * 100, budget(p) - spent(p)]; });
+    const sa = rows.reduce((s, x) => s + x[2], 0), sb2 = rows.reduce((s, x) => s + x[3], 0), byD = {};
+    pos.forEach(r => { const k2 = r.dept || ''; byD[k2] = (byD[k2] || 0) + reqAmt(r); });
+    return { kpis: [['أوامر الشراء', money(sa) + ' ر.ع', pos.length + ' أمر'], ['بيتي كاش معتمد', money(sb2) + ' ر.ع', pcs.length + ' طلب'], ['إجمالي المصروف', money(sa + sb2) + ' ر.ع', 'في الفترة المختارة'], ['بيتي كاش بدون فاتورة', pcs.filter(c => !c.inv).length, money(pcs.filter(c => !c.inv).reduce((s, c) => s + c.amt, 0)) + ' ر.ع', pcs.filter(c => !c.inv).length]],
+      secs: [{ h: 'حسب المشروع', note: 'المتبقي من الميزانية محسوب على كل المصروف من بداية المشروع.', cols: [['المشروع'], ['الميزانية (عقد + VO)', 'n'], ['أوامر الشراء', 'n'], ['بيتي كاش', 'n'], ['الإجمالي', 'n'], ['من الميزانية', 'p'], ['المتبقي من الميزانية', 'n']], rows, foot: [C('الإجمالي'), rows.reduce((s, x) => s + x[1], 0), sa, sb2, sa + sb2, '', rows.reduce((s, x) => s + x[6], 0)] },
+        { h: 'المشتريات حسب القسم', cols: [['القسم'], ['المبلغ', 'n'], ['النسبة', 'p']], rows: Object.keys(byD).sort((a, b) => byD[b] - byD[a]).map(d => [C(d ? DEPTS[d] : 'بدون قسم'), byD[d], sa ? byD[d] / sa * 100 : 0]) }] };
+  }
+  if (k === 'budget') {
+    const rows = []; projs.forEach(p => p.boq.forEach(b => { const s = itemSpent(p, b.c); if (f.pid || s > 0) rows.push([p, b, s]); }));
+    rows.sort((a, b) => b[2] / (b[1].t || 1) - a[2] / (a[1].t || 1));
+    const over = rows.filter(x => x[2] > x[1].t);
+    return { kpis: [['بنود عليها صرف', rows.filter(x => x[2] > 0).length, f.pid ? 'من ' + rows.length + ' بند' : ''], ['ميزانية هذي البنود', money(rows.reduce((a, x) => a + x[1].t, 0)) + ' ر.ع', ''], ['المصروف عليها', money(rows.reduce((a, x) => a + x[2], 0)) + ' ر.ع', ''], ['بنود متجاوزة الميزانية', over.length, over.length ? money(over.reduce((a, x) => a + x[2] - x[1].t, 0)) + ' ر.ع زيادة' : 'ما في تجاوز', over.length]],
+      secs: [{ note: f.pid ? 'كل بنود المشروع، مرتبة من الأعلى صرفاً نسبةً لميزانيته.' : 'البنود اللي عليها صرف فقط. اختر مشروع عشان تشوف كل بنوده.', cols: (f.pid ? [] : [['المشروع']]).concat([['البند'], ['الوصف'], ['القسم'], ['الميزانية', 'n'], ['المصروف', 'n'], ['المصروف من الميزانية', 'p'], ['الإنجاز', 'p'], ['الحالة']]),
+        rows: rows.map(([p, b, s]) => (f.pid ? [] : [projCell(p.id)]).concat([C(b.c), C(String(b.d || '').slice(0, 90)), C(b.dept ? DEPTS[b.dept] : '—'), b.t, s, b.t ? s / b.t * 100 : 0, b.p, s > b.t ? C('متجاوز', '<span class="pill p-bad">متجاوز ' + money(s - b.t) + '</span>') : b.t && s / b.t * 100 > b.p + 15 ? C('الصرف أعلى من الإنجاز', '<span class="pill p-warn">الصرف أعلى من الإنجاز</span>') : C('ضمن الميزانية', '<span class="pill p-ok">ضمن الميزانية</span>')])) }] };
+  }
+  if (k === 'petty') {
+    const l = S.petty.filter(c => inProj(c.pid) && inRange(c.date)), sum = st => l.filter(c => c.status === st).reduce((a, c) => a + c.amt, 0), noInv = l.filter(c => c.status === 'approved' && !c.inv);
+    const ST = c => c.status === 'pending' ? 'بانتظار المدير العام' : c.status === 'rejected' ? 'مرفوض' : c.inv ? 'معتمد · الفاتورة مرفقة' : 'معتمد · بدون فاتورة';
+    return { kpis: [['معتمد', money(sum('approved')) + ' ر.ع', l.filter(c => c.status === 'approved').length + ' طلب'], ['بانتظار الاعتماد', money(sum('pending')) + ' ر.ع', l.filter(c => c.status === 'pending').length + ' طلب'], ['مرفوض', money(sum('rejected')) + ' ر.ع', l.filter(c => c.status === 'rejected').length + ' طلب'], ['معتمد بدون فاتورة', noInv.length, money(noInv.reduce((a, c) => a + c.amt, 0)) + ' ر.ع', noInv.length]],
+      secs: [{ cols: [['الرقم'], ['التاريخ', 'd'], ['المشروع'], ['التفاصيل'], ['البند'], ['طلبه'], ['المبلغ', 'n'], ['الحالة']], rows: l.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => [C(c.no), { d: c.date }, projCell(c.pid), C(c.d), C(c.boq || 'عام'), C(c.by), c.amt, C(ST(c), '<span class="pill ' + (c.status === 'rejected' ? 'p-bad' : c.status === 'pending' || !c.inv ? 'p-warn' : 'p-ok') + '">' + ST(c) + '</span>')]), foot: [C('الإجمالي'), '', '', '', '', '', l.reduce((a, c) => a + c.amt, 0), ''] }] };
+  }
+  if (k === 'vo') {
+    const l = S.variations.filter(v => inProj(v.pid) && inRange(v.date)), sum = st => l.filter(v => v.gm === st).reduce((a, v) => a + v.amt, 0);
+    const GS = { approved: 'معتمد', rejected: 'مرفوض', pending: 'بانتظار المدير العام' };
+    return { kpis: [['عدد الأعمال الإضافية', l.length, ''], ['معتمد', money(sum('approved')) + ' ر.ع', 'منفصل عن قيمة العقد'], ['بانتظار الاعتماد', money(sum('pending')) + ' ر.ع', ''], ['بدون موافقة العميل', l.filter(v => !v.file).length, 'ما انرفقت الموافقة', l.filter(v => !v.file).length]],
+      secs: [{ cols: [['الرقم'], ['التاريخ', 'd'], ['المشروع'], ['العمل الإضافي'], ['طلبه'], ['موافقة العميل'], ['اعتماد المدير العام'], ['القيمة', 'n']], rows: l.map(v => [C(v.no), { d: v.date }, projCell(v.pid), C(v.title + (v.d ? ' - ' + v.d : ''), '<b>' + esc(v.title) + '</b><div class="muted small">' + esc(v.d || '') + '</div>'), C(v.by), C(v.file ? 'مرفقة' : 'ما انرفقت'), C(GS[v.gm] + (v.gmBy && v.gm !== 'pending' ? ' (' + nameOf(v.gmBy) + ')' : ''), '<span class="pill ' + (v.gm === 'approved' ? 'p-ok' : v.gm === 'rejected' ? 'p-bad' : 'p-warn') + '">' + GS[v.gm] + '</span>'), v.amt]), foot: [C('الإجمالي'), '', '', '', '', '', '', l.reduce((a, v) => a + v.amt, 0)] }] };
+  }
+  if (k === 'receipts') {
+    const inv = S.cinv.filter(x => inProj(x.pid) && inRange(x.date)), pay = S.cpay.filter(x => inProj(x.pid) && inRange(x.date));
+    const ti = inv.reduce((a, x) => a + x.amt, 0), tp = pay.reduce((a, x) => a + x.amt, 0), open = inv.filter(x => invPaid(x.id) < x.amt);
+    return { kpis: [['الفواتير المسلمة للعملاء', money(ti) + ' ر.ع', inv.length + ' فاتورة'], ['المبالغ المستلمة', money(tp) + ' ر.ع', pay.length + ' دفعة'], ['فواتير ما اكتمل استلامها', open.length, money(open.reduce((a, x) => a + x.amt - invPaid(x.id), 0)) + ' ر.ع باقي', open.length], ['قيمة المشاريع', money(projs.reduce((a, p) => a + recStats(p).value, 0)) + ' ر.ع', 'عقد + VO معتمد']],
+      secs: [{ h: 'حسب المشروع', cols: [['المشروع'], ['قيمة العقد + VO', 'n'], ['المفوتر', 'n'], ['المستلم', 'n'], ['الباقي عند العميل', 'n'], ['المستلم من القيمة', 'p'], ['آخر مبلغ', 'd']], rows: projs.map(p => { const s = recStats(p); return [projCell(p.id), s.value, s.invoiced, s.received, s.due, s.value ? s.received / s.value * 100 : 0, { d: s.last }]; }) },
+        { h: 'الفواتير', cols: [['رقم الفاتورة'], ['التاريخ', 'd'], ['المشروع'], ['العمل المنجز'], ['نسبة الإنجاز'], ['المبلغ', 'n'], ['المستلم', 'n'], ['الباقي', 'n']], rows: inv.map(x => [C(x.no), { d: x.date }, projCell(x.pid), C(x.desc || '—'), C(x.pct == null ? '—' : x.pct + '%'), x.amt, invPaid(x.id), x.amt - invPaid(x.id)]), foot: [C('الإجمالي'), '', '', '', '', ti, inv.reduce((a, x) => a + invPaid(x.id), 0), inv.reduce((a, x) => a + x.amt - invPaid(x.id), 0)] },
+        { h: 'المبالغ المستلمة', cols: [['تاريخ الاستلام', 'd'], ['المشروع'], ['مقابل الفاتورة'], ['طريقة الدفع'], ['المرجع'], ['المبلغ', 'n']], rows: pay.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(x => { const iv = S.cinv.find(i => i.id === x.inv); return [{ d: x.date }, projCell(x.pid), C(iv ? iv.no : 'بدون فاتورة'), C(PAYM[x.method] || '—'), C(x.ref || '—'), x.amt]; }), foot: [C('الإجمالي'), '', '', '', '', tp] }] };
+  }
+  return null;
+}
+function poSec(list, h) {
+  return { h, cols: [['أمر الشراء'], ['التاريخ', 'd'], ['المشروع'], ['البند'], ['المواد'], ['المورّد'], ['الدفع'], ['طلبه'], ['اعتمده'], ['المبلغ', 'n']],
+    rows: list.slice().sort((a, b) => String(b.po.date).localeCompare(String(a.po.date))).map(r => { const q = selQuote(r) || {}, it = r.items.map(i => i.d + ' (' + i.q + ' ' + (i.u || '') + (i.pr != null ? ' × ' + i.pr : '') + ')');
+      return [C(r.po.no, '<a href="#r-' + r.id + '"><b>' + esc(r.po.no) + '</b></a><div class="muted small">' + esc(r.no) + '</div>'), { d: r.po.date }, projCell(r.pid), C(r.boq || '—'), C(it.join('، '), '<span class="small">' + it.map(esc).join('<br>') + '</span>'), C(poSup(r)), C(TERMS[q.terms] || '—'), C(r.by), C(poApprover(r)), reqAmt(r)]; }),
+    foot: [C('الإجمالي'), '', '', '', '', '', '', '', '', list.reduce((a, r) => a + reqAmt(r), 0)] };
+}
+const cellH = (v, t) => v && typeof v === 'object' ? ('d' in v ? fd(v.d) : v.h) : v === '' || v == null ? '' : t === 'n' ? money(v) : t === 'p' ? Math.round(v) + '%' : esc(v);
+const cellT = (v, t) => v && typeof v === 'object' ? ('d' in v ? (v.d ? fd(v.d) : '') : v.t) : v === '' || v == null ? '' : t === 'n' ? (Math.round(v * 1000) / 1000) : t === 'p' ? Math.round(v) + '%' : String(v);
+function repTable(s) {
+  if (!s.rows.length) return '<p class="muted small">ما في بيانات في هذا التقرير حسب الاختيار.</p>';
+  const cls = t => t === 'n' || t === 'p' ? ' class="n"' : '';
+  return '<div class="tbl"><table class="rtbl"><thead><tr>' + s.cols.map(c => '<th' + cls(c[1]) + '>' + c[0] + '</th>').join('') + '</tr></thead><tbody>' +
+    s.rows.map(r => '<tr>' + r.map((v, i) => '<td' + cls(s.cols[i][1]) + '>' + cellH(v, s.cols[i][1]) + '</td>').join('') + '</tr>').join('') + '</tbody>' +
+    (s.foot ? '<tfoot><tr>' + s.foot.map((v, i) => '<td' + cls(s.cols[i][1]) + '>' + cellH(v, s.cols[i][1]) + '</td>').join('') + '</tr></tfoot>' : '') + '</table></div>';
+}
+function repFilterText(k) {
+  const f = rf(), p = f.pid ? P(f.pid) : null, s = f.sup ? SUP(f.sup) : null;
+  return [p ? 'المشروع: ' + pName(p) : 'كل المشاريع', k === 'projects' ? 'الوضع كما هو اليوم' : f.from || f.to ? 'الفترة: ' + (f.from ? fd(f.from) : 'البداية') + ' إلى ' + (f.to ? fd(f.to) : 'اليوم') : 'كل الفترات', s ? 'المورّد: ' + s.name : ''].filter(Boolean).join(' · ');
+}
+function vReports() {
+  if (!canReports()) return '<div class="empty">التقارير للمدير العام وصاحب الشركة.</div>';
+  return '<div class="head"><div class="t"><h1>التقارير</h1><span class="muted">اختر التقرير، حدد المشروع أو الفترة، واطبعه PDF أو صدّره Excel.</span></div></div>' +
+    '<div class="rhub">' + REPORTS.map(([k, l, d], i) => '<a class="rcard" href="#rep-' + k + '"><span class="rn">' + (i + 1) + '</span><b>' + l + '</b><span class="muted small">' + d + '</span></a>').join('') + '</div>';
+}
+function vReport(k) {
+  if (!canReports()) return '<div class="empty">التقارير للمدير العام وصاحب الشركة.</div>';
+  const def = REPORTS.find(x => x[0] === k); if (!def) return vReports();
+  const f = rf(), d = repData(k);
+  const opt = (v, l, sel) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>';
+  let h = '<div class="head noprint"><div class="t"><span class="crumb"><a href="#reports">التقارير</a> / ' + def[1] + '</span></div><div class="actions"><button class="btn pri" data-act="print">🖨 طباعة أو حفظ PDF</button><button class="btn" data-act="repCsv" data-v="' + k + '">⬇ تصدير Excel</button></div></div>';
+  h += '<div class="card noprint rfil"><label class="fld"><span>المشروع</span><select id="rp-p">' + opt('', 'كل المشاريع', f.pid) + S.projects.map(p => opt(p.id, pName(p), f.pid)).join('') + '</select></label>' +
+    (k === 'projects' ? '' : '<label class="fld"><span>من تاريخ</span><input type="date" id="rp-f" value="' + esc(f.from) + '"></label><label class="fld"><span>إلى تاريخ</span><input type="date" id="rp-t" value="' + esc(f.to) + '"></label>') +
+    (k === 'suppliers' || k === 'purchases' ? '<label class="fld"><span>المورّد</span><select id="rp-s">' + opt('', 'كل الموردين', f.sup) + S.suppliers.map(s => opt(s.id, s.name, f.sup)).join('') + '</select></label>' : '') +
+    (f.pid || f.from || f.to || f.sup ? '<button class="btn sm" data-act="repClear">مسح الاختيار</button>' : '') + '</div>';
+  h += '<div class="card rep rdoc"><div class="lhd">' + BRAND + '<div class="lhd-m small"><div>تاريخ التقرير <b>' + fd(iso(today)) + '</b></div><div>أعدّه <b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</div></div></div><div class="stripe lhd-s" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
+    '<div class="rtitle"><h1>تقرير ' + def[1] + '</h1><div class="muted small">' + esc(repFilterText(k)) + '</div></div>';
+  h += '<div class="kpis rk">' + d.kpis.map(x => '<div class="kpi' + (x[3] ? ' alert' : '') + '"><span class="l">' + x[0] + '</span><span class="v">' + x[1] + '</span><span class="s">' + (x[2] || '&nbsp;') + '</span></div>').join('') + '</div>';
+  d.secs.forEach(s => { h += (s.h ? '<h2>' + s.h + '</h2>' : '') + (s.note ? '<p class="muted small">' + s.note + '</p>' : '') + repTable(s); });
+  h += '<div class="rfoot small muted"><span>Carbon Engineering Design</span><span>تقرير داخلي للإدارة · طُبع ' + fd(iso(today)) + '</span></div></div>';
+  return h;
+}
+function repCsv(k) {
+  const def = REPORTS.find(x => x[0] === k), d = repData(k); if (!d) return;
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"', lines = [[q('Carbon Engineering Design'), q('تقرير ' + def[1])].join(','), q(repFilterText(k)), q('تاريخ التقرير ' + fd(iso(today))), ''];
+  d.kpis.forEach(x => lines.push([q(x[0]), q(String(x[1]).replace(/<[^>]+>/g, '')), q(x[2] || '')].join(',')));
+  d.secs.forEach(s => { lines.push(''); if (s.h) lines.push(q(s.h)); lines.push(s.cols.map(c => q(c[0])).join(','));
+    s.rows.forEach(r => lines.push(r.map((v, i) => q(cellT(v, s.cols[i][1]))).join(',')));
+    if (s.foot) lines.push(s.foot.map((v, i) => q(cellT(v, s.cols[i][1]))).join(',')); });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'Carbon-' + k + '-' + iso(today) + '.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
 function vInbox() {
   const q = myQueue();
   let h = '<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div></div>';
@@ -751,7 +916,7 @@ function vSchedReport(pid) {
   if (verdict[0] === 'ok' && cnt('late')) verdict = ['warn', '⚠️ المشروع ماشي حسب الخطة، لكن فيه ' + cnt('late') + ' بند متأخر لازم يخلص'];
   if (dl < 0 && act < 100) verdict = ['bad', '⛔ تجاوزنا موعد التسليم والمشروع ما خلص'];
   let h = '<div class="head noprint"><div class="t"><span class="crumb"><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a> / تقرير الجدول الزمني</span></div><div class="actions"><button class="btn pri" data-act="print">🖨 طباعة أو حفظ PDF</button><a class="btn" href="#p-' + p.id + '">رجوع للمشروع</a></div></div>';
-  h += '<div class="card rep"><div class="rep-h"><div><h1>تقرير الجدول الزمني</h1><b>' + esc(p.name) + '</b><div class="muted small">' + esc(p.code || '') + (p.client ? ' · العميل ' + esc(p.client) : '') + ' · ' + KIND[p.kind] + (locText(p) ? ' · ' + esc(locText(p)) : '') + '</div></div><div class="small muted rep-logo"><img src="assets/logo.png" alt="شعار كربون"><div>تاريخ التقرير <b>' + fd(iso(today)) + '</b><br>' + (p.sched.status === 'approved' ? 'الجدول معتمد' + (p.sched.by ? ' من ' + esc(nameOf(p.sched.by)) : '') : 'الجدول مسودة غير معتمدة') + '</div></div></div>';
+  h += '<div class="card rep"><div class="rep-h"><div><h1>تقرير الجدول الزمني</h1><b>' + esc(p.name) + '</b><div class="muted small">' + esc(p.code || '') + (p.client ? ' · العميل ' + esc(p.client) : '') + ' · ' + KIND[p.kind] + (locText(p) ? ' · ' + esc(locText(p)) : '') + '</div></div><div class="small muted rep-logo">' + BRAND + '<div>تاريخ التقرير <b>' + fd(iso(today)) + '</b><br>' + (p.sched.status === 'approved' ? 'الجدول معتمد' + (p.sched.by ? ' من ' + esc(nameOf(p.sched.by)) : '') : 'الجدول مسودة غير معتمدة') + '</div></div></div>';
   // 1. The answer in one box
   h += '<div class="rep-v ' + verdict[0] + '"><div class="big">' + verdict[1] + '</div><div class="rep-vg">' +
     '<div><span>المفروض ننجز لين اليوم</span><b>' + Math.round(plan) + '%</b></div><div><span>المنجز فعلياً</span><b>' + Math.round(act) + '%</b></div>' +
@@ -1048,6 +1213,8 @@ const A2 = {
   npSchedule: () => { const n = npState(); npSync(); if (!n.f.start || !n.f.end || n.f.end < n.f.start) return toast('حدد تاريخ البداية وموعد التسليم أولاً', true); npPlan(n); render(); toast('تم حساب مدة كل بند'); },
   schedEdit: d => { const p = P(d.v); ui.ted = { pid: p.id, list: p.boq.map(b => ({ id: b.id, start: b.ps || '', end: b.pe || '', s0: b.ps || '', e0: b.pe || '', q: b.q, r: b.r, q0: b.q, r0: b.r, dp: b.dept || '', dp0: b.dept || '' })) }; render(); },
   print: () => window.print(),
+  repCsv: d => repCsv(d.v),
+  repClear: () => { ui.rf = { pid: '', from: '', to: '', sup: '' }; render(); },
   secRename: d => { const p = P(d.p), sec = p.sections.find(x => x[0] === d.v) || [d.v, '']; modal('اسم القسم ' + d.v, '<form class="f" data-form="secRename" data-p="' + p.id + '" data-v="' + esc(d.v) + '"><label class="fld"><span>اسم القسم</span><input id="sr-n" required value="' + esc(sec[1] && !/^قسم /.test(sec[1]) ? sec[1] : '') + '" placeholder="مثال: الأعمال الإنشائية"></label><div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   logReload: () => { ui.logRows = null; render(); },
   gcol: d => { ui.gcol = ui.gcol || {}; if (ui.gcol[d.v]) delete ui.gcol[d.v]; else ui.gcol[d.v] = 1; render(); },
@@ -1235,6 +1402,7 @@ document.addEventListener('change', async e => {
   if (e.target.id === 'nu-role') { document.getElementById('nu-dwrap').innerHTML = deptChecks('nu-dept', [], e.target.value); return; }
   if (e.target.id && e.target.id.startsWith('ur-')) { const cell = e.target.closest('tr').children[3], uid = e.target.id.slice(3), u = S.profiles.find(x => x.id === uid); cell.innerHTML = deptChecks('ud-' + uid, myDepts(u), e.target.value); return; }
   if (e.target.dataset && e.target.dataset.logf != null) { ui.logF[e.target.dataset.logf] = e.target.value; ui.logRows = null; render(); return; }
+  if (['rp-p', 'rp-f', 'rp-t', 'rp-s'].includes(e.target.id)) { rf()[{ 'rp-p': 'pid', 'rp-f': 'from', 'rp-t': 'to', 'rp-s': 'sup' }[e.target.id]] = e.target.value; render(); return; }
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   if (e.target.id === 'sup-q') { ui.supQ = e.target.value; render(); return; }
   const t = e.target;
@@ -1393,11 +1561,12 @@ function render() {
   if (!me) { root.innerHTML = '<div class="loading">جاري التحميل...</div>'; return; }
   if (me.role === 'pending') { root.innerHTML = vPending(); return; }
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
-  const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h;
+  const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h.startsWith('rep-') ? 'reports' : h;
   const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
   if (canSeeRec()) items.splice(items.findIndex(x => x[0] === 'petty'), 0, ['receipts', 'المبالغ المستلمة', 'cash', 'المستلم']);
+  if (canReports()) items.splice(items.findIndex(x => x[0] === 'inbox'), 0, ['reports', 'التقارير', 'rep', 'التقارير']);
   if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';

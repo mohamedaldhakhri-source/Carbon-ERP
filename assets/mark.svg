@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 3 324 456" role="img" aria-label="Carbon Engineering Design">
+  <path fill="#111" stroke="#111" stroke-width="6" stroke-linejoin="miter" d="M182 8H199V96H329V182H199V374H324V454H57V182H32V397H15V165H57V96H182Z"/>
+  <rect x="75" y="114" width="106" height="51" fill="#fff"/>
+  <rect x="200" y="114" width="111" height="51" fill="#b82039"/>
+  <rect x="75" y="183" width="106" height="253" fill="#ddc762"/>
+  <rect x="200" y="392" width="106" height="44" fill="#146698"/>
+</svg>
