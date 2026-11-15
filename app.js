@@ -732,7 +732,7 @@ function timeTab(p) {
     const ch = ui.ted.list.filter(chg).length, pr = canPrice();
     const tot = ui.ted.list.reduce((a, r) => a + (+r.q || 0) * (+r.r || 0), 0), tot0 = p.boq.reduce((a, b) => a + b.t, 0);
     h += '<div class="flag warn">وضع التعديل: غيّر البداية أو عدد الأيام' + (pr ? ' أو القسم أو الكمية والسعر' : '') + ' لأي بند، والنهاية تنحسب تلقائياً. بعدها اضغط حفظ.' + (me.role === 'head' && myDepts().length ? ' تقدر تعدّل بنود ' + deptNames() + ' فقط.' : '') + '</div>' +
-      '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + (pr && Math.abs(tot - tot0) > .001 ? ' · قيمة المشروع ' + money(tot0) + ' ← <b>' + money(tot) + '</b> ر.ع' : '') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدد تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
+      '<div class="ch" style="margin-bottom:8px"><span class="muted small">' + (ch ? ch + ' بند تغيّر' : 'ما في تغيير بعد') + (pr && Math.abs(tot - tot0) > .001 ? ' · قيمة المشروع ' + money(tot0) + ' ← <b>' + money(tot) + '</b> ر.ع' : '') + '</span><div class="actions">' + (isAdmin() ? '<button class="btn" data-act="schedAuto" data-v="' + p.id + '">احسب المدة تلقائياً من جديد</button>' : '') + '<button class="btn pri" data-act="schedSave">حفظ</button><button class="btn" data-act="schedCancel">إلغاء</button></div></div>' +
       '<div class="tbl"><table class="rv ted"><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th>' + (pr ? '<th class="n">الكمية</th><th class="n">سعر الوحدة</th>' : '') + '<th class="n">القيمة</th><th>البداية</th><th class="n">الأيام</th><th>النهاية</th></tr></thead><tbody>';
     p.sections.concat(p.boq.filter(b => !p.sections.some(s => s[0] === b.s)).map(b => [b.s, '']).filter((x, i, a) => a.findIndex(y => y[0] === x[0]) === i)).forEach(([sc, sn]) => {
       const it = p.boq.filter(b => b.s === sc); if (!it.length) return;
@@ -750,7 +750,7 @@ function timeTab(p) {
     return h + '</tbody></table></div>';
   }
   const has = dated.length || p.tasks.length;
-  h += '<div class="ch" style="margin-bottom:8px">' + (!has ? '<span class="muted small">' + (p.boq.length ? 'ما انحسبت مدد البنود بعد.' : 'لا توجد بنود BOQ لهذا المشروع.') + '</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
+  h += '<div class="ch" style="margin-bottom:8px">' + (!has ? '<span class="muted small">' + (p.boq.length ? 'ما انحسبت مدة البنود بعد.' : 'لا توجد بنود BOQ لهذا المشروع.') + '</span>' : st.status === 'approved' ? '<span class="flag ok">' + (st.by ? 'معتمد من ' + esc(nameOf(st.by)) : 'معتمد') + (st.at ? ' بتاريخ ' + fd(st.at) : '') + (st.note ? ' · ' + esc(st.note) : '') + '</span>' : '<span class="flag warn">مسودة بانتظار مراجعة واعتماد المدير العام</span>') +
     '<div class="actions">' + (canSched() && has && st.status !== 'approved' ? '<button class="btn ok" data-act="schedApprove" data-v="' + p.id + '">اعتماد الجدول</button>' : '') +
  (dated.length ? '<a class="btn" href="#sr-' + p.id + '">📄 تقرير الجدول الزمني</a>' : '') +
     (dated.length ? '<button class="btn" data-act="gfold" data-v="' + p.id + '">' + (Object.keys(ui.gcol || {}).length ? 'فتح كل الأقسام' : 'طي كل الأقسام') + '</button>' : '') +
@@ -766,7 +766,7 @@ function timeTab(p) {
       it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p }));
     });
     h += gantt(p, rows);
-    if (dated.length < p.boq.length) h += '<p class="muted small">' + (p.boq.length - dated.length) + ' بند بدون تواريخ. اضغط "تعديل مدد البنود" لإضافتها.</p>';
+    if (dated.length < p.boq.length) h += '<p class="muted small">' + (p.boq.length - dated.length) + ' بند بدون تواريخ. اضغط "تعديل مدة البنود" لإضافتها.</p>';
   } else if (p.tasks.length) h += gantt(p, p.tasks.map(t => ({ n: t.n, s: t.s, e: t.e, ph: t.ph, sc: t.id, dept: t.dept })));
   return h;
 }
@@ -779,7 +779,7 @@ function boqReview(n) {
     '<div class="kpi"><span class="l">ضريبة القيمة المضافة 5%</span><span class="v">' + money(vat) + ' <small>ر.ع</small></span><span class="s">&nbsp;</span></div>' +
     '<div class="kpi"><span class="l">الإجمالي مع الضريبة</span><span class="v">' + money(sum + vat) + ' <small>ر.ع</small></span><span class="s">' + (n.statedGrand ? 'المكتوب في الملف ' + money(n.statedGrand) + ' ر.ع' : '&nbsp;') + '</span></div>' +
     '<div class="kpi' + (n.stated && !ok ? ' alert' : '') + '"><span class="l">المكتوب في الملف (بدون الضريبة)</span><span class="v">' + (n.stated ? money(n.stated) + ' <small>ر.ع</small>' : '—') + '</span><span class="s">' + (!n.stated ? 'ما لقيت إجمالي مكتوب في الملف' : ok ? '✓ يطابق مجموع البنود' : 'الفرق ' + money(Math.abs(diff)) + ' ر.ع ' + (diff < 0 ? 'ناقص' : 'زايد') + ' في البنود المقروءة') + '</span></div></div>' +
-    '<div class="ch" style="margin-top:6px"><b>البنود</b><div class="actions"><button type="button" class="btn sm" data-act="npClassify">أعد توزيع الأقسام تلقائياً</button><button type="button" class="btn sm" data-act="npSchedule">احسب المدد تلقائياً</button></div></div>';
+    '<div class="ch" style="margin-top:6px"><b>البنود</b><div class="actions"><button type="button" class="btn sm" data-act="npClassify">أعد توزيع الأقسام تلقائياً</button><button type="button" class="btn sm" data-act="npSchedule">احسب المدة تلقائياً</button></div></div>';
   if (n.via) h += '<span class="hint">' + esc(n.via) + '</span>';
   if (n.stated && !ok) {
     // Where the difference is: each section total printed in the file against the items read for it.
@@ -927,7 +927,7 @@ function npTake(n, res, via) {
   BOQ.classify(n.sections, n.items, true); addDepts(n); npPlan(n);
 }
 function npDatesOk(n) {
-  if (!n.f.start || !n.f.end) { toast('اكتب تاريخ البداية وموعد التسليم فوق أولاً، عشان تتوزع مدد البنود صح', true); const el = document.getElementById(n.f.start ? 'np-end' : 'np-start'); if (el) el.focus(); return false; }
+  if (!n.f.start || !n.f.end) { toast('اكتب تاريخ البداية وموعد التسليم فوق أولاً، عشان تتوزع مدة البنود صح', true); const el = document.getElementById(n.f.start ? 'np-end' : 'np-start'); if (el) el.focus(); return false; }
   if (n.f.end < n.f.start) { toast('موعد التسليم قبل تاريخ البداية', true); return false; }
   return true;
 }
@@ -1010,7 +1010,7 @@ const A2 = {
       toast('تم حفظ ' + new Set(ch.concat(chp, chd).map(r => r.id)).size + ' بند'); ui.ted = null; refresh();
     } catch (e) { el.disabled = false; }
   },
-  schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">مدد ' + p.boq.filter(b => b.ps).length + ' بند من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. مهندس الموقع يقدر يحدّث التواريخ بعد الاعتماد حسب سير العمل.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  schedApprove: d => { const p = P(d.v); modal('اعتماد الجدول الزمني - ' + pName(p), '<form class="f" data-form="schedOk" data-v="' + p.id + '"><p class="small">مدة ' + p.boq.filter(b => b.ps).length + ' بند من ' + fd(p.start) + ' إلى ' + fd(p.end) + '. مهندس الموقع يقدر يحدّث التواريخ بعد الاعتماد حسب سير العمل.</p><label class="fld"><span>ملاحظة (اختياري)</span><input id="so-n"></label><div class="actions"><button class="btn ok" type="submit">اعتماد</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   boqClassify: async (d, el) => {
     const p = P(d.v); const todo = p.boq.filter(b => !b.dept).map(b => ({ id: b.id, code: b.c, desc: b.d, total: b.t, sec: b.s, dept: null })); if (!todo.length) return;
     el.disabled = true;
