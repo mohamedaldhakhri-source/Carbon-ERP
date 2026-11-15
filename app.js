@@ -195,7 +195,7 @@ async function loadAll() {
   const q = t => sb.from(t).select('*');
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
-    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), q('project_docs').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on')]);
+    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), sb.from('project_docs').select('id,project_id,kind,title,path,uploaded_by,created_at').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on')]);
   const bad = res.find(r => r.error); if (bad) throw bad.error;
   const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups, cinv, cpay] = res.map(r => r.data);
   S.cinv = (cinv || []).map(x => ({ id: x.id, pid: x.project_id, no: x.invoice_no, date: x.invoice_date, amt: +x.amount, desc: x.work_desc, pct: x.work_pct == null ? null : +x.work_pct, file: x.file_path, byId: x.created_by }));
@@ -577,22 +577,25 @@ function payForm(pid) {
 }
 function docsTab(p) {
   const ko = Object.keys(DOCK), ds = S.docs.filter(x => x.pid === p.id).sort((a, b) => ko.indexOf(a.kind) - ko.indexOf(b.kind));
-  let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></div>';
+  let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><span class="actions">' + (canAi() ? '<button class="btn" data-act="aiDesign" data-v="' + p.id + '">✨ صمّم بـ AI</button>' : '') + '<button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></span></div>';
   if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
   h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DWG أو DXF أو PDF، أو حتى صورة المخطط (PNG / JPG)، ويتحول 3D تلقائياً.</p>';
-  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + (isAiDoc(d) ? '' : fileLink(d.path, 'فتح')) + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 /* ---------- 3D viewer ---------- */
-const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
+const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg|layout)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
+// a building the AI designed from a written brief: no file, the design lives on the document itself
+const isAiDoc = d => /\.layout$/i.test(d.path || '');
+const canAi = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 // CAD drawings plotted to PDF (with layers) also open in 3D when filed as drawings or 3D models.
 const ext3dDoc = d => { if (ext3d(d.path)) return ext3d(d.path); const m = /\.(pdf|png|jpe?g|webp)$/i.exec(d.path || ''); return m && ['drawing', 'cad', 'municipality', 'model3d'].includes(d.kind) ? m[1].toLowerCase().replace('jpeg', 'jpg') : null; };
 let V3 = null;
 function vModel3d(id) {
   const d = S.docs.find(x => x.id === id); if (!d) return '<div class="empty">المستند غير موجود.</div>';
   const p = P(d.pid), others = S.docs.filter(x => x.pid === d.pid && ext3dDoc(x));
-  return '<div class="head"><div class="t"><span class="crumb"><a href="#p-' + d.pid + '" data-act="goDocs" data-v="' + d.pid + '">' + esc(pName(p)) + '</a> / عرض 3D</span><h1>' + esc(d.title) + '</h1><span class="muted small">' + ({ ifc: 'نموذج IFC', glb: 'نموذج GLB', gltf: 'نموذج glTF', dxf: 'مخطط AutoCAD (DXF) محوّل تلقائياً', dwg: 'مخطط AutoCAD (DWG) محوّل تلقائياً', pdf: 'مخطط PDF محوّل تلقائياً', png: 'صورة مخطط محوّلة تلقائياً', jpg: 'صورة مخطط محوّلة تلقائياً', webp: 'صورة مخطط محوّلة تلقائياً' })[ext3dDoc(d)] + '</span></div><div class="actions">' +
+  return '<div class="head"><div class="t"><span class="crumb"><a href="#p-' + d.pid + '" data-act="goDocs" data-v="' + d.pid + '">' + esc(pName(p)) + '</a> / عرض 3D</span><h1>' + esc(d.title) + '</h1><span class="muted small">' + ({ ifc: 'نموذج IFC', glb: 'نموذج GLB', gltf: 'نموذج glTF', dxf: 'مخطط AutoCAD (DXF) محوّل تلقائياً', dwg: 'مخطط AutoCAD (DWG) محوّل تلقائياً', pdf: 'مخطط PDF محوّل تلقائياً', layout: 'تصميم بالـ AI', png: 'صورة مخطط محوّلة تلقائياً', jpg: 'صورة مخطط محوّلة تلقائياً', webp: 'صورة مخطط محوّلة تلقائياً' })[ext3dDoc(d)] + '</span></div><div class="actions">' +
     (others.length > 1 ? '<select id="v3-doc" aria-label="النموذج">' + others.map(x => '<option value="' + x.id + '"' + (x.id === id ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>' : '') +
-    '<button class="btn" data-act="v3shot">📷 صورة</button>' + fileLink(d.path, 'تنزيل الملف') + '</div></div><div id="v3d-mount" data-doc="' + id + '"></div>';
+    '<button class="btn" data-act="v3shot">📷 صورة</button>' + (isAiDoc(d) ? '' : fileLink(d.path, 'تنزيل الملف')) + '</div></div><div id="v3d-mount" data-doc="' + id + '"></div>';
 }
 async function mount3d() {
   const mt = document.getElementById('v3d-mount');
@@ -602,15 +605,18 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=56'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=57'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   // finishes read from the design renders in the file (Claude, once per document, saved for everyone)
   const looks = { load: async () => { const { data } = await sb.from('project_docs').select('look').eq('id', id).single(); return (data && data.look) || null; } };
-  if (['admin', 'owner', 'gm'].includes(me.role)) looks.analyze = async body => { const { data, error } = await sb.functions.invoke('analyze-renders', { body: { doc_id: id, ...body } }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
-  const viewer = me3.viewer = new mod.Viewer({ canEdit: false, looks,
+  const aiCall = async body => { const { data, error } = await sb.functions.invoke('analyze-renders', { body: { doc_id: id, ...body } }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
+  const ai = {}; // the paid AI steps: only the system admin, owner and general manager start them
+  if (canAi()) { looks.analyze = aiCall; ai.plan = body => aiCall({ mode: 'plan', ...body }); ai.design = body => aiCall({ mode: 'design', ...body }); }
+  const viewer = me3.viewer = new mod.Viewer({ canEdit: false, looks, ai,
     pdfjs: async () => { const L = await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib'); L.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; return L; } });
   (document.getElementById('v3d-mount') || mt).appendChild(viewer.el); viewer.resize();
+  if (isAiDoc(d)) { await viewer.loadDesign(); return; }
   viewer.msg('جاري تنزيل الملف…');
   const { data, error } = await sb.storage.from('attachments').download(d.path);
   if (V3 !== me3) return;
@@ -1307,6 +1313,10 @@ const A2 = {
   projNo: d => modal('رفض المشروع', '<form class="f" data-form="projNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="pn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد أمر التغيير VO (منفصل عن قيمة العقد)'); } catch (e) { el.disabled = false; return; } refresh(); },
   voNo: d => modal('رفض العمل الإضافي', '<form class="f" data-form="voNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="vn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
+  aiDesign: d => modal('✨ صمّم بـ AI', '<form class="f" data-form="aidesign" data-v="' + d.v + '"><label class="fld"><span>اسم التصميم</span><input id="ad-t" required placeholder="مثال: استراحة العائلة"></label>' +
+    '<label class="fld"><span>وش تبي في المشروع؟</span><textarea id="ad-b" rows="6" required placeholder="مثال: استراحة دور واحد على أرض 30×25 م، مساحة البناء 250 م². مجلس رجال بمدخل مستقل ودورة مياه، صالة عائلية مفتوحة على مطبخ أمريكي، غرفتين نوم ماستر، غرفة خادمة، مسبح 8×4 م وتراس خشب وجلسة خارجية."></textarea></label>' +
+    '<p class="muted small" style="margin:0">الـ AI يرسم المخطط (الجدران والأبواب والشبابيك والغرف) ويفرشه، ويطلع 3D تقدر تمشي فيه. ياخذ تقريباً دقيقتين، وينحفظ مع مستندات المشروع.</p>' +
+    '<div class="actions"><button class="btn pri" type="submit">✨ صمّم</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   newDoc: d => modal('إضافة مستند للمشروع', '<form class="f" data-form="doc" data-v="' + d.v + '"><div class="fr"><label class="fld"><span>نوع المستند</span><select id="dc-k">' + Object.entries(DOCK).map(([k, l]) => '<option value="' + k + '">' + l + '</option>').join('') + '</select></label><label class="fld"><span>اسم المستند</span><input id="dc-t" required placeholder="مثال: العقد الموقّع"></label></div><label class="fld"><span>الملف</span><input id="dc-f" type="file" required></label><div class="actions"><button class="btn pri" type="submit">رفع</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   docDel: async d => { try { await run(sb.from('project_docs').delete().eq('id', d.v), 'انحذف المستند'); } catch (e) { return; } refresh(); },
   projDel: d => {
@@ -1590,6 +1600,10 @@ document.addEventListener('submit', async e => {
       const path = await upload(fileOf('dc-f'), 'docs');
       await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: v('dc-k'), title: v('dc-t'), path, uploaded_by: me.id }), 'انرفع المستند');
       ui.tab = 'docs'; closeModal(); refresh();
+    } else if (kind === 'aidesign') {
+      const path = 'ai/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.layout';
+      const row = await run(sb.from('project_docs').insert({ project_id: f.dataset.v, kind: 'model3d', title: v('ad-t'), path, uploaded_by: me.id, look: { brief: v('ad-b') } }).select('id').single());
+      closeModal(); await refresh(); if (row && row.id) location.hash = '#v3d-' + row.id;
     } else if (kind === 'schedOk') {
       await run(sb.rpc('approve_schedule', { p_project: f.dataset.v, p_note: v('so-n') || null }), 'اعتُمد الجدول الزمني');
       closeModal(); refresh();

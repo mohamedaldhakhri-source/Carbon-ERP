@@ -8,9 +8,10 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vend
 import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
 import { looksLikePlan, analyzeImages } from './planimg.js?v=55';
 import { dwgToDxf } from './dwg.js?v=53';
-import { LIB, COLORS, buildItem } from './furniture3d.js?v=55';
-import { Look, dressModel } from './look3d.js?v=56';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=57';
+import { Look, dressModel } from './look3d.js?v=57';
 import { pageLayout, markOn, pageTitle } from './scenes.js?v=56';
+import { layoutToSet } from './layout.js?v=57';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -479,17 +480,91 @@ export class Viewer {
   }
   /* ----- loading ----- */
   async load(buf, ext) {
-    this.ext = ext;
+    this.ext = ext; this.srcBuf = buf.slice(0); // a copy: pdf.js takes over the original buffer
+    const pic = ['pdf', 'png', 'jpg', 'jpeg', 'webp'].includes(ext);
     try {
-      if (ext === 'ifc') await this._loadIfc(buf);
+      // a plan the AI already read for this document opens straight away, with no new cost
+      let saved = null; if (pic && this.opts.looks) { try { const lk = await this.opts.looks.load(); saved = lk && lk.layout; } catch (e) { console.warn(e); } }
+      if (saved) this._loadLayout(saved);
+      else if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
       else if (ext === 'dwg') await this._loadDwg(buf);
       else if (ext === 'pdf') await this._loadPdf(buf);
       else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp') await this._loadPictures([buf], ext);
       else throw new Error('نوع الملف غير مدعوم');
-    } catch (e) { console.error(e); this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); return false; }
+    } catch (e) { console.error(e); this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); if (pic) this._offerAi(); return false; }
     this._finish(); return true;
+  }
+  /* ----- plans the AI reads (any drawing style) ----- */
+  _offerAi(mode) {
+    const design = mode === 'design', can = !!(this.opts.ai && (design ? this.opts.ai.design : this.opts.ai.plan));
+    this.msgEl.hidden = false;
+    if (design) { this.msgEl.innerHTML = '<div class="v3-ai"><b>التصميم ما اكتمل.</b><span>' + (can ? 'جرّب مرة ثانية.' : 'يشغّله مدير النظام أو صاحب الشركة أو المدير العام.') + '</span>' + (can ? '<button type="button" class="btn pri" data-aiplan="1">✨ صمّم بـ AI</button>' : '') + '</div>';
+      const b = this.msgEl.querySelector('[data-aiplan]'); if (b) b.onclick = () => this.aiPlan(false, 'design'); return; }
+    this.msgEl.innerHTML = '<div class="v3-ai"><b>المخطط هذا ما قدرت أقراه بالطريقة العادية.</b><span>' + (can ? 'الـ AI يقدر يقراه: يطلع الجدران والأبواب والشبابيك والغرف ومقاساتها والأثاث والمسبح، ويبنيه 3D. القراءة مرة وحدة وتنحفظ مع المستند.' : 'قراءته بالـ AI يشغّلها مدير النظام أو صاحب الشركة أو المدير العام.') + '</span>' +
+      (can ? '<button type="button" class="btn pri" data-aiplan="1">✨ اقرأ المخطط بالـ AI</button>' : '') + '</div>';
+    const b = this.msgEl.querySelector('[data-aiplan]'); if (b) b.onclick = () => this.aiPlan();
+  }
+  // the drawing as pictures for the AI: each PDF page (up to 4) or the image itself, plus any text on the pages
+  async _planPictures() {
+    const out = [], texts = [];
+    if (this.ext === 'pdf') {
+      const L = this.opts.pdfjs ? await this.opts.pdfjs() : window.pdfjsLib, doc = await L.getDocument({ data: new Uint8Array(this.srcBuf.slice(0)), disableFontFace: true, isEvalSupported: false }).promise;
+      for (let i = 1; i <= Math.min(doc.numPages, 4); i++) {
+        const page = await doc.getPage(i), v1 = page.getViewport({ scale: 1 }), s = Math.min(4, 1568 / Math.max(v1.width, v1.height)), vp = page.getViewport({ scale: s });
+        const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise; out.push(cv.toDataURL('image/jpeg', 0.85).split(',')[1]);
+        try { texts.push((await page.getTextContent()).items.map(t => t.str).join(' ')); } catch (e) { }
+      }
+    } else {
+      const bmp = await createImageBitmap(new Blob([this.srcBuf], { type: 'image/' + (this.ext === 'jpg' ? 'jpeg' : this.ext) })), p = this._picture(bmp); if (p) out.push(this._jpeg(p, 1568, 0.88).split(',')[1]);
+    }
+    return { images: out, text: texts.join('\n').slice(0, 12000) };
+  }
+  // two steps, each a separate call: the building first (shown as soon as it is ready), then the furniture in it
+  async aiPlan(force, mode) {
+    const A = this.opts.ai, design = mode === 'design', call = design ? A && A.design : A && A.plan; if (!call || this.aiBusy) return; this.aiBusy = true;
+    const show = async L => { this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o)); await this._loadLayout(L); this._finish(); };
+    let built = false;
+    try {
+      let pp = {};
+      if (!design) { this.msg('جاري تجهيز المخطط للـ AI…'); pp = await this._planPictures(); if (!pp.images.length) throw new Error('ما لقيت صفحات أرسلها'); }
+      this.msg(design ? '✨ الـ AI يصمم المخطط: الغرف والجدران والأبواب والشبابيك… (حوالي دقيقة إلى دقيقتين، لا تسكّر الصفحة)' : 'الـ AI يقرأ الجدران والأبواب والشبابيك والغرف… (حوالي دقيقة، لا تسكّر الصفحة)');
+      const r1 = await call({ ...pp, part: 'structure', force: !!force }); if (!r1 || !r1.layout) throw new Error('ما رجع مخطط');
+      await show(r1.layout); built = true;
+      if (!(r1.layout.storeys || []).some(s => (s.furniture || []).length)) {
+        this._note(design ? '✨ الـ AI يفرش التصميم الحين… (حوالي دقيقة)' : '✨ الـ AI يحط الأثاث الحين… (حوالي دقيقة)');
+        const r2 = await call({ ...pp, part: 'furniture', structure: r1.layout });
+        if (r2 && r2.layout) await show(r2.layout);
+      }
+      this._note('');
+    } catch (e) { console.error(e); if (built) this._note('ما قدر الـ AI يحط الأثاث: ' + (e.message || e)); else { this.msg((design ? 'ما قدر الـ AI يكمّل التصميم: ' : 'ما قدر الـ AI يقرأ المخطط: ') + (e.message || e)); setTimeout(() => this._offerAi(mode), 3000); } }
+    this.aiBusy = false;
+  }
+  // a line over the model while the AI keeps working (the model stays usable)
+  _note(t) { let e = this.stage.querySelector('.v3-aino'); if (!e) { e = document.createElement('div'); e.className = 'v3-aino'; this.stage.appendChild(e); } e.textContent = t || ''; e.hidden = !t; }
+  // a building the AI designed from a brief: open the saved design, or make it now
+  async loadDesign() {
+    this.ext = 'layout';
+    let lk = null; try { lk = this.opts.looks ? await this.opts.looks.load() : null; } catch (e) { console.warn(e); }
+    if (lk && lk.layout) {
+      try { await this._loadLayout(lk.layout); this._finish(); } catch (e) { console.error(e); this._offerAi('design'); return false; }
+      if (!(lk.layout.storeys || []).some(s => (s.furniture || []).length) && this.opts.ai && this.opts.ai.design) { this.aiBusy = true; try { this._note('✨ الـ AI يفرش التصميم الحين… (حوالي دقيقة)'); const r = await this.opts.ai.design({ part: 'furniture', structure: lk.layout }); if (r && r.layout) { this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o)); await this._loadLayout(r.layout); this._finish(); } this._note(''); } catch (e) { this._note('ما قدر الـ AI يفرش التصميم: ' + (e.message || e)); } this.aiBusy = false; }
+      return true;
+    }
+    if (this.opts.ai && this.opts.ai.design) return this.aiPlan(false, 'design');
+    this._offerAi('design'); return false;
+  }
+  _loadLayout(L, opt) {
+    const set = layoutToSet(L, opt); if (!set || !set.storeys.length) throw new Error('المخطط اللي رجع فاضي');
+    this.layoutData = L; this.layoutOpt = opt || {}; this.set = set; this.texCache = {}; this.areas = []; this.ext = this.ext || 'pdf';
+    return this._buildSheets();
+  }
+  async rebuildLayout(opt) {
+    this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
+    this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
+    await this._loadLayout(this.layoutData, { ...this.layoutOpt, ...opt }); this._finish();
   }
   _finish() {
     this.dirty = true;
@@ -892,6 +967,14 @@ export class Viewer {
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
   }
+  // walk into a room of a plan the AI read
+  goRoom(q) {
+    const f = this.set && this.set.finishes && this.set.finishes[q]; if (!f) return;
+    this.storeySel = String(f.lvl); this.setMode('walk');
+    const st = this.set.storeys[f.lvl], sp = this._startPoint(st.base, f);
+    if (sp) { this.camera.position.copy(sp.pos); this.yaw = sp.yaw; } else { this.camera.position.set((f.x0 + f.x1) / 2, st.base + 0.15 + 1.6, (f.z0 + f.z1) / 2); this.yaw = 0; }
+    this.pitch = -0.08; this._mapMake(); this.dirty = true;
+  }
   // walk to an area: stand in the middle of its frame on its storey
   goArea(key) {
     const a = (this.areas || []).find(x => x.key === key), R = a && this._areaRect(a); if (!R) return;
@@ -948,7 +1031,7 @@ export class Viewer {
     const counts = { walls: 0, windows: 0, doors: 0, floor: 0, roof: 0 };
     // finishes read from the design renders: each area's frame on its storey, smallest frame wins where they overlap
     const looks = this.looks || {}, hex = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : null, lm = {};
-    const AR = S.raster ? (this.areas || []).map(a => ({ a, look: looks[a.key], R: this._areaRect(a) })).filter(x => x.look && x.R)
+    const AR = S.layout ? S.finishes.map((f, q) => ({ ...f, key: 'room' + q, nv: 1, A: (f.x1 - f.x0) * (f.z1 - f.z0) })).sort((p, q) => q.A - p.A) : S.raster ? (this.areas || []).map(a => ({ a, look: looks[a.key], R: this._areaRect(a) })).filter(x => x.look && x.R)
       .map(x => ({ ...x.R, look: x.look, key: x.a.key, nv: x.a.views.length, A: (x.R.x1 - x.R.x0) * (x.R.z1 - x.R.z0) })).sort((p, q) => q.A - p.A || q.nv - p.nv) : [];
     const areaAt = (i, x, z) => { let best = null; AR.forEach(r => { if (r.lvl === i && x >= r.x0 - 0.05 && x <= r.x1 + 0.05 && z >= r.z0 - 0.05 && z <= r.z1 + 0.05 && (!best || r.A < best.A)) best = r; }); return best; };
     const fin = (c, look, o) => { const k = c + look + JSON.stringify(o || {}); return lm[k] || (lm[k] = tag(new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...(o || {}) }), look)); };
@@ -998,13 +1081,14 @@ export class Viewer {
       if (s.furniture && s.furniture.length) {
         const grp = new THREE.Group(), byMat = new Map();
         s.furniture.forEach(it => { const L = Math.max(it.sx || 0, it.sz || 0), W = Math.min(it.sx || 0, it.sz || 0), turn = (it.sz || 0) > (it.sx || 0) ? Math.PI / 2 : 0; let q = null;
-          if (it.t === 'chair') q = { t: 'ochair', r: it.r }; else if (it.t === 'armchair') q = { t: 'armchair', r: it.r };
+          if (it.layout) q = { t: it.t, sx: it.t === 'sofa' ? it.sx / 2.2 : it.sx, sz: it.sz, r: it.r, d: it.d };
+          else if (it.t === 'chair') q = { t: 'ochair', r: it.r }; else if (it.t === 'armchair') q = { t: 'armchair', r: it.r };
           else if (it.t === 'table') q = { t: 'otable', sx: L, sz: W, r: turn }; else if (it.t === 'desk') q = { t: 'desk', sx: L, sz: W, r: turn };
           else if (it.t === 'rtable') q = { t: 'rtable', d: it.d }; else if (it.t === 'cabinet') q = { t: 'cabinet', sx: L, sz: W, r: turn };
           else if (it.t === 'ltable') q = { t: 'ltable', sx: L, sz: W, r: turn }; else if (it.t === 'sofa') q = { t: 'sofa', sx: L / 2.2, r: turn };
           const ar = q && AR.length ? areaAt(i, it.x, it.z) : null, fc = (ar && ar.look.furniture) || {};
           const col = ar && hex({ chair: fc.chair, armchair: fc.armchair || fc.sofa, table: fc.table, desk: fc.desk, rtable: fc.table, cabinet: fc.cabinet, ltable: fc.table, sofa: fc.sofa || fc.armchair }[it.t]);
-          const g = q && buildItem({ ...q, c: col || undefined, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
+          const g = q && buildItem({ ...q, c: (it.layout && hex(it.c)) || col || undefined, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
         grp.updateMatrixWorld(true);
         grp.traverse(o => { if (!o.isMesh) return; const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld); (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(g); o.geometry.dispose(); });
         byMat.forEach((gs, mat) => { for (let k2 = 0; k2 < gs.length; k2 += 3000) { const m = new THREE.Mesh(mergeGeometries(gs.slice(k2, k2 + 3000), false), mat); m.castShadow = true; m.receiveShadow = true; m.userData = { ...ud, cat: 'furniture', noCollide: true }; this.model.add(m); } gs.forEach(g => g.dispose()); });
@@ -1031,6 +1115,21 @@ export class Viewer {
         const g = quads([S.raster ? { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: (rg.Y0 - pcy) * k, z1: (rg.Y1 - pcy) * k } : { x0: (rg.X0 - pcx) * k, x1: (rg.X1 - pcx) * k, z0: -(rg.Y1 - pcy) * k, z1: -(rg.Y0 - pcy) * k }], 0.004);
         const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, color: '#ddd8cc', roughness: 0.95 })); m.userData = { cat: 'floor', noCollide: true, site: true }; this.model.add(m);
       }
+    }
+    // outdoor works around a plan the AI read or designed: deck, lawn, paving and a pool sunk in them
+    if (S.outdoor && S.outdoor.length) {
+      const OM = { deck: tag(new THREE.MeshStandardMaterial({ color: '#9a6a43', roughness: 0.7 }), 'wood'), lawn: new THREE.MeshStandardMaterial({ color: '#6f9a4e', roughness: 1 }), paving: tag(new THREE.MeshStandardMaterial({ color: '#d8d0c2', roughness: 0.9 }), 'paving'), pergola: tag(new THREE.MeshStandardMaterial({ color: '#7a5233', roughness: 0.7 }), 'wood') };
+      const pools = S.outdoor.filter(o => o.type === 'pool'), cut = r => { let parts = [r]; pools.forEach(p => { const nx = []; parts.forEach(q => { if (p.x1 <= q.x0 || p.x0 >= q.x1 || p.z1 <= q.z0 || p.z0 >= q.z1) { nx.push(q); return; }
+        if (p.z0 > q.z0) nx.push({ ...q, z1: p.z0 }); if (p.z1 < q.z1) nx.push({ ...q, z0: p.z1 }); const z0 = Math.max(q.z0, p.z0), z1 = Math.min(q.z1, p.z1); if (p.x0 > q.x0) nx.push({ ...q, x1: p.x0, z0, z1 }); if (p.x1 < q.x1) nx.push({ ...q, x0: p.x1, z0, z1 }); }); parts = nx; }); return parts; };
+      S.outdoor.filter(o => o.type !== 'pool').forEach(o => { const L = [], h = o.type === 'deck' ? 0.14 : o.type === 'paving' ? 0.06 : 0.03;
+        if (o.type === 'pergola') { [[o.x0, o.z0], [o.x1, o.z0], [o.x0, o.z1], [o.x1, o.z1]].forEach(([x, z]) => box(L, x - 0.08, x + 0.08, 0, 2.6, z - 0.08, z + 0.08)); for (let x = o.x0; x <= o.x1; x += 0.4) box(L, x - 0.03, x + 0.03, 2.6, 2.75, o.z0, o.z1); }
+        else cut(o).forEach(q => box(L, q.x0, q.x1, 0, h, q.z0, q.z1));
+        add(L, OM[o.type] || OM.paving, { cat: 'floor', outdoor: true }); });
+      pools.forEach(p => { const L = [], c = 0.3; box(L, p.x0 - c, p.x1 + c, 0, 0.16, p.z0 - c, p.z0); box(L, p.x0 - c, p.x1 + c, 0, 0.16, p.z1, p.z1 + c); box(L, p.x0 - c, p.x0, 0, 0.16, p.z0, p.z1); box(L, p.x1, p.x1 + c, 0, 0.16, p.z0, p.z1);
+        add(L, MAT.stair, { cat: 'floor', outdoor: true });
+        const w = new THREE.Mesh(new THREE.PlaneGeometry(p.x1 - p.x0, p.z1 - p.z0), new THREE.MeshPhysicalMaterial({ color: '#2f9fd0', roughness: 0.05, metalness: 0, transmission: 0, clearcoat: 1, transparent: true, opacity: 0.88 }));
+        w.rotation.x = -Math.PI / 2; w.position.set((p.x0 + p.x1) / 2, 0.1, (p.z0 + p.z1) / 2); w.userData = { cat: 'floor', noCollide: true }; this.model.add(w);
+        counts.pool = (counts.pool || 0) + 1; });
     }
     if (S.roof) { const R = S.roof, RF = [], P = [];
       R.slab.forEach(r => box(RF, r.x0, r.x1, R.base - 0.25, R.base, r.z0, r.z1)); R.parapets.forEach(r => box(P, r.x0, r.x1, R.base, R.base + R.parapetH, r.z0, r.z1));
@@ -1173,7 +1272,7 @@ export class Viewer {
     const A = this.areas, L = this.looks || {}, n = A.reduce((q, a) => q + a.views.length, 0), left = A.filter(a => !L[a.key]).length, can = !!(this.opts.looks && this.opts.looks.analyze);
     const sw = c => /^#[0-9a-f]{6}$/i.test(c || '') ? '<i class="v3-chip" style="background:' + c + '"></i>' : '';
     let h = '<div class="v3-cats v3-areas"><b>🎨 التصميم الداخلي (من صور العرض)</b><span class="v3-note">لقيت ' + n + ' صورة تصميم لـ ' + A.length + ' أماكن، وعرفت مكان كل صورة من الإطار الأحمر على المخطط الصغير.' +
-      (left ? (can ? ' اضغط الزر تحت عشان Claude يقرأ الأرضيات والجدران والأسقف وألوان الأثاث من الصور ويطبقها على المجسم. القراءة مرة وحدة وتنحفظ مع المستند.' : ' قراءة الخامات والألوان من الصور يشغّلها مدير النظام أو صاحب الشركة أو المدير العام.') : ' الخامات والألوان مطبّقة على المجسم، امش فيه وشوف.') + '</span>';
+      (left ? (can ? ' اضغط الزر تحت عشان الـ AI يقرأ الأرضيات والجدران والأسقف وألوان الأثاث من الصور ويطبقها على المجسم. القراءة مرة وحدة وتنحفظ مع المستند.' : ' قراءة الخامات والألوان من الصور يشغّلها مدير النظام أو صاحب الشركة أو المدير العام.') : ' الخامات والألوان مطبّقة على المجسم، امش فيه وشوف.') + '</span>';
     if (left && can) h += '<div class="v3-modes"><button type="button" data-lkread="1"' + (this.reading ? ' disabled' : '') + '>✨ اقرأ التصميم من الصور (' + left + ')</button></div>';
     h += '<span class="v3-note" data-lknote="1"></span>';
     h += A.map(a => { const lk = L[a.key], v = a.views[0];
@@ -1204,10 +1303,10 @@ export class Viewer {
       h += '<div class="v3-modes"><button type="button" data-all="1">👁 إظهار كل التفاصيل</button></div>';
       const CL = { walls: 'الجدران والدراوي', windows: 'الشبابيك والزجاج', doors: 'الأبواب', stairs: 'الدرج', furniture: 'الأثاث (من المخطط)', finish: 'التشطيبات من صور التصميم', floor: 'الأرضيات (المخطط مطبوع عليها)', roof: 'السقف والسطح' };
       h += '<div class="v3-cats"><b>عناصر المبنى</b>' + Object.keys(CL).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '>' + CL[c] + ' <small>' + this.counts[c] + '</small></label>').join('') +
-        (S.raster ? '<label class="v3-f"><span>عرض المبنى (م)</span><input type="number" min="3" max="400" step="0.1" value="' + S.width + '" data-rw="1"></label><label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="12" step="0.1" value="' + S.height + '" data-rh="1"></label>' :
+        (S.layout ? '<label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="8" step="0.1" value="' + S.height + '" data-lh="1"></label>' : S.raster ? '<label class="v3-f"><span>عرض المبنى (م)</span><input type="number" min="3" max="400" step="0.1" value="' + S.width + '" data-rw="1"></label><label class="v3-f"><span>ارتفاع الدور (م)</span><input type="number" min="2.4" max="12" step="0.1" value="' + S.height + '" data-rh="1"></label>' :
         '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>') +
         '<b style="margin-top:6px">الصفحات اللي انقرت</b><span class="v3-note">' + S.sheets.map(x => 'ص' + (x.i + 1) + ': ' + esc(x.title || '—')).join('<br>') + '</span>' +
-        (S.raster ? '<span class="v3-note">المخطط هنا صورة، فقريته من الألوان والأشكال: الجدران من التعبئة الرمادية، والزجاج من الخطوط الصفراء، والأبواب من الفتحات بين الجدران، والفراغات المفتوحة (Double height) من علامة X، والدرج من الدرجات المرسومة. المقياس محسوب من سماكة الجدران، ولو العرض مو مضبوط اكتب العرض الصحيح فوق ويتعدل كل شي.</span></div>' :
+        (S.layout ? '<span class="v3-note">' + (this.layoutData && this.layoutData.designed ? '✨ هذا التصميم سواه الـ AI: ' + esc(this.layoutData.title || '') + '، ' + S.width + ' × ' + S.depth + ' م.' + (this.layoutData.brief ? '<br><b>المطلوب:</b> ' + esc(this.layoutData.brief) : '') : '✨ هذا المخطط قراه الـ AI: ' + S.width + ' × ' + S.depth + ' م.') + ' كل شي محفوظ مع المستند، فيفتح على طول المرة الجاية بدون تكلفة. اضغط أي غرفة عشان تمشي فيها:</span><div class="v3-rooms">' + S.finishes.map((f, q) => f.name ? '<button type="button" data-goroom="' + q + '">🚶 ' + esc(f.name) + '</button>' : '').join('') + '</div>' + (this.opts.ai && this.opts.ai.plan ? '<button type="button" class="v3-link" data-aiplan2="1">' + (this.layoutData && this.layoutData.designed ? '↻ صمّم من جديد' : '↻ إعادة القراءة بالـ AI') + '</button>' : '') + '</div>' : S.raster ? '<span class="v3-note">المخطط هنا صورة، فقريته من الألوان والأشكال: الجدران من التعبئة الرمادية، والزجاج من الخطوط الصفراء، والأبواب من الفتحات بين الجدران، والفراغات المفتوحة (Double height) من علامة X، والدرج من الدرجات المرسومة. المقياس محسوب من سماكة الجدران، ولو العرض مو مضبوط اكتب العرض الصحيح فوق ويتعدل كل شي.</span></div>' :
         '<span class="v3-note">الجدران من القلم الأسمك في المخطط، والأبواب والشبابيك من الفتحات ورموزها، والمناسيب من القطاع' + (Object.keys(S.levels).length ? '' : ' (ما لقيتها، فاستخدمت 3.6 م للدور)') + '.</span></div>');
     } else if (this.ext === 'dxf' || this.ext === 'pdf') {
       const pdf = this.ext === 'pdf', RL = pdf ? PDF_ROLES : { wall: 'جدران', window: 'شبابيك', door: 'أبواب', skip: 'تجاهل' }, rolesNow = pdf ? this.pdfRoles : this.dxfRoles;
@@ -1234,6 +1333,8 @@ export class Viewer {
       }
       if (b.dataset.auto && this.pdf) { this.pdfRoles = guessPdfRoles(Object.keys(this.dxfCount)); this.rebuildPdf(); }
       if (b.dataset.goarea) this.goArea(b.dataset.goarea);
+      if (b.dataset.aiplan2) this.aiPlan(true, this.layoutData && this.layoutData.designed ? 'design' : 'plan');
+      if (b.dataset.goroom != null) this.goRoom(+b.dataset.goroom);
       if (b.dataset.lkread) this.readLooks(false);
       if (b.dataset.lkredo) this.readLooks(true);
       if (b.dataset.fs) { const fs = document.fullscreenElement; if (fs) document.exitFullscreen(); else if (this.el.requestFullscreen) this.el.requestFullscreen(); setTimeout(() => this.resize(), 200); }
@@ -1247,6 +1348,7 @@ export class Viewer {
       else if (t.dataset.layer != null) { if (this.ext === 'pdf') { this.pdfRoles[t.dataset.layer] = t.value; this.rebuildPdf(); } else { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); } }
       else if (t.dataset.dh) { this.dxfH = Math.max(2, Math.min(12, +t.value || 3)); if (this.ext === 'pdf') this.rebuildPdf(); else this.rebuildDxf(); }
       else if (t.dataset.rw && this.set && this.set.raster) { const w = +t.value; if (w > 2 && this.set.width) this.rebuildRaster({ mpp: this.set.mpp * w / this.set.width }); }
+      else if (t.dataset.lh && this.set && this.set.layout) { const v = +t.value; if (v >= 2.4 && v <= 8) this.rebuildLayout({ height: v }); }
       else if (t.dataset.rh && this.set && this.set.raster) { const v = +t.value; if (v >= 2.4 && v <= 12) this.rebuildRaster({ height: v }); }
       else if (t.dataset.ps) { this.pdfScale = Math.max(1, +t.value || 100); if (this.set) this.rebuildSheets(); else this.rebuildPdf(); }
       else if (t.dataset.du) { this.dxfUnits = +t.value; this.rebuildDxf(); }

@@ -453,3 +453,9 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .v3-area button{border:1px solid var(--line);background:var(--surface);border-radius:6px;cursor:pointer;padding:6px 8px;font-size:1rem}
 .v3-chip{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,.2);margin-inline-end:3px;vertical-align:middle}
 .v3-link{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:.72rem;padding:4px 0;text-decoration:underline}
+.v3-ai{display:flex;flex-direction:column;gap:10px;align-items:center;max-width:420px;line-height:1.6}
+.v3-ai span{font-weight:400;font-size:.88rem;color:#444}
+.v3-aino{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(20,20,20,.82);color:#fff;padding:7px 14px;border-radius:18px;font-size:.82rem;z-index:3;pointer-events:none}
+.v3-aino[hidden]{display:none}
+.v3-rooms{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.v3-rooms button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:99px;padding:4px 10px;font:inherit;font-size:.74rem;cursor:pointer}

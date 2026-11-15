@@ -81,6 +81,23 @@ export const LIB = {
     if (W > 1.1) box(g, L - 0.04, 0.38, 0.025, 0, 0.94, 0, tag(mat('#6d8796', { roughness: 0.9 }), 'fabric')); } },
   cabinet: { hide: true, build: (g, a, it) => { const L = Math.max(0.3, it.sx || 1), W = Math.max(0.3, it.sz || 0.6); box(g, L, 0.86, W, 0, 0.45, 0, prim(a, M.oak())); box(g, L + 0.02, 0.03, W + 0.02, 0, 0.895, 0, M.marble()); } },
   ltable: { hide: true, build: (g, a, it) => { const L = Math.max(0.4, it.sx || 1), W = Math.max(0.4, it.sz || 0.6); box(g, L, 0.05, W, 0, 0.42, 0, prim(a, M.walnut())); box(g, L * 0.8, 0.4, W * 0.7, 0, 0.2, 0, M.walnut()); } },
+  // home pieces for plans read or designed by Claude (sizes from the plan: sx across the front, sz front to back)
+  bed: { hide: true, build: (g, a, it) => { const W = Math.max(0.9, it.sx || 1.8), L = Math.max(1.8, it.sz || 2.0), w = M.walnut(), white = tag(mat('#f4f2ee', { roughness: 0.95 }), 'fabric');
+    box(g, W, 0.28, L, 0, 0.16, 0, w); box(g, W - 0.06, 0.22, L - 0.12, 0, 0.41, 0.03, white); box(g, W - 0.04, 0.06, L * 0.62, 0, 0.53, L * 0.17, prim(a, tag(mat('#c9b79c', { roughness: 0.95 }), 'fabric')));
+    box(g, W + 0.1, 1.0, 0.08, 0, 0.5, -L / 2 + 0.04, prim(a, M.fabric())); const n = W > 1.3 ? 2 : 1; for (let i = 0; i < n; i++) box(g, W / n - 0.18, 0.12, 0.38, (i - (n - 1) / 2) * W / n, 0.58, -L / 2 + 0.32, white); } },
+  wardrobe: { hide: true, build: (g, a, it) => { const W = Math.max(0.5, it.sx || 1.8), D = Math.max(0.4, Math.min(0.7, it.sz || 0.6)), b = prim(a, tag(mat('#ece6dc', { roughness: 0.6 }), 'wood')); box(g, W, 2.3, D, 0, 1.15, 0, b);
+    const n = Math.max(2, Math.round(W / 0.5)); for (let i = 1; i < n; i++) box(g, 0.01, 2.2, 0.01, -W / 2 + W * i / n, 1.15, D / 2 + 0.005, M.black()); } },
+  kitchen: { hide: true, build: (g, a, it) => { const W = Math.max(0.6, it.sx || 2.4), D = Math.max(0.5, Math.min(0.75, it.sz || 0.6)), b = prim(a, tag(mat('#f1efeb', { roughness: 0.5 }), 'wood'));
+    box(g, W, 0.86, D, 0, 0.45, 0, b); box(g, W + 0.02, 0.04, D + 0.02, 0, 0.9, 0.01, M.marble()); box(g, W, 0.7, 0.35, 0, 1.85, -D / 2 + 0.175, b); } },
+  island: { hide: true, build: (g, a, it) => { const W = Math.max(0.8, it.sx || 2.2), D = Math.max(0.6, it.sz || 1.0); box(g, W - 0.1, 0.86, D - 0.2, 0, 0.45, -0.05, prim(a, tag(mat('#f1efeb', { roughness: 0.5 }), 'wood'))); box(g, W, 0.05, D, 0, 0.905, 0, M.marble()); } },
+  tv: { hide: true, build: (g, a, it) => { const W = Math.max(0.8, it.sx || 1.8); box(g, W, 0.45, 0.42, 0, 0.225, 0, prim(a, M.walnut())); box(g, Math.min(2, W * 0.75), 0.62, 0.05, 0, 1.15, -0.15, M.black()); } },
+  toilet: { hide: true, build: (g) => { const w = tag(mat('#f7f7f5', { roughness: 0.2 }), 'marble'); box(g, 0.38, 0.4, 0.18, 0, 0.6, -0.26, w); const c = cyl(g, 0.19, 0.16, 0.4, 0, 0.2, 0.02, w, 20); c.scale.z = 1.3; } },
+  basin: { hide: true, build: (g, a, it) => { const W = Math.max(0.5, it.sx || 0.9), D = Math.max(0.4, Math.min(0.6, it.sz || 0.5)); box(g, W, 0.55, D, 0, 0.55, 0, prim(a, M.walnut())); box(g, W + 0.02, 0.04, D + 0.02, 0, 0.84, 0, M.marble());
+    cyl(g, 0.18, 0.14, 0.1, 0, 0.91, 0.02, tag(mat('#ffffff', { roughness: 0.15 }), 'marble'), 24); box(g, Math.min(W, 1.0), 0.75, 0.02, 0, 1.4, -D / 2 + 0.01, tag(mat('#cfe0e8', { roughness: 0.05, metalness: 0.9 }), 'metal')); } },
+  shower: { hide: true, build: (g, a, it) => { const W = Math.max(0.8, it.sx || 1.0), D = Math.max(0.8, it.sz || 1.0), gl = mat('#bfe3ef', { transparent: true, opacity: 0.25, roughness: 0.05 });
+    box(g, W, 0.05, D, 0, 0.025, 0, tag(mat('#e9e6e0', { roughness: 0.4 }), 'stone')); const p = box(g, W, 2.0, 0.01, 0, 1.05, D / 2, gl); p.userData.noCollide = true; cyl(g, 0.12, 0.12, 0.02, W / 2 - 0.25, 2.1, -D / 2 + 0.25, M.black(), 16); } },
+  bathtub: { hide: true, build: (g, a, it) => { const W = Math.max(1.4, it.sx || 1.7), D = Math.max(0.6, it.sz || 0.75), w = tag(mat('#fbfbf9', { roughness: 0.15 }), 'marble'); box(g, W, 0.55, D, 0, 0.275, 0, w); box(g, W - 0.16, 0.02, D - 0.16, 0, 0.56, 0, mat('#d9e9ef', { roughness: 0.1 })); } },
+  sunbed: { hide: true, build: (g, a) => { const f = prim(a, tag(mat('#f2efe8', { roughness: 0.9 }), 'fabric')); box(g, 0.7, 0.12, 1.4, 0, 0.3, 0.25, f); const b = box(g, 0.7, 0.1, 0.65, 0, 0.55, -0.6, f); b.rotation.x = -0.6; box(g, 0.74, 0.22, 1.9, 0, 0.12, -0.05, M.walnut()); } },
   parasol: { l: 'مظلة جلسة خارجية', i: '⛱', build: (g, a) => { cyl(g, 0.03, 0.03, 2.4, 0, 1.2, 0, M.walnut(), 8); const c = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.45, 8, 1, true), prim(a, M.fabric())); c.position.y = 2.5; c.material.side = THREE.DoubleSide; g.add(c); cyl(g, 0.3, 0.32, 0.08, 0, 0.04, 0, M.black(), 16); } }
 };
 
