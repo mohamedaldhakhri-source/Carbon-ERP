@@ -175,6 +175,7 @@ async function run(promise, okMsg) {
 }
 async function upload(file, folder) {
   if (!file) return null;
+  if (file.size > 50 * 1024 * 1024) { toast('الملف حجمه ' + (file.size / 1048576).toFixed(0) + ' ميجا، والحد الأقصى 50 ميجا. صغّره (مثلاً احفظ الـ PDF بجودة أقل أو اضغطه ZIP) وارفعه مرة ثانية.', true); throw new Error('too big'); }
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
   const path = folder + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext;
   await run(sb.storage.from('attachments').upload(path, file));
@@ -1438,6 +1439,8 @@ document.addEventListener('submit', async e => {
   const f = e.target; e.preventDefault(); const v = id => document.getElementById(id).value;
   const fileOf = id => { const el = document.getElementById(id); return el && el.files && el.files[0] ? el.files[0] : null; };
   const btn = f.querySelector('[type=submit]'); if (btn) btn.disabled = true;
+  const upMb = [...f.querySelectorAll('input[type=file]')].reduce((a, x) => a + (x.files && x.files[0] ? x.files[0].size : 0), 0) / 1048576;
+  if (btn && upMb > 0.5) { btn.dataset.t = btn.textContent; btn.textContent = 'جاري رفع الملف (' + upMb.toFixed(1) + ' ميجا)… لا تسكر النافذة'; }
   try {
     const kind = f.dataset.form;
     if (kind === 'login') {
@@ -1551,7 +1554,7 @@ document.addEventListener('submit', async e => {
       closeModal(); refresh();
     }
   } catch (err) { /* toast already shown */ }
-  finally { if (btn && document.body.contains(btn)) btn.disabled = false; }
+  finally { if (btn && document.body.contains(btn)) { btn.disabled = false; if (btn.dataset.t) btn.textContent = btn.dataset.t; } }
 });
 window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
