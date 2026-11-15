@@ -151,6 +151,63 @@ function guessUnits(units, segs) {
   return w > 500 ? 4 : w > 60 ? 5 : 6;
 }
 
+/* ---------- AutoCAD-plotted PDF (vector paths on CAD layers) ---------- */
+export async function extractPdfPlan(pdfjs, data) {
+  const doc = await pdfjs.getDocument({ data, disableFontFace: true, isEvalSupported: false }).promise;
+  const page = await doc.getPage(1);
+  const oc = await doc.getOptionalContentConfig(); const gg = (oc && oc.getGroups && oc.getGroups()) || {}; const names = {}; Object.keys(gg).forEach(id => { names[id] = gg[id].name; });
+  const ol = await page.getOperatorList(), O = pdfjs.OPS;
+  let text = ''; try { text = (await page.getTextContent()).items.map(x => x.str).join(' '); } catch (e) { }
+  let ctm = [1, 0, 0, 1, 0, 0], sub = [], cur = null; const st = [], mc = [], paths = [];
+  const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+  const T = (x, y) => [ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]];
+  const layer = () => { for (let i = mc.length - 1; i >= 0; i--) if (mc[i]) return mc[i]; return '(بدون طبقة)'; };
+  const fillOps = new Set([O.fill, O.eoFill, O.fillStroke, O.eoFillStroke, O.closeFillStroke, O.closeEOFillStroke]), paintOps = new Set([O.stroke, O.closeStroke, ...fillOps]);
+  for (let i = 0; i < ol.fnArray.length; i++) {
+    const f = ol.fnArray[i], a = ol.argsArray[i];
+    if (f === O.save) st.push(ctm); else if (f === O.restore) ctm = st.pop() || ctm;
+    else if (f === O.transform) ctm = mul(ctm, a);
+    else if (f === O.beginMarkedContentProps) mc.push(a[0] === 'OC' && a[1] && a[1].id ? (names[a[1].id] || null) : null);
+    else if (f === O.beginMarkedContent) mc.push(null);
+    else if (f === O.endMarkedContent) mc.pop();
+    else if (f === O.constructPath) {
+      const ops = a[0], c = a[1]; let k = 0;
+      for (const op of ops) {
+        if (op === O.moveTo) { cur = [T(c[k], c[k + 1])]; sub.push(cur); k += 2; }
+        else if (op === O.lineTo) { if (!cur) { cur = []; sub.push(cur); } cur.push(T(c[k], c[k + 1])); k += 2; }
+        else if (op === O.curveTo || op === O.curveTo2 || op === O.curveTo3) {
+          const p0 = cur && cur.length ? cur[cur.length - 1] : T(c[k], c[k + 1]); let p1, p2, p3;
+          if (op === O.curveTo) { p1 = T(c[k], c[k + 1]); p2 = T(c[k + 2], c[k + 3]); p3 = T(c[k + 4], c[k + 5]); k += 6; }
+          else if (op === O.curveTo2) { p1 = p0; p2 = T(c[k], c[k + 1]); p3 = T(c[k + 2], c[k + 3]); k += 4; }
+          else { p1 = T(c[k], c[k + 1]); p2 = T(c[k + 2], c[k + 3]); p3 = p2; k += 4; }
+          if (!cur) { cur = [p0]; sub.push(cur); } cur.curve = true;
+          for (let s = 1; s <= 6; s++) { const t = s / 6, u = 1 - t; cur.push([u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]); }
+        }
+        else if (op === O.closePath) { if (cur && cur.length) { cur.closed = true; cur = null; } }
+        else if (op === O.rectangle) { const x = c[k], y = c[k + 1], w = c[k + 2], h = c[k + 3]; const r = [T(x, y), T(x + w, y), T(x + w, y + h), T(x, y + h)]; r.closed = true; sub.push(r); cur = null; k += 4; }
+      }
+    } else if (paintOps.has(f)) {
+      const filled = fillOps.has(f), L = layer();
+      sub.forEach(s => { if (s.length > 1) paths.push({ layer: L, pts: s, closed: !!s.closed || f === O.closeStroke || f === O.closeFillStroke || f === O.closeEOFillStroke, filled, curve: !!s.curve }); });
+      sub = []; cur = null;
+    } else if (f === O.endPath) { sub = []; cur = null; }
+  }
+  return { doc, page, names, paths, text };
+}
+export const PDF_ROLES = { wall: 'جدران', column: 'أعمدة', window: 'زجاج / شبابيك', door: 'أبواب', plant: 'أشجار ونباتات', furniture: 'أثاث مجسّم', plan: 'رسم على الأرضية', skip: 'إخفاء' };
+export function guessPdfRoles(layers) {
+  const r = {};
+  layers.forEach(l => { const n = l.toLowerCase();
+    r[l] = /curt|window|menuiserie - alu|glaz|vitr|fen[eê]tre|glass|زجاج|شباك/.test(n) ? 'window'
+      : /door|porte|menuiserie - bois|باب/.test(n) ? 'door'
+      : /column|colonne|poteau|struct_member|عمود/.test(n) ? 'column'
+      : /verdure|arbre|tree|planter|شجر|نبات/.test(n) ? 'plant'
+      : /wall|wals|poch|gypsum|mur|cloison|ma[cç]on|جدار|حائط/.test(n) ? 'wall'
+      : /floor|sol|revetement|jardin|am[ée]nagement|ffe|furn|storage|mobilier|piscine|water|cach[ée]|ارضي|أرضي|أثاث|اثاث/.test(n) ? 'plan'
+      : 'skip'; });
+  return r;
+}
+
 /* ---------- viewer ---------- */
 export class Viewer {
   constructor(opts) {
@@ -163,10 +220,11 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.stage.prepend(this.renderer.domElement);
-    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#e9edf1');
+    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#dce8f2');
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 5000);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f96, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(30, 60, 20); this.scene.add(sun);
+    this.scene.add(new THREE.HemisphereLight(0xdfeeff, 0x9a8f80, 1.5));
+    const sun = this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2); sun.position.set(30, 60, 20); this.scene.add(sun);
+    this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.model = new THREE.Group(); this.scene.add(this.model);
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement); this.orbit.enableDamping = true;
     this.mode = 'orbit'; this.keys = {}; this.yaw = 0; this.pitch = 0; this.move = { x: 0, y: 0 };
@@ -304,12 +362,13 @@ export class Viewer {
       if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
+      else if (ext === 'pdf') await this._loadPdf(buf);
       else throw new Error('نوع الملف غير مدعوم');
     } catch (e) { console.error(e); this.msg('ما قدرت أفتح الملف: ' + (e.message || e)); return false; }
     this._finish(); return true;
   }
   _finish() {
-    this.meshes = []; this.model.traverse(o => { if (o.isMesh) { this.meshes.push(o); o.geometry.computeBoundsTree(); } });
+    this.meshes = []; this.model.traverse(o => { if (o.isMesh && !o.isInstancedMesh) { this.meshes.push(o); o.geometry.computeBoundsTree(); } if (o.isMesh) { const tr = [].concat(o.material).some(m => m.transparent); o.castShadow = !tr; o.receiveShadow = true; } });
     this.box = new THREE.Box3().setFromObject(this.model);
     if (this.box.isEmpty()) { this.msg('الملف ما فيه عناصر ثلاثية الأبعاد.'); return; }
     const s = this.box.getSize(new THREE.Vector3()), R = Math.max(s.x, s.y, s.z);
@@ -317,6 +376,9 @@ export class Viewer {
     // ground plane
     const c = this.box.getCenter(new THREE.Vector3());
     const gnd = new THREE.Mesh(new THREE.CircleGeometry(R * 3, 48), new THREE.MeshLambertMaterial({ color: '#cfd6cc' }));
+    gnd.receiveShadow = true;
+    const sn = this.sun; sn.position.set(c.x + R * 0.5, c.y + R * 1.1, c.z + R * 0.35); sn.target.position.copy(c); this.scene.add(sn.target);
+    sn.castShadow = true; sn.shadow.mapSize.set(4096, 4096); const sc = sn.shadow.camera, e = R * 0.8; sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 0.5; sc.far = R * 4; sc.updateProjectionMatrix(); sn.shadow.bias = -0.0004; sn.shadow.normalBias = 0.02;
     gnd.rotation.x = -Math.PI / 2; gnd.position.set(c.x, this.box.min.y - 0.01, c.z); gnd.userData.ground = true; this.scene.add(gnd); this.meshes.push(gnd); gnd.geometry.computeBoundsTree();
     this.msg(''); this.setMode('orbit'); this._side();
   }
@@ -457,6 +519,107 @@ export class Viewer {
     this.counts = { walls: walls.length, windows: wins.length, doors: doors.length };
     ['walls', 'windows', 'doors', 'floor'].forEach(c => { if (this.catOn[c] == null) this.catOn[c] = true; });
   }
+  _boxes(list, mat, cat, noCollide) {
+    if (!list.length) return;
+    for (let s = 0; s < list.length; s += 3000) {
+      const gs = list.slice(s, s + 3000).map(w => { const g = new THREE.BoxGeometry(w.L, w.y1 - w.y0, w.t);
+        g.applyMatrix4(new THREE.Matrix4().makeRotationY(Math.atan2(-w.uz, w.ux)).setPosition(w.a[0] + w.ux * w.L / 2, (w.y0 + w.y1) / 2, w.a[1] + w.uz * w.L / 2)); return g; });
+      const m = new THREE.Mesh(mergeGeometries(gs, false), mat); m.userData = { cat, noCollide }; this.model.add(m); gs.forEach(g => g.dispose());
+    }
+  }
+  async _loadPdf(buf) {
+    this.msg('جاري قراءة المخطط…');
+    const L = this.opts.pdfjs ? await this.opts.pdfjs() : window.pdfjsLib; if (!L) throw new Error('قارئ PDF غير متوفر');
+    const ex = await extractPdfPlan(L, new Uint8Array(buf));
+    const st = {}; ex.paths.forEach(p => { const s = st[p.layer] = st[p.layer] || { n: 0 }; s.n++; });
+    if (ex.paths.length < 300 || Object.keys(st).length < 3) throw new Error('هذا الـ PDF مو مخطط أوتوكاد بطبقات (غالباً صورة أو عرض تقديمي)، فما أقدر أرفعه 3D تلقائياً. اطبعه من AutoCAD لـ PDF مع الطبقات، أو ارفع ملف DXF أو IFC.');
+    this.pdf = ex; this.dxfCount = st; this.pdfRoles = guessPdfRoles(Object.keys(st));
+    const m = /1\s*:\s*(\d{2,4})/.exec(ex.text || ''); this.pdfScale = m ? +m[1] : 100; this.dxfH = 3.5;
+    await this._buildPdf();
+  }
+  async _buildPdf() {
+    this.model.clear(); this.meshes = [];
+    const roles = this.pdfRoles, k = 0.0254 / 72 * this.pdfScale, H = this.dxfH, P = this.pdf.paths;
+    const use = r => P.filter(p => roles[p.layer] === r);
+    const box = arr => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; arr.forEach(p => p.pts.forEach(([x, y]) => { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; })); return { x0, y0, x1, y1 }; };
+    let bb = box(P.filter(p => roles[p.layer] === 'wall' || roles[p.layer] === 'column'));
+    if (!isFinite(bb.x0)) bb = box(P.filter(p => roles[p.layer] !== 'skip'));
+    if (!isFinite(bb.x0)) { this.msg('اختر طبقة الجدران من القائمة.'); return; }
+    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2, W = q => [(q[0] - cx) * k, -(q[1] - cy) * k]; // -> world x, z
+    const seg = (a, b, t, y0, y1) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]); return L < 0.02 ? null : { a, L, ux: (b[0] - a[0]) / L, uz: (b[1] - a[1]) / L, t, y0, y1 }; };
+    const solids = [], thin = [], glass = [], frames = [], doors = [], furn = [];
+    const addShape = (pts, h, out) => {
+      const w = pts.map(W); let ar = 0; for (let i = 0; i < w.length; i++) { const a = w[i], b = w[(i + 1) % w.length]; ar += a[0] * b[1] - b[0] * a[1]; }
+      if (Math.abs(ar) / 2 < 0.0004) return;
+      const sh = new THREE.Shape(w.map(([x, z]) => new THREE.Vector2(x, -z)));
+      const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 1 }); g.rotateX(-Math.PI / 2); out.push(g);
+    };
+    ['wall', 'column'].forEach(r => use(r).forEach(p => {
+      if (p.filled && p.closed && p.pts.length >= 3) addShape(p.pts, H, solids);
+      else for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), r === 'column' ? 0.08 : 0.05, 0, H); if (s) thin.push(s); }
+    }));
+    use('window').forEach(p => { for (let i = 0; i + 1 < p.pts.length; i++) { const a = W(p.pts[i]), b = W(p.pts[i + 1]); const g = seg(a, b, 0.03, 0.02, H - 0.35), f = seg(a, b, 0.08, H - 0.35, H); if (g) glass.push(g); if (f) frames.push(f); } });
+    use('door').forEach(p => { if (p.curve) return; for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), 0.045, 0, 2.2); if (s && s.L >= 0.6 && s.L <= 1.6) doors.push(s); } });
+    use('furniture').forEach(p => { if (p.closed && p.pts.length >= 3) addShape(p.pts, 0.75, furn); });
+    // trees and planters: one plant per outline, merged when close together
+    const trees = [], cell = {};
+    use('plant').forEach(p => { const b = box([p]), sz = Math.max(b.x1 - b.x0, b.y1 - b.y0) * k; if (sz < 0.35 || sz > 9) return;
+      const c = W([(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]), key = Math.round(c[0] / 0.8) + ',' + Math.round(c[1] / 0.8); if (cell[key]) { cell[key].r = Math.max(cell[key].r, sz / 2); return; }
+      const t = { x: c[0], z: c[1], r: sz / 2 }; cell[key] = t; trees.push(t); });
+    const MAT = {
+      wall: new THREE.MeshStandardMaterial({ color: '#f3efe7', roughness: 0.92 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: '#bfe0ef', transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0, depthWrite: false }),
+      frame: new THREE.MeshStandardMaterial({ color: '#3a3a3a', roughness: 0.5, metalness: 0.4 }),
+      door: new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.65 }),
+      wood: new THREE.MeshStandardMaterial({ color: '#a8743f', roughness: 0.7 })
+    };
+    if (solids.length) for (let s = 0; s < solids.length; s += 2000) { const m = new THREE.Mesh(mergeGeometries(solids.slice(s, s + 2000), false), MAT.wall); m.userData = { cat: 'walls' }; this.model.add(m); }
+    solids.forEach(g => g.dispose());
+    this._boxes(thin, MAT.wall, 'walls');
+    this._boxes(glass, MAT.glass, 'windows', false);
+    this._boxes(frames, MAT.frame, 'windows', true);
+    this._boxes(doors, MAT.door, 'doors', true);
+    if (furn.length) { const m = new THREE.Mesh(mergeGeometries(furn, false), MAT.wood); m.userData = { cat: 'furniture', noCollide: true }; this.model.add(m); furn.forEach(g => g.dispose()); }
+    if (trees.length) {
+      const list = trees.slice(0, 800), n = list.length, d = new THREE.Object3D(), col = new THREE.Color();
+      const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.1, 1, 6), new THREE.MeshStandardMaterial({ color: '#6b4a2b', roughness: 0.9 }), n);
+      const leaf = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, flatShading: true }), n * 2);
+      list.forEach((t, i) => {
+        const big = t.r > 0.9, h = big ? Math.min(6, 2 + t.r * 1.4) : 0.5 + t.r * 0.8, cr = big ? Math.min(3, t.r * 0.9) : t.r * 0.9;
+        d.position.set(t.x, (h - cr * 0.8) / 2, t.z); d.scale.set(1, Math.max(0.1, h - cr * 0.8), 1); d.rotation.set(0, 0, 0); d.updateMatrix(); trunk.setMatrixAt(i, d.matrix);
+        for (let j = 0; j < 2; j++) {
+          const s = cr * (j ? 0.7 : 1); d.position.set(t.x + (j ? cr * 0.3 : 0), h - cr * (j ? 0.2 : 0.6), t.z + (j ? -cr * 0.25 : 0)); d.scale.set(s, s * (big ? 0.9 : 0.7), s); d.rotation.set(i, i * 1.7, 0); d.updateMatrix();
+          leaf.setMatrixAt(i * 2 + j, d.matrix); leaf.setColorAt(i * 2 + j, col.setHSL(0.27 + ((i * 37 + j * 11) % 10) / 120, 0.45, 0.28 + ((i * 13) % 10) / 70));
+        }
+      });
+      trunk.userData = { cat: 'plants', noCollide: true, inst: true }; leaf.userData = { cat: 'plants', noCollide: true, inst: true };
+      this.model.add(trunk, leaf);
+    }
+    // the drawing itself (furniture, floor patterns, water, landscape) printed on the floor
+    try { await this._pdfFloor(bb, cx, cy, k); } catch (e) { console.warn(e); }
+    this.counts = { walls: solids.length + thin.length, windows: glass.length, doors: doors.length, plants: trees.length, furniture: furn.length };
+    ['walls', 'windows', 'doors', 'plants', 'furniture', 'floor'].forEach(c => { if (this.catOn[c] == null) this.catOn[c] = true; });
+  }
+  async _pdfFloor(bb, cx, cy, k) {
+    const { page, doc, names } = this.pdf, view = page.view, pad = 6 / k;
+    const r = { x0: Math.max(view[0], bb.x0 - pad), y0: Math.max(view[1], bb.y0 - pad), x1: Math.min(view[2], bb.x1 + pad), y1: Math.min(view[3], bb.y1 + pad) };
+    const w = r.x1 - r.x0, h = r.y1 - r.y0, max = Math.min(8192, this.renderer.capabilities.maxTextureSize || 4096, 6144);
+    const s = Math.min(max / w, max / h, 8), cw = Math.round(w * s), ch = Math.round(h * s);
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch; const ctx = cv.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cw, ch);
+    const cfg = await doc.getOptionalContentConfig(); const show = new Set(['plan', 'furniture', 'plant', 'door']);
+    Object.keys(names).forEach(id => { try { cfg.setVisibility(id, show.has(this.pdfRoles[names[id]])); } catch (e) { } });
+    const vp = page.getViewport({ scale: s });
+    await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -(r.x0 - view[0]) * s, -(view[3] - r.y1) * s], optionalContentConfigPromise: Promise.resolve(cfg) }).promise;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const fl = new THREE.Mesh(new THREE.PlaneGeometry(w * k, h * k), new THREE.MeshStandardMaterial({ map: tex, color: '#efe5d3', roughness: 0.95 }));
+    fl.rotation.x = -Math.PI / 2; fl.position.set(((r.x0 + r.x1) / 2 - cx) * k, 0.005, -((r.y0 + r.y1) / 2 - cy) * k); fl.userData = { cat: 'floor' };
+    this.model.add(fl);
+  }
+  async rebuildPdf() {
+    this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
+    this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
+    await this._buildPdf(); this._finish();
+  }
   rebuildDxf() {
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     this._buildDxf(); this._finish();
@@ -494,7 +657,7 @@ export class Viewer {
       for (let k = 0; k < ea.count; k++) if (ea.getX(k) === id) box.expandByPoint(t.fromBufferAttribute(pa, k));
     } else {
       const names = []; let o = h.object; while (o && o !== this.model) { if (o.name) names.unshift(o.name); o = o.parent; }
-      html = '<b>' + esc(names.pop() || ({ walls: 'جدار', windows: 'شباك', doors: 'باب', floor: 'أرضية' }[h.object.userData.cat] || 'عنصر')) + '</b>' + (names.length ? '<span>' + esc(names.slice(-3).join(' › ')) + '</span>' : '');
+      html = '<b>' + esc(names.pop() || ({ walls: 'جدار', windows: 'زجاج / شباك', doors: 'باب', floor: 'أرضية', furniture: 'أثاث' }[h.object.userData.cat] || 'عنصر')) + '</b>' + (names.length ? '<span>' + esc(names.slice(-3).join(' › ')) + '</span>' : '');
       box = new THREE.Box3().setFromObject(h.object);
       if (h.object.userData.cat) box = null;
     }
@@ -514,12 +677,13 @@ export class Viewer {
       h += '<div class="v3-cats"><b>الأنظمة في النموذج</b>' + Object.keys(CATS).filter(c => this.counts[c]).map(c => '<label><input type="checkbox" data-cat="' + c + '"' + (this.catOn[c] !== false ? ' checked' : '') + '><i style="background:' + CATS[c].c + '"></i>' + CATS[c].l + ' <small>' + this.counts[c] + '</small></label>').join('') + '</div>';
     } else if (this.parts && this.parts.length > 1 && this.parts.length <= 40) {
       h += '<div class="v3-cats"><b>أجزاء النموذج</b>' + this.parts.map(p => '<label><input type="checkbox" data-cat="' + p.k + '"' + (this.catOn[p.k] !== false ? ' checked' : '') + '>' + esc(p.l) + '</label>').join('') + '</div>';
-    } else if (this.ext === 'dxf') {
-      const RL = { wall: 'جدران', window: 'شبابيك', door: 'أبواب', skip: 'تجاهل' };
+    } else if (this.ext === 'dxf' || this.ext === 'pdf') {
+      const pdf = this.ext === 'pdf', RL = pdf ? PDF_ROLES : { wall: 'جدران', window: 'شبابيك', door: 'أبواب', skip: 'تجاهل' }, rolesNow = pdf ? this.pdfRoles : this.dxfRoles;
       h += '<div class="v3-cats"><b>طريقة رفع المخطط</b><label class="v3-f"><span>ارتفاع الجدران (م)</span><input type="number" step="0.1" min="2" max="12" value="' + this.dxfH + '" data-dh="1"></label>' +
-        '<label class="v3-f"><span>وحدة الرسم في الملف</span><select data-du="1">' + [[4, 'ملم (mm)'], [5, 'سم (cm)'], [6, 'متر (m)'], [1, 'إنش'], [2, 'قدم']].map(([k, l]) => '<option value="' + k + '"' + (+this.dxfUnits === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
-        '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.</span>' +
-        Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (this.dxfRoles[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
+        (pdf ? '<label class="v3-f"><span>مقياس الرسم 1:</span><input type="number" min="1" max="2000" step="1" value="' + this.pdfScale + '" data-ps="1"></label>' :
+        '<label class="v3-f"><span>وحدة الرسم في الملف</span><select data-du="1">' + [[4, 'ملم (mm)'], [5, 'سم (cm)'], [6, 'متر (m)'], [1, 'إنش'], [2, 'قدم']].map(([k, l]) => '<option value="' + k + '"' + (+this.dxfUnits === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>') +
+        '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
+        Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
     h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
@@ -532,8 +696,9 @@ export class Viewer {
       const t = e.target;
       if (t.dataset.cat) { this.catOn[t.dataset.cat] = t.checked; this.applyVis(); }
       else if (t.dataset.st) { this.storeySel = t.value; this.applyVis(); }
-      else if (t.dataset.layer != null) { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); }
-      else if (t.dataset.dh) { this.dxfH = Math.max(2, Math.min(12, +t.value || 3)); this.rebuildDxf(); }
+      else if (t.dataset.layer != null) { if (this.ext === 'pdf') { this.pdfRoles[t.dataset.layer] = t.value; this.rebuildPdf(); } else { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); } }
+      else if (t.dataset.dh) { this.dxfH = Math.max(2, Math.min(12, +t.value || 3)); if (this.ext === 'pdf') this.rebuildPdf(); else this.rebuildDxf(); }
+      else if (t.dataset.ps) { this.pdfScale = Math.max(1, +t.value || 100); this.rebuildPdf(); }
       else if (t.dataset.du) { this.dxfUnits = +t.value; this.rebuildDxf(); }
     };
   }
