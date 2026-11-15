@@ -9,10 +9,11 @@ export const COLORS = [
 ];
 const cache = {};
 const mat = (c, o) => { const k = c + JSON.stringify(o || {}); return cache[k] || (cache[k] = new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.7 }, o || {}))); };
+const tag = (m, look) => { m.userData.look = look; return m; }; // what it is made of, for the textures in look3d.js
 const M = {
-  oak: () => mat('#c79a63', { roughness: 0.6 }), walnut: () => mat('#6b4529', { roughness: 0.55 }), leather: () => mat('#b0622f', { roughness: 0.45 }),
-  fabric: () => mat('#e4dccd', { roughness: 0.95 }), plaster: () => mat('#e9e1d4', { roughness: 0.9 }), trav: () => mat('#d8c4a5', { roughness: 0.75 }),
-  marble: () => mat('#f1efea', { roughness: 0.25 }), black: () => mat('#2b2b2b', { roughness: 0.4, metalness: 0.6 }), brass: () => mat('#b8913f', { roughness: 0.3, metalness: 0.8 }),
+  oak: () => tag(mat('#c79a63', { roughness: 0.6 }), 'wood'), walnut: () => tag(mat('#6b4529', { roughness: 0.55 }), 'walnut'), leather: () => tag(mat('#b0622f', { roughness: 0.45 }), 'leather'),
+  fabric: () => tag(mat('#e4dccd', { roughness: 0.95 }), 'fabric'), plaster: () => tag(mat('#e9e1d4', { roughness: 0.9 }), 'plaster'), trav: () => tag(mat('#d8c4a5', { roughness: 0.75 }), 'stone'),
+  marble: () => tag(mat('#f1efea', { roughness: 0.25 }), 'marble'), black: () => tag(mat('#2b2b2b', { roughness: 0.35, metalness: 0.7 }), 'metal'), brass: () => tag(mat('#b8913f', { roughness: 0.3, metalness: 0.8 }), 'metal'),
   soil: () => mat('#4a3626', { roughness: 1 }), terra: () => mat('#b96f4a', { roughness: 0.85 }), bark: () => mat('#5d4430', { roughness: 0.95 }), rope: () => mat('#b99a6b', { roughness: 1 }),
   leaf: i => mat(['#4f7a3a', '#3f6b35', '#5d8a43', '#6b8f4e'][i % 4], { roughness: 0.85, flatShading: true }),
   glow: () => mat('#fff4dc', { emissive: '#ffe2b0', emissiveIntensity: 1.2, roughness: 0.3 }), pebble: () => mat('#cfc8bb', { roughness: 0.8, flatShading: true })
@@ -21,7 +22,7 @@ const M = {
 const box = (g, w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); g.add(o); return o; };
 const cyl = (g, r1, r2, h, x, y, z, m, seg) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, seg || 20), m); o.position.set(x, y, z); g.add(o); return o; };
 const blob = (g, r, x, y, z, m, sy) => { const o = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), m); o.position.set(x, y, z); o.scale.set(1, sy || 0.85, 1); o.rotation.set(x * 3, z * 5, 0); g.add(o); return o; };
-const prim = (c, fallback) => c ? mat(c, { roughness: 0.7 }) : fallback;
+const prim = (c, fallback) => c ? tag(mat(c, { roughness: 0.7 }), fallback.userData.look) : fallback;
 
 function chair(g, a) { // dining chair: oak frame, fabric seat
   const f = prim(a, M.oak()); [[-0.2, -0.19], [0.2, -0.19], [-0.2, 0.19], [0.2, 0.19]].forEach(([x, z]) => cyl(g, 0.018, 0.015, 0.44, x, 0.22, z, f, 8));

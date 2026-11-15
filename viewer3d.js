@@ -5,8 +5,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
-import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=49';
-import { LIB, COLORS, buildItem } from './furniture3d.js?v=49';
+import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=50';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
+import { Look, dressModel } from './look3d.js?v=50';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -212,6 +213,7 @@ export function guessPdfRoles(layers) {
   return r;
 }
 
+const tag = (m, look) => { m.userData.look = look; return m; };
 /* ---------- viewer ---------- */
 export class Viewer {
   constructor(opts) {
@@ -231,6 +233,8 @@ export class Viewer {
     const sun = this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2); sun.position.set(30, 60, 20); this.scene.add(sun);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.model = new THREE.Group(); this.scene.add(this.model);
+    // daylight sky, reflections and (on computers) soft shadows in corners and under furniture
+    this.look = new Look(this); let hq = !matchMedia('(pointer:coarse)').matches; try { const q = localStorage.getItem('v3-hq'); if (q) hq = q === '1'; } catch (e) { } this.hq = hq;
     // furniture and landscape pieces the user adds (saved with the document)
     this.items = (this.opts.items || []).filter(it => it && LIB[it.t]); this.itemGroup = new THREE.Group(); this.scene.add(this.itemGroup); this.itemMeshes = []; this.tool = null; this.toolColor = '';
     // a soft light that travels with the walker, so rooms under a roof are not left in the dark
@@ -249,14 +253,14 @@ export class Viewer {
   msg(t) { this.msgEl.hidden = !t; this.msgEl.textContent = t || ''; }
   resize() {
     const r = this.stage.getBoundingClientRect(), w = Math.max(200, r.width), h = Math.max(200, r.height);
-    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); if (this.look) this.look.resize();
   }
   dispose() {
     this.alive = false; window.removeEventListener('resize', this._onResize); document.removeEventListener('keydown', this._kd); document.removeEventListener('keyup', this._ku);
     document.removeEventListener('pointerlockchange', this._plc); document.removeEventListener('mousemove', this._mm);
     this.model.traverse(o => { if (o.geometry) { o.geometry.disposeBoundsTree && o.geometry.boundsTree && o.geometry.disposeBoundsTree(); o.geometry.dispose(); } if (o.material) [].concat(o.material).forEach(m => m.dispose()); });
     document.removeEventListener('keydown', this._ki);
-    this.renderer.dispose(); this.el.remove();
+    this.look.dispose(); this.renderer.dispose(); this.el.remove();
   }
   _bind() {
     this._onResize = () => this.resize(); window.addEventListener('resize', this._onResize);
@@ -270,6 +274,7 @@ export class Viewer {
       else if (this.sel && (e.code === 'Delete' || e.code === 'Backspace')) { e.preventDefault(); this._itemAct('del'); } };
     document.addEventListener('keydown', this._ki);
     const cv = this.renderer.domElement;
+    ['pointerdown', 'pointerup', 'wheel', 'click'].forEach(ev => this.stage.addEventListener(ev, () => { this.dirty = true; }, { passive: true }));
     this._plc = () => { this.locked = document.pointerLockElement === cv; this._hint(); };
     this._mm = e => { if (this.locked) this._look(e.movementX, e.movementY, 0.0022); };
     document.addEventListener('pointerlockchange', this._plc); document.addEventListener('mousemove', this._mm);
@@ -398,7 +403,9 @@ export class Viewer {
       if (this.map && Math.abs(p.y - 0.4 - this.map.cut) > 1.2 && performance.now() - this.map.t > 800) this._mapMake(); // another floor: redraw its plan
       this._mapDraw();
     } else this.orbit.update();
-    this.renderer.render(this.scene, this.camera);
+    // draw only when something moves (or twice a second), so the realistic mode stays light when you just look
+    const cm = this.camera.matrixWorld.elements, key = cm.join(',') + this.camera.projectionMatrix.elements[0], now = performance.now();
+    if (key !== this._lastKey || this.dirty || now - (this._lastDraw || 0) > 500) { this._lastKey = key; this.dirty = false; this._lastDraw = now; this.look.render(); }
   }
   /* ----- small map while walking: the plan seen from above, cut a little below eye level, with you on it ----- */
   _mapMake() {
@@ -409,7 +416,7 @@ export class Viewer {
     const r = this.renderer, size = r.getSize(new THREE.Vector2()), bg = this.scene.background, head = this.head.intensity, hl = this.hl, sun = this.sun.intensity, vis = [];
     const hemi = this.scene.children.find(o => o.isHemisphereLight), hemiI = hemi ? hemi.intensity : 0;
     const dark = this._mapMat || (this._mapMat = new THREE.MeshBasicMaterial({ color: '#3b3b3b', side: THREE.DoubleSide, depthTest: false }));
-    r.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), cut)]; this.scene.background = new THREE.Color('#f4f1ea'); this.head.intensity = 0; this.sun.intensity = 0; if (hemi) hemi.intensity = hemiI + sun * 0.8; if (hl) hl.visible = false;
+    r.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), cut)]; this.look.sky.visible = false; this.scene.background = new THREE.Color('#f4f1ea'); this.head.intensity = 0; this.sun.intensity = 0; if (hemi) hemi.intensity = hemiI + sun * 0.8; if (hl) hl.visible = false;
     try {
       this.scene.traverse(o => { if (o.isMesh || o.isLine || o.isLineSegments) { vis.push([o, o.visible]); if (o.userData.ground) o.visible = false; } });
       r.setSize(W, H, false); r.render(this.scene, cam);
@@ -420,7 +427,7 @@ export class Viewer {
       const base = this.mapBase || (this.mapBase = document.createElement('canvas')); base.width = W; base.height = H; base.getContext('2d').drawImage(r.domElement, 0, 0, W, H);
     } finally {
       vis.forEach(([o, v]) => { o.visible = v; }); this.scene.overrideMaterial = null; r.autoClear = true; if (hemi) hemi.intensity = hemiI;
-      r.clippingPlanes = []; this.scene.background = bg; this.head.intensity = head; this.sun.intensity = sun; if (hl) hl.visible = true; r.setSize(size.x, size.y, false);
+      r.clippingPlanes = []; this.look.sky.visible = true; this.scene.background = bg; this.head.intensity = head; this.sun.intensity = sun; if (hl) hl.visible = true; r.setSize(size.x, size.y, false);
     }
     const zoom = Math.max(hx, hz) * 2 > 40; // a big site: the map follows you, about 32 m across
     this.mapEl.width = zoom ? 480 : Math.min(W, 640); this.mapEl.height = zoom ? 360 : Math.round(this.mapEl.width * H / W);
@@ -459,11 +466,13 @@ export class Viewer {
     this.camera.near = Math.max(0.02, R / 5000); this.camera.far = R * 20; this.camera.updateProjectionMatrix();
     // ground plane
     const c = this.box.getCenter(new THREE.Vector3());
-    const gnd = new THREE.Mesh(new THREE.CircleGeometry(R * 3, 48), new THREE.MeshLambertMaterial({ color: '#cfd6cc' }));
+    const gnd = new THREE.Mesh(new THREE.CircleGeometry(R * 3, 48), tag(new THREE.MeshStandardMaterial({ color: '#cbc6ba', roughness: 0.95 }), 'paving'));
     gnd.receiveShadow = true;
     const sn = this.sun; sn.position.set(c.x + R * 0.5, c.y + R * 1.1, c.z + R * 0.35); sn.target.position.copy(c); this.scene.add(sn.target);
+    this.look.placeSun(sn.position.clone().sub(c));
     sn.castShadow = true; sn.shadow.mapSize.set(4096, 4096); const sc = sn.shadow.camera, e = R * 0.8; sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 0.5; sc.far = R * 4; sc.updateProjectionMatrix(); sn.shadow.bias = -0.0004; sn.shadow.normalBias = 0.02;
     gnd.rotation.x = -Math.PI / 2; gnd.position.set(c.x, this.box.min.y - 0.01, c.z); gnd.userData.ground = true; this.scene.add(gnd); this.meshes.push(gnd); gnd.geometry.computeBoundsTree();
+    if (!this.look.ready) { this.look.ready = true; this.look.setQuality(this.hq); } else dressModel(this.scene, this.hq);
     this.msg(''); this._renderItems(); this.setMode('orbit'); this._side();
   }
   async _loadGltf(buf) {
@@ -656,12 +665,12 @@ export class Viewer {
       const c = W([(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]), key = Math.round(c[0] / 0.8) + ',' + Math.round(c[1] / 0.8); if (cell[key]) { cell[key].r = Math.max(cell[key].r, sz / 2); return; }
       const t = { x: c[0], z: c[1], r: sz / 2 }; cell[key] = t; trees.push(t); });
     const MAT = {
-      wall: new THREE.MeshStandardMaterial({ color: '#f3efe7', roughness: 0.92 }),
-      glass: new THREE.MeshPhysicalMaterial({ color: '#bfe0ef', transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0, depthWrite: false }),
-      frame: new THREE.MeshStandardMaterial({ color: '#3a3a3a', roughness: 0.5, metalness: 0.4 }),
-      door: new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.65 }),
-      wood: new THREE.MeshStandardMaterial({ color: '#a8743f', roughness: 0.7 }),
-      stone: new THREE.MeshStandardMaterial({ color: '#cdb594', roughness: 0.85 })
+      wall: tag(new THREE.MeshStandardMaterial({ color: '#f3efe7', roughness: 0.92 }), 'plaster'),
+      glass: tag(new THREE.MeshPhysicalMaterial({ color: '#bfe0ef', transparent: true, opacity: 0.16, roughness: 0.03, metalness: 0, depthWrite: false }), 'glass'),
+      frame: tag(new THREE.MeshStandardMaterial({ color: '#3a3a3a', roughness: 0.35, metalness: 0.7 }), 'metal'),
+      door: tag(new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.65 }), 'wood'),
+      wood: tag(new THREE.MeshStandardMaterial({ color: '#a8743f', roughness: 0.7 }), 'wood'),
+      stone: tag(new THREE.MeshStandardMaterial({ color: '#cdb594', roughness: 0.85 }), 'stone')
     };
     if (solids.length) for (let s = 0; s < solids.length; s += 2000) { const m = new THREE.Mesh(mergeGeometries(solids.slice(s, s + 2000), false), MAT.wall); m.userData = { cat: 'walls' }; this.model.add(m); }
     solids.forEach(g => g.dispose());
@@ -736,13 +745,13 @@ export class Viewer {
     this.model.clear(); this.meshes = [];
     const S = this.set, n = S.storeys.length, k = S.k, rg = S.region, [pcx, pcy] = S.center;
     const MAT = {
-      wall: new THREE.MeshStandardMaterial({ color: '#efe8dc', roughness: 0.92 }),
-      slab: new THREE.MeshStandardMaterial({ color: '#f4f2ee', roughness: 0.95 }),
-      roof: new THREE.MeshStandardMaterial({ color: '#d6d0c6', roughness: 0.95 }),
-      glass: new THREE.MeshPhysicalMaterial({ color: '#9ec6da', transparent: true, opacity: 0.32, roughness: 0.05, metalness: 0.1, depthWrite: false }),
-      frame: new THREE.MeshStandardMaterial({ color: '#4b4f54', roughness: 0.45, metalness: 0.5 }),
-      door: new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.6 }),
-      stair: new THREE.MeshStandardMaterial({ color: '#e6dfd2', roughness: 0.5 })
+      wall: tag(new THREE.MeshStandardMaterial({ color: '#efe8dc', roughness: 0.92 }), 'plaster'),
+      slab: tag(new THREE.MeshStandardMaterial({ color: '#f4f2ee', roughness: 0.95 }), 'plaster'),
+      roof: tag(new THREE.MeshStandardMaterial({ color: '#d6d0c6', roughness: 0.95 }), 'plaster'),
+      glass: tag(new THREE.MeshPhysicalMaterial({ color: '#9ec6da', transparent: true, opacity: 0.26, roughness: 0.03, metalness: 0.1, depthWrite: false }), 'glass'),
+      frame: tag(new THREE.MeshStandardMaterial({ color: '#4b4f54', roughness: 0.35, metalness: 0.7 }), 'metal'),
+      door: tag(new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.6 }), 'wood'),
+      stair: tag(new THREE.MeshStandardMaterial({ color: '#e6dfd2', roughness: 0.5 }), 'stone')
     };
     const hemi = this.scene.children.find(o => o.isHemisphereLight); if (hemi) hemi.groundColor.set('#d9d2c6'); // light ceilings indoors
     const box = (list, x0, x1, y0, y1, z0, z1) => { if (x1 - x0 < 0.004 || y1 - y0 < 0.004 || z1 - z0 < 0.004) return; const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0); g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); list.push(g); };
@@ -829,6 +838,7 @@ export class Viewer {
   }
   /* ----- filters ----- */
   applyVis() {
+    this.dirty = true;
     const sel = this.mode === 'walk' ? 'all' : this.storeySel, selE = sel === 'all' ? null : (this.storeys.find(s => String(s.id) === String(sel)) || {}).elev;
     this.model.traverse(o => {
       if (!o.isMesh) return; const u = o.userData;
@@ -964,6 +974,7 @@ export class Viewer {
         '<b style="margin-top:6px">الطبقات (Layers)</b><span class="v3-note">' + (pdf ? 'حدد وش تمثل كل طبقة: الجدران والأعمدة ترتفع، والزجاج يصير واجهات، والأشجار تطلع مجسمة، و"رسم على الأرضية" يطبع الأثاث والممرات والمياه على الأرض.' : 'حدد وش تمثل كل طبقة. الجدران ترتفع للسقف، والشبابيك يصير لها جلسة وزجاج، والأبواب تطلع درفة مفتوحة.') + '</span>' +
         Object.keys(this.dxfCount).sort((a, b) => this.dxfCount[b].n - this.dxfCount[a].n).map(l => '<label class="v3-l"><span title="' + esc(l) + '">' + esc(l) + ' <small>' + this.dxfCount[l].n + '</small></span><select data-layer="' + esc(l) + '">' + Object.entries(RL).map(([k, t]) => '<option value="' + k + '"' + (rolesNow[l] === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>').join('') + '</div>';
     }
+    h += '<label class="v3-hq"><input type="checkbox" data-hq="1"' + (this.hq ? ' checked' : '') + '> ✨ جودة عالية (إضاءة وظلال وخامات واقعية، أبطأ على الأجهزة الضعيفة)</label>';
     h += '<div class="v3-help"><b>طريقة الاستخدام</b><span>لفّ: اسحب بالماوس أو بإصبع، وكبّر بالعجلة أو بإصبعين (التكبير يروح للمكان اللي عليه الماوس). دبل كلك على أي غرفة يقرّب لها، والزر اليمين أو Shift مع السحب يحرّك الصورة.</span><span>مشي: على الكمبيوتر W A S D أو الأسهم، والماوس للالتفات، وQ / E للنزول والطلوع بين الطوابق. على الجوال حرّك الدائرة واسحب للالتفات.</span><span>وقت المشي تطلع خريطة صغيرة في الزاوية تبين مكانك بالضبط والسهم اتجاه نظرك، واضغط على أي مكان فيها عشان تنتقل له.</span><span>اضغط على أي عنصر عشان تشوف بياناته.</span></div>';
     this.side.innerHTML = h; this._sideMode();
     this.side.onclick = e => {
@@ -980,7 +991,8 @@ export class Viewer {
     };
     this.side.onchange = e => {
       const t = e.target;
-      if (t.dataset.cat) { this.catOn[t.dataset.cat] = t.checked; this.applyVis(); }
+      if (t.dataset.hq) { this.hq = t.checked; try { localStorage.setItem('v3-hq', this.hq ? '1' : '0'); } catch (e) { } this.look.setQuality(this.hq); }
+      else if (t.dataset.cat) { this.catOn[t.dataset.cat] = t.checked; this.applyVis(); }
       else if (t.dataset.tc != null) { this.toolColor = t.value; }
       else if (t.dataset.st) { this.storeySel = t.value; if (this.mode === 'walk') this.setMode('walk'); else this.applyVis(); }
       else if (t.dataset.layer != null) { if (this.ext === 'pdf') { this.pdfRoles[t.dataset.layer] = t.value; this.rebuildPdf(); } else { this.dxfRoles[t.dataset.layer] = t.value; this.rebuildDxf(); } }
