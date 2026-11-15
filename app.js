@@ -904,7 +904,7 @@ function itemState(b) {
 }
 const planPct = b => !b.ps || !b.pe ? 0 : D(b.ps) > today ? 0 : D(b.pe) <= today ? 100 : Math.min(100, (daysBetween(D(b.ps), today) + 1) / durOf(b.ps, b.pe) * 100);
 const deptHeads = d => S.profiles.filter(u => u.role === 'head' && (!myDepts(u).length || myDepts(u).includes(d))).map(u => u.full_name).join('، ');
-const pbar = (plan, act) => '<div class="pp" title="المخطط ' + Math.round(plan) + '% · الفعلي ' + Math.round(act) + '%"><i class="pl" style="width:' + Math.min(100, plan) + '%"></i><i class="ac' + (act + 10 < plan ? ' bad' : '') + '" style="width:' + Math.min(100, act) + '%"></i></div>';
+const pbar = (plan, act) => '<div class="pp" title="المخطط ' + Math.round(plan) + '% · الفعلي ' + Math.round(act) + '%"><i class="pp-pl" style="width:' + Math.min(100, plan) + '%"></i><i class="pp-ac' + (act + 10 < plan ? ' bad' : '') + '" style="width:' + Math.min(100, act) + '%"></i></div>';
 function vSchedReport(pid) {
   const p = P(pid); if (!p) return '<div class="empty">المشروع غير موجود.</div>';
   const items = p.boq.filter(b => b.ps && b.pe), st = items.map(b => [b, itemState(b)]), cnt = k => st.filter(x => x[1].k === k).length;
@@ -932,18 +932,19 @@ function vSchedReport(pid) {
     const list = byD[d].sort((a, b) => (planPct(b) - b.p) - (planPct(a) - a.p)), hd = d ? deptHeads(d) : '';
     h += '<div class="rep-d"><div class="rep-dh"><span><span class="dot" style="background:' + (DCOL[d] || '#999') + '"></span> <b>' + (d ? DEPTS[d] : 'بدون قسم') + '</b>' + (hd ? ' · المسؤول: ' + esc(hd) : '') + '</span><span class="small">' + list.length + ' بند · متأخر ' + list.filter(b => itemState(b).k === 'late').length + '</span></div>' +
       '<table><thead><tr><th>البند</th><th>العمل</th><th>لازم يخلص</th><th style="width:150px">المخطط / المنجز</th><th>الحالة</th></tr></thead><tbody>' +
-      list.map(b => { const s2 = itemState(b); return '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '<div class="muted">' + esc(secName(b.s)) + '</div></td><td class="small">' + fd(b.pe) + '</td><td>' + pbar(planPct(b), b.p) + '<div class="small muted">' + Math.round(planPct(b)) + '% / ' + b.p + '%</div></td><td><span class="pill ' + s2.c + '">' + s2.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
+      list.map(b => { const s2 = itemState(b); return '<tr><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '<div class="muted">' + esc(secName(b.s)) + '</div></td><td class="small">' + fd(b.pe) + '</td><td>' + pbar(planPct(b), b.p) + '<div class="small muted">المخطط ' + Math.round(planPct(b)) + '% · المنجز ' + b.p + '%</div></td><td><span class="pill ' + s2.c + '">' + s2.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
   });
   // 3. Next two weeks
   const lim = iso(new Date(today.getTime() + 14 * 864e5)), t0 = iso(today);
   const soon = items.filter(b => b.ps > t0 && b.ps <= lim).sort((a, b) => a.ps.localeCompare(b.ps));
   h += '<h2>٢. يبدأ خلال الأسبوعين القادمين (جهّزوا له)</h2>' + (soon.length ? '<div class="tbl"><table><thead><tr><th>يبدأ</th><th>البند</th><th>العمل</th><th>القسم</th><th class="n">المدة</th></tr></thead><tbody>' + soon.map(b => '<tr><td class="small"><b>' + fd(b.ps) + '</b></td><td class="num small">' + esc(b.c) + '</td><td class="small">' + esc(short(b.d)) + '</td><td class="small">' + (b.dept ? DEPTS[b.dept] : '—') + '</td><td class="n small">' + durOf(b.ps, b.pe) + ' يوم</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted small">ما في بنود تبدأ خلال الأسبوعين القادمين.</p>');
   // 4. Sections
-  h += '<h2>٣. وضع كل قسم من أقسام الـ BOQ</h2><div class="tbl"><table><thead><tr><th>القسم</th><th class="n">البنود</th><th>الفترة</th><th style="width:170px">المخطط / المنجز</th><th>الحالة</th></tr></thead><tbody>';
-  secs.forEach(([sc]) => { const it = items.filter(b => b.s === sc); if (!it.length) return;
+  h += '<h2>٣. وضع كل قسم من أقسام الشركة في المشروع</h2><div class="tbl"><table><thead><tr><th>القسم</th><th>المسؤول</th><th class="n">البنود</th><th>الفترة</th><th style="width:190px">المخطط / المنجز</th><th>الحالة</th></tr></thead><tbody>';
+  const dAll = {}; items.forEach(b => { (dAll[b.dept || ''] = dAll[b.dept || ''] || []).push(b); });
+  Object.keys(DEPTS).concat(['']).filter(d => dAll[d]).forEach(d => { const it = dAll[d];
     const s0 = it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e0 = it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe), v = it.reduce((a, b) => a + b.t, 0) || 1, pr = it.reduce((a, b) => a + b.t * b.p, 0) / v, pl = it.reduce((a, b) => a + b.t * planPct(b), 0) / v;
     const late = it.filter(b => itemState(b).k === 'late').length, ss = pr >= 100 ? ['منجز', 'p-ok'] : pl === 0 ? ['لم يبدأ', 'p-idle'] : late ? [late + ' بند متأخر', 'p-bad'] : pr + 10 < pl ? ['متأخر عن الخطة', 'p-warn'] : ['حسب الخطة', 'p-ok'];
-    h += '<tr><td><b>' + esc(sc) + '</b> ' + esc(secName(sc)) + '</td><td class="n">' + it.length + '</td><td class="small">' + fd(s0) + ' ← ' + fd(e0) + '</td><td>' + pbar(pl, pr) + '<div class="small muted">' + Math.round(pl) + '% / ' + Math.round(pr) + '%</div></td><td><span class="pill ' + ss[1] + '">' + ss[0] + '</span></td></tr>'; });
+    h += '<tr><td><span class="dot" style="background:' + (DCOL[d] || '#999') + '"></span> <b>' + (d ? DEPTS[d] : 'بدون قسم') + '</b></td><td class="small">' + (d ? esc(deptHeads(d)) || '—' : '—') + '</td><td class="n">' + it.length + '</td><td class="small">' + fd(s0) + ' ← ' + fd(e0) + '</td><td>' + pbar(pl, pr) + '<div class="small muted">المخطط ' + Math.round(pl) + '% · المنجز ' + Math.round(pr) + '%</div></td><td><span class="pill ' + ss[1] + '">' + ss[0] + '</span></td></tr>'; });
   h += '</tbody></table></div>';
   // 5. Timeline
   const rows = []; secs.forEach(([sc]) => { const it = items.filter(b => b.s === sc); if (!it.length) return; rows.push({ c: sc, n: secName(sc), sc, ph: true, s: it.reduce((a, b) => b.ps < a ? b.ps : a, it[0].ps), e: it.reduce((a, b) => b.pe > a ? b.pe : a, it[0].pe) }); it.forEach(b => rows.push({ c: b.c, n: short(b.d), t: b.d, s: b.ps, e: b.pe, dept: b.dept, p: b.p })); });
