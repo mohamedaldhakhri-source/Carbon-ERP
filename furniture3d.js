@@ -2,6 +2,7 @@
    in the materials of the restaurant concept: light oak, walnut, tan leather, beige fabric, plaster, travertine, brass, greenery.
    Each piece is built at the origin, facing +z, sitting on y = 0, sizes in metres. */
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 export const COLORS = [
   ['#c79a63', 'خشب فاتح (بلوط)'], ['#6b4529', 'خشب جوز'], ['#b0622f', 'جلد عسلي'], ['#e4dccd', 'قماش بيج'], ['#8fa889', 'أخضر زيتي'],
@@ -24,6 +25,45 @@ const cyl = (g, r1, r2, h, x, y, z, m, seg) => { const o = new THREE.Mesh(new TH
 const blob = (g, r, x, y, z, m, sy) => { const o = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), m); o.position.set(x, y, z); o.scale.set(1, sy || 0.85, 1); o.rotation.set(x * 3, z * 5, 0); g.add(o); return o; };
 const prim = (c, fallback) => c ? tag(mat(c, { roughness: 0.7 }), fallback.userData.look) : fallback;
 
+
+// softer, more real shapes: rounded boxes, bent tubes, curved shells
+const rbox = (g, w, h, d, x, y, z, m, r) => { const o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.min(r || 0.02, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)), m); o.position.set(x, y, z); g.add(o); return o; };
+const tube = (g, pts, r, m, closed) => { const c = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p)), !!closed, 'catmullrom', 0.1); const o = new THREE.Mesh(new THREE.TubeGeometry(c, Math.max(8, pts.length * 6), r, 8, !!closed), m); g.add(o); return o; };
+// a curved panel (part of a cylinder wall) centred on x = 0, bending around a point in front of it
+const shell = (g, w, h, R, t, x, y, z, m, tilt) => { const a = w / R, sh = new THREE.Shape(); const n = 16;
+  for (let i = 0; i <= n; i++) { const q = -a / 2 + a * i / n; sh[i ? 'lineTo' : 'moveTo'](Math.sin(q) * R, Math.cos(q) * R); }
+  for (let i = n; i >= 0; i--) { const q = -a / 2 + a * i / n; sh.lineTo(Math.sin(q) * (R + t), Math.cos(q) * (R + t)); }
+  const geo = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: true, bevelThickness: Math.min(0.012, t / 2), bevelSize: Math.min(0.012, t / 2), bevelSegments: 2, curveSegments: 4 });
+  geo.rotateX(-Math.PI / 2); geo.translate(0, 0, R); const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); if (tilt) o.rotation.x = -tilt; g.add(o); return o; }; // a positive tilt leans it back
+const light = c => { const k = new THREE.Color(c || '#888'); return 0.299 * k.r + 0.587 * k.g + 0.114 * k.b > 0.6; };
+const P = { // the office materials seen in design renders
+  white: () => tag(mat('#f2f2f0', { roughness: 0.35 }), 'plastic'), chrome: () => tag(mat('#d8dadc', { roughness: 0.18, metalness: 1 }), 'metal'), dark: () => tag(mat('#2a2b2d', { roughness: 0.5, metalness: 0.4 }), 'metal'),
+  mesh: c => tag(mat(c || '#d9d8d4', { roughness: 0.9, side: THREE.DoubleSide }), 'mesh'), fab: c => tag(mat(c || '#cfcac2', { roughness: 0.95 }), 'fabric'), screen: () => mat('#16181b', { roughness: 0.25, metalness: 0.3 }), caster: () => mat('#1d1d1d', { roughness: 0.6 })
+};
+function base5(g, frame, y) { // five-star base on casters
+  for (let i = 0; i < 5; i++) { const t = i * Math.PI * 2 / 5, ex = Math.sin(t) * 0.31, ez = Math.cos(t) * 0.31;
+    tube(g, [[0, y, 0], [ex * 0.55, y - 0.015, ez * 0.55], [ex, y - 0.035, ez]], 0.016, frame);
+    const c = cyl(g, 0.026, 0.026, 0.035, ex, 0.026, ez, P.caster(), 12); c.rotation.z = Math.PI / 2; c.rotation.y = t; cyl(g, 0.008, 0.008, 0.04, ex, 0.06, ez, frame, 6); }
+  cyl(g, 0.045, 0.05, 0.05, 0, y, 0, frame, 16);
+}
+function taskChair(g, a) { // ergonomic office chair: mesh back with headrest, padded seat, arms, five-star base
+  const c = a || '#d9d8d4', frame = light(c) ? P.white() : P.dark();
+  base5(g, frame, 0.085); cyl(g, 0.022, 0.022, 0.32, 0, 0.26, 0, P.chrome(), 12); rbox(g, 0.3, 0.05, 0.3, 0, 0.43, 0.01, frame, 0.015);
+  rbox(g, 0.5, 0.075, 0.48, 0, 0.485, 0.03, P.fab(c), 0.035);
+  tube(g, [[0, 0.45, -0.12], [0, 0.48, -0.25], [0, 0.6, -0.29]], 0.02, frame); // spine
+  shell(g, 0.48, 0.5, 0.6, 0.012, 0, 0.58, -0.28, P.mesh(c), 0.12); // mesh back
+  const top = 1.08, bot = 0.58;
+  [-1, 1].forEach(sd => tube(g, [[sd * 0.245, bot, -0.27], [sd * 0.25, (bot + top) / 2, -0.31], [sd * 0.235, top, -0.36]], 0.014, frame));
+  shell(g, 0.3, 0.13, 0.5, 0.03, 0, 1.13, -0.38, P.fab(c), 0.18); // headrest
+  tube(g, [[0, top - 0.02, -0.355], [0, 1.12, -0.38]], 0.012, frame);
+  [-1, 1].forEach(sd => { tube(g, [[sd * 0.2, 0.47, -0.05], [sd * 0.25, 0.56, -0.04], [sd * 0.26, 0.66, 0]], 0.016, frame); rbox(g, 0.07, 0.03, 0.26, sd * 0.26, 0.675, 0.02, P.fab('#3a3b3d'), 0.012); });
+}
+function meetChair(g, a, casters) { // shell chair: moulded seat and back, slim legs (or casters for training rooms)
+  const c = a || '#f2f2f0', sh = tag(mat(c, { roughness: 0.4 }), light(c) ? 'plastic' : 'fabric'), leg = light(c) ? P.chrome() : P.dark();
+  rbox(g, 0.47, 0.045, 0.45, 0, 0.455, 0.02, sh, 0.02); shell(g, 0.46, 0.36, 0.42, 0.018, 0, 0.5, -0.19, sh, 0.16);
+  if (casters) { [[-0.21, -0.19], [0.21, -0.19], [-0.21, 0.21], [0.21, 0.21]].forEach(([x, z]) => { tube(g, [[x * 0.7, 0.44, z * 0.7], [x, 0.22, z], [x * 1.05, 0.04, z * 1.05]], 0.011, leg); const k = cyl(g, 0.022, 0.022, 0.03, x * 1.05, 0.024, z * 1.05, P.caster(), 10); k.rotation.z = Math.PI / 2; }); }
+  else [[-0.2, -0.18], [0.2, -0.18], [-0.2, 0.21], [0.2, 0.21]].forEach(([x, z]) => tube(g, [[x * 0.8, 0.44, z * 0.8], [x, 0.22, z], [x * 1.08, 0.0, z * 1.08]], 0.01, leg));
+}
 function chair(g, a) { // dining chair: oak frame, fabric seat
   const f = prim(a, M.oak()); [[-0.2, -0.19], [0.2, -0.19], [-0.2, 0.19], [0.2, 0.19]].forEach(([x, z]) => cyl(g, 0.018, 0.015, 0.44, x, 0.22, z, f, 8));
   box(g, 0.46, 0.06, 0.45, 0, 0.47, 0, M.fabric()); box(g, 0.44, 0.04, 0.04, 0, 0.62, -0.21, f); box(g, 0.44, 0.22, 0.04, 0, 0.78, -0.22, f);
@@ -50,8 +90,17 @@ export const LIB = {
   table120: { l: 'طاولة دائرية Ø120', i: '⭕', build: (g, a) => table(g, a, 0.6, 0.75) },
   tablesq: { l: 'طاولة مربعة 80', i: '⬜', build: (g, a) => { box(g, 0.8, 0.04, 0.8, 0, 0.73, 0, prim(a, M.oak())); [[-0.35, -0.35], [0.35, -0.35], [-0.35, 0.35], [0.35, 0.35]].forEach(([x, z]) => box(g, 0.05, 0.71, 0.05, x, 0.355, z, M.walnut())); } },
   booth: { l: 'جلسة دائرية (بود)', i: '🛋', build: (g, a) => { arcSeat(g, a, 1.05, Math.PI * 1.25, 1.05); table(g, null, 0.5, 0.75); leafy(g, 2.4, 0.5, 1.05, 9, 0.1); g.children.slice(-9).forEach(o => { o.position.z = o.position.z * 0.3 - 1.42; }); } },
-  armchair: { l: 'كرسي لاونج', i: '💺', build: (g, a) => { const w = M.walnut(); box(g, 0.82, 0.12, 0.8, 0, 0.18, 0, w); box(g, 0.66, 0.16, 0.66, 0, 0.32, 0.04, prim(a, M.fabric())); box(g, 0.66, 0.42, 0.16, 0, 0.5, -0.3, prim(a, M.fabric())); box(g, 0.08, 0.36, 0.8, -0.37, 0.42, 0, w); box(g, 0.08, 0.36, 0.8, 0.37, 0.42, 0, w); } },
-  sofa: { l: 'كنبة 3 مقاعد', i: '🛋', build: (g, a) => { const w = M.walnut(), f = prim(a, M.fabric()); box(g, 2.2, 0.12, 0.9, 0, 0.16, 0, w); [-0.7, 0, 0.7].forEach(x => box(g, 0.68, 0.16, 0.7, x, 0.3, 0.06, f)); box(g, 2.0, 0.42, 0.18, 0, 0.5, -0.34, f); box(g, 0.1, 0.34, 0.9, -1.05, 0.4, 0, w); box(g, 0.1, 0.34, 0.9, 1.05, 0.4, 0, w); } },
+  armchair: { l: 'كرسي لاونج', i: '💺', build: (g, a) => { // tub lounge chair: curved shell, deep cushion, slim legs, a pillow
+    const f = prim(a, tag(mat('#e8e2d6', { roughness: 0.98 }), 'fabric'));
+    shell(g, 1.6, 0.42, 0.3, 0.1, 0, 0.24, -0.27, f); // the tub wraps round a seat centred near z = 0
+    const cu = cyl(g, 0.31, 0.31, 0.14, 0, 0.33, 0.04, f, 32); cu.scale.z = 1.05; cyl(g, 0.4, 0.4, 0.1, 0, 0.21, 0.03, f, 32);
+    [[-0.26, -0.22], [0.26, -0.22], [-0.26, 0.28], [0.26, 0.28]].forEach(([x, z]) => cyl(g, 0.014, 0.01, 0.2, x, 0.1, z, P.dark(), 8));
+    const pl = rbox(g, 0.36, 0.26, 0.11, 0, 0.5, -0.12, tag(mat('#b8643a', { roughness: 0.95 }), 'fabric'), 0.05); pl.rotation.x = -0.25; } },
+  sofa: { l: 'كنبة 3 مقاعد', i: '🛋', build: (g, a) => { // modern sofa: plinth, soft seat and back cushions, arms, slim legs
+    const f = prim(a, M.fabric());
+    rbox(g, 2.2, 0.16, 0.9, 0, 0.2, 0, f, 0.04); [-0.7, 0, 0.7].forEach(x => { rbox(g, 0.69, 0.14, 0.66, x, 0.34, 0.08, f, 0.05); rbox(g, 0.69, 0.4, 0.2, x, 0.56, -0.3, f, 0.07); });
+    rbox(g, 2.2, 0.36, 0.14, 0, 0.42, -0.39, f, 0.04); [-1, 1].forEach(s => rbox(g, 0.14, 0.42, 0.9, s * 1.08, 0.38, 0, f, 0.05));
+    [[-1.0, -0.38], [1.0, -0.38], [-1.0, 0.38], [1.0, 0.38]].forEach(([x, z]) => cyl(g, 0.018, 0.014, 0.12, x, 0.06, z, P.dark(), 8)); } },
   coffee: { l: 'طاولة قهوة ترافرتين', i: '▭', build: (g, a) => { const t = prim(a, M.trav()); const top = cyl(g, 0.6, 0.6, 0.06, 0, 0.35, 0, t, 40); top.scale.z = 0.5; [[-0.38, 0], [0, 0], [0.38, 0]].forEach(([x, z]) => cyl(g, 0.1, 0.1, 0.32, x, 0.16, z, t, 20)); } },
   stool: { l: 'كرسي بار خشب', i: '🪵', build: (g, a) => { const f = prim(a, M.oak()); cyl(g, 0.2, 0.2, 0.05, 0, 0.75, 0, f, 24); [[-0.14, -0.14], [0.14, -0.14], [-0.14, 0.14], [0.14, 0.14]].forEach(([x, z]) => { const l = cyl(g, 0.016, 0.02, 0.74, x * 1.15, 0.37, z * 1.15, f, 8); l.rotation.set(z * 0.35, 0, -x * 0.35); }); box(g, 0.32, 0.02, 0.02, 0, 0.3, 0.16, f); } },
   counter: { l: 'كاونتر بار (جبس)', i: '🍸', build: (g, a) => { const p = prim(a, M.plaster()); box(g, 3.0, 1.05, 0.6, 0, 0.525, 0, p); cyl(g, 0.3, 0.3, 1.05, -1.5, 0.525, 0, p, 24); cyl(g, 0.3, 0.3, 1.05, 1.5, 0.525, 0, p, 24); box(g, 3.1, 0.05, 0.7, 0, 1.08, 0.04, M.marble()); cyl(g, 0.02, 0.02, 3.0, 0, 0.2, 0.38, M.brass(), 8).rotation.z = Math.PI / 2; } },
@@ -68,17 +117,29 @@ export const LIB = {
   pebbles: { l: 'ممر حصى', i: '🪨', build: (g) => { box(g, 2.0, 0.03, 0.8, 0, 0.015, 0, mat('#e8e1d3', { roughness: 1 })); for (let i = 0; i < 40; i++) { const p = new THREE.Mesh(new THREE.IcosahedronGeometry(0.05 + (i % 4) * 0.015, 0), M.pebble()); p.position.set(((i * 0.618) % 1 - 0.5) * 1.9, 0.04, ((i * 0.382) % 1 - 0.5) * 0.7); p.scale.y = 0.5; g.add(p); } } },
   // pieces read from a drawing, built to the size drawn (kept out of the library list)
   rtable: { hide: true, build: (g, a, it) => { const d = Math.max(0.4, Math.min(2.2, it.d || 0.9)); table(g, a, d / 2, d < 0.62 ? 0.5 : 0.75); } },
-  otable: { hide: true, build: (g, a, it) => { const L = Math.max(0.8, it.sx || 1.6), W = Math.max(0.5, it.sz || 0.8), top = prim(a, M.oak());
-    if (it.oval) { const t = cyl(g, 0.5, 0.5, 0.04, 0, 0.73, 0, top, 48); t.scale.set(L, 1, W); } else box(g, L, 0.04, W, 0, 0.73, 0, top);
-    [-1, 1].forEach(s => { cyl(g, 0.05, 0.06, 0.69, s * L * 0.3, 0.355, 0, M.black(), 12); box(g, 0.08, 0.03, W * 0.6, s * L * 0.3, 0.015, 0, M.black()); }); } },
+  otable: { hide: true, build: (g, a, it) => { // meeting table (wood) or training table (white, T legs on casters)
+    const L = Math.max(0.8, it.sx || 1.6), W = Math.max(0.5, it.sz || 0.8), top = prim(a, M.oak()), white = light(a || '#c79a63');
+    if (it.oval) { const t = cyl(g, 0.5, 0.5, 0.04, 0, 0.73, 0, top, 48); t.scale.set(L, 1, W); } else rbox(g, L, 0.035, W, 0, 0.732, 0, top, 0.012);
+    if (white && L < 2.2) { [-1, 1].forEach(s => { const x = s * (L / 2 - 0.1); rbox(g, 0.05, 0.68, 0.05, x, 0.375, 0, P.white(), 0.01); rbox(g, 0.05, 0.035, W * 0.85, x, 0.055, 0, P.white(), 0.012); rbox(g, 0.05, 0.035, W * 0.7, x, 0.7, 0, P.white(), 0.012);
+      [-1, 1].forEach(z => { const k = cyl(g, 0.025, 0.025, 0.03, x, 0.025, z * W * 0.4, P.caster(), 10); k.rotation.z = Math.PI / 2; }); }); }
+    else [-1, 1].forEach(s => { const x = s * L * 0.32; rbox(g, 0.06, 0.7, Math.min(0.7, W * 0.6), x, 0.36, 0, P.dark(), 0.01); rbox(g, 0.08, 0.025, W * 0.7, x, 0.0125, 0, P.dark(), 0.01); });
+  } },
   // office pieces read from plan pictures (sizes come from the drawing)
-  ochair: { hide: true, build: (g, a) => { const k = prim(a, mat('#3a3d42', { roughness: 0.8 })), m = M.black();
-    for (let i = 0; i < 5; i++) { const t = i * Math.PI * 2 / 5, l = box(g, 0.3, 0.025, 0.04, Math.sin(t) * 0.14, 0.05, Math.cos(t) * 0.14, m); l.rotation.y = t + Math.PI / 2; }
-    cyl(g, 0.025, 0.025, 0.36, 0, 0.24, 0, m, 10); box(g, 0.48, 0.07, 0.46, 0, 0.46, 0.02, k); box(g, 0.44, 0.5, 0.06, 0, 0.78, -0.21, k);
-    [-1, 1].forEach(s2 => box(g, 0.04, 0.03, 0.26, s2 * 0.24, 0.64, 0.02, m)); } },
-  desk: { hide: true, build: (g, a, it) => { const L = Math.max(0.6, it.sx || 1.4), W = Math.max(0.5, it.sz || 0.7), top = prim(a, mat('#f3f1ec', { roughness: 0.4 })), m = M.black();
-    box(g, L, 0.03, W, 0, 0.735, 0, top); [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([x, z]) => box(g, 0.04, 0.72, 0.04, x * (L / 2 - 0.05), 0.36, z * (W / 2 - 0.05), m));
-    if (W > 1.1) box(g, L - 0.04, 0.38, 0.025, 0, 0.94, 0, tag(mat('#6d8796', { roughness: 0.9 }), 'fabric')); } },
+  ochair: { hide: true, build: (g, a) => taskChair(g, a) },
+  mchair: { hide: true, build: (g, a, it) => meetChair(g, a, it && it.casters) },
+  desk: { hide: true, build: (g, a, it) => { // workstation: thin white top, loop legs, a fabric divider on a double desk, a screen per seat
+    const L = Math.max(0.6, it.sx || 1.4), W = Math.max(0.5, it.sz || 0.7), top = prim(a, tag(mat('#f3f2ef', { roughness: 0.35 }), 'plastic')), leg = light(a || '#f3f2ef') ? P.white() : P.dark(), dbl = W > 1.1;
+    rbox(g, L, 0.025, W, 0, 0.737, 0, top, 0.008);
+    [-1, 1].forEach(sx => { const x = sx * (L / 2 - 0.06); rbox(g, 0.05, 0.7, 0.05, x, 0.37, -(W / 2 - 0.08), leg, 0.01); rbox(g, 0.05, 0.7, 0.05, x, 0.37, W / 2 - 0.08, leg, 0.01); rbox(g, 0.05, 0.04, W - 0.12, x, 0.02, 0, leg, 0.01); rbox(g, 0.04, 0.04, W - 0.16, x, 0.7, 0, leg, 0.01); });
+    rbox(g, L - 0.2, 0.08, 0.03, 0, 0.66, 0, leg, 0.01); // cable tray
+    const seats = Math.max(1, Math.round(L / 1.4)), sideOf = dbl ? [-1, 1] : [1];
+    if (dbl) rbox(g, L - 0.06, 0.4, 0.03, 0, 0.95, 0, P.fab(it.screen || '#cfd3d4'), 0.012);
+    sideOf.forEach(sd => { for (let k = 0; k < seats; k++) { const x = -L / 2 + L * (k + 0.5) / seats;
+      const zz = dbl ? sd * 0.2 : -(W / 2 - 0.2), face = dbl ? sd : 1;
+      rbox(g, 0.6, 0.36, 0.02, x, 1.0, zz, P.screen(), 0.01); rbox(g, 0.56, 0.32, 0.005, x, 1.0, zz + face * 0.011, mat('#2e3440', { roughness: 0.15, emissive: '#1b2330', emissiveIntensity: 0.6 }), 0.004);
+      cyl(g, 0.015, 0.015, 0.16, x, 0.83, zz - face * 0.03, P.chrome(), 8); rbox(g, 0.2, 0.01, 0.15, x, 0.755, zz - face * 0.03, P.chrome(), 0.004);
+      rbox(g, 0.42, 0.012, 0.13, x, 0.756, zz + face * 0.28, mat('#e9e9e7', { roughness: 0.5 }), 0.004); } });
+  } },
   cabinet: { hide: true, build: (g, a, it) => { const L = Math.max(0.3, it.sx || 1), W = Math.max(0.3, it.sz || 0.6); box(g, L, 0.86, W, 0, 0.45, 0, prim(a, M.oak())); box(g, L + 0.02, 0.03, W + 0.02, 0, 0.895, 0, M.marble()); } },
   ltable: { hide: true, build: (g, a, it) => { const L = Math.max(0.4, it.sx || 1), W = Math.max(0.4, it.sz || 0.6); box(g, L, 0.05, W, 0, 0.42, 0, prim(a, M.walnut())); box(g, L * 0.8, 0.4, W * 0.7, 0, 0.2, 0, M.walnut()); } },
   // home pieces for plans read or designed by Claude (sizes from the plan: sx across the front, sz front to back)

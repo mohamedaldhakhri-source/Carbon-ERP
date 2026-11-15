@@ -46,7 +46,7 @@ const LOOK = {
   wood: { t: 'wood', s: 0.9, rough: 0.55, env: 0.6 }, walnut: { t: 'wood', s: 0.9, rough: 0.5, env: 0.6 }, marble: { t: 'marble', s: 1.2, rough: 0.18, env: 1.1 },
   fabric: { t: 'fabric', s: 0.25, rough: 0.95, env: 0.3 }, leather: { t: 'leather', s: 0.5, rough: 0.45, env: 0.6 }, plaster: { t: 'plaster', s: 2.5, rough: 0.92, env: 0.35 },
   stone: { t: 'stone', s: 1.2, rough: 0.7, env: 0.5 }, paving: { t: 'stone', s: 4, rough: 0.95, env: 0.3 }, metal: { env: 1.2 }, glass: { env: 0.7 }, floor: { env: 0.45 },
-  tile: { t: 'tile', s: 1.2, rough: 0.35, env: 0.8 }, terrazzo: { t: 'terrazzo', s: 1.0, rough: 0.3, env: 0.8 }, concrete: { t: 'concrete', s: 3, rough: 0.45, env: 0.6 }, carpet: { t: 'fabric', s: 0.35, rough: 1, env: 0.15 }, slats: { t: 'slats', s: 0.9, rough: 0.6, env: 0.4 }
+  tile: { t: 'tile', s: 1.2, rough: 0.35, env: 0.8 }, terrazzo: { t: 'terrazzo', s: 1.0, rough: 0.3, env: 0.8 }, concrete: { t: 'concrete', s: 3, rough: 0.45, env: 0.6 }, plastic: { rough: 0.35, env: 0.7 }, mesh: { t: 'fabric', s: 0.08, rough: 0.9, env: 0.25 }, carpet: { t: 'fabric', s: 0.35, rough: 1, env: 0.15 }, slats: { t: 'slats', s: 0.9, rough: 0.6, env: 0.4 }
 };
 
 // texture coordinates in metres, projected from the side each face looks at (so long walls are not stretched)

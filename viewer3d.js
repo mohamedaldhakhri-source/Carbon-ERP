@@ -8,8 +8,8 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vend
 import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
 import { looksLikePlan, analyzeImages } from './planimg.js?v=55';
 import { dwgToDxf } from './dwg.js?v=53';
-import { LIB, COLORS, buildItem } from './furniture3d.js?v=57';
-import { Look, dressModel } from './look3d.js?v=57';
+import { LIB, COLORS, buildItem } from './furniture3d.js?v=60';
+import { Look, dressModel } from './look3d.js?v=60';
 import { pageLayout, markOn, pageTitle } from './scenes.js?v=56';
 import { layoutToSet } from './layout.js?v=57';
 
@@ -333,6 +333,8 @@ export class Viewer {
     this.el.querySelector('.v3-joy').hidden = !(m === 'walk' && matchMedia('(pointer:coarse)').matches);
     if (document.pointerLockElement) document.exitPointerLock();
     this.head.intensity = m === 'walk' ? 2.2 : 0; this.mapEl.hidden = m !== 'walk';
+    { const hemi = this.scene.children.find(o => o.isHemisphereLight); if (hemi) hemi.intensity = m === 'walk' ? 2.3 : 0.55; this.renderer.toneMappingExposure = m === 'walk' ? 1.0 : 0.82; } // indoors the sky does not reach: lift the fill light
+    this._picBtn(null);
     if (m === 'walk') {
       this.orbit.enabled = false;
       // Start just outside the front of the building, at eye height on the lowest floor, facing it.
@@ -387,8 +389,31 @@ export class Viewer {
     }
     return false;
   }
+  /* ----- the design's own pictures of the place you are walking in ----- */
+  _areaHere() {
+    if (!this.areas || !this.areas.length || !this.set || !this.set.raster) return null;
+    const p = this.camera.position, S = this.set; let best = null, bA = Infinity;
+    this.areas.forEach(a => { const R = a._R || (a._R = this._areaRect(a)); if (!R) return; const st = S.storeys[R.lvl]; if (!st || p.y < st.base || p.y > st.top + 0.5) return;
+      if (p.x >= R.x0 && p.x <= R.x1 && p.z >= R.z0 && p.z <= R.z1) { const A = (R.x1 - R.x0) * (R.z1 - R.z0); if (A < bA) { bA = A; best = a; } } });
+    return best;
+  }
+  _picBtn(a) {
+    this._picArea = a; let b = this._pb;
+    if (!b) { b = this._pb = document.createElement('button'); b.type = 'button'; b.className = 'v3-pic'; this.stage.appendChild(b); b.onclick = e => { e.stopPropagation(); if (this._picArea) this._showShots(this._picArea, 0); }; }
+    b.hidden = !a || this.mode !== 'walk'; if (a) b.textContent = '📷 صور التصميم هنا (' + a.views.length + ')';
+  }
+  _showShots(a, i) {
+    if (document.pointerLockElement) document.exitPointerLock();
+    let o = this._so; if (!o) { o = this._so = document.createElement('div'); o.className = 'v3-shots'; this.stage.appendChild(o); }
+    const v = a.views[(i + a.views.length) % a.views.length], L = (this.looks || {})[a.key];
+    o.innerHTML = '<img src="' + v.jpg + '" alt=""><div class="v3-shots-bar"><b>' + esc((L && L.room_ar) || a.title || '') + '</b><small>صفحة ' + v.page + ' · ' + ((i % a.views.length + a.views.length) % a.views.length + 1) + ' من ' + a.views.length + '</small>' +
+      (a.views.length > 1 ? '<button type="button" data-sh="-1">›</button><button type="button" data-sh="1">‹</button>' : '') + '<button type="button" data-sh="x">✕ رجوع للمشي</button></div>';
+    o.hidden = false;
+    o.querySelectorAll('[data-sh]').forEach(btn => btn.onclick = e => { e.stopPropagation(); const d = btn.dataset.sh; if (d === 'x') o.hidden = true; else this._showShots(a, i + +d); });
+  }
   _tick() {
     const dt = Math.min(0.05, this.clock.getDelta());
+    if (this.mode === 'walk' && this.areas && this.areas.length) { const now = performance.now(); if (!(now - (this._picAt || 0) < 400)) { this._picAt = now; const a = this._areaHere(); if (a !== this._picArea) this._picBtn(a); } }
     if (this.mode === 'walk' && this.box) {
       const k = this.keys, f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0) + this.move.y, r = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0) + this.move.x;
       const sp = (k.ShiftLeft || k.ShiftRight ? 4.2 : 1.9) * dt;
@@ -493,6 +518,7 @@ export class Viewer {
       else if (ext === 'pdf' && kept && kept.set && await this._openKept(buf, kept.set)) { }
       else if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
+      else if (['fbx', 'obj', 'dae', '3ds', 'zip'].includes(ext)) await this._loadModel(buf, ext);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
       else if (ext === 'dwg') await this._loadDwg(buf);
       else if (ext === 'pdf') await this._loadPdf(buf);
@@ -603,6 +629,39 @@ export class Viewer {
     tops.forEach((o, i) => { o.userData.part = 'p' + i; this.parts.push({ k: 'p' + i, l: o.name || 'جزء ' + (i + 1), o }); this.catOn['p' + i] = true; });
     root.traverse(o => { if (o.isMesh) { [].concat(o.material).forEach(m => { m.side = THREE.DoubleSide; }); } });
     this.model.add(root);
+  }
+  // models exported from design programs (3ds Max, SketchUp, Revit, Blender...): FBX, OBJ, DAE, 3DS, or a ZIP holding the model with its textures
+  async _loadModel(buf, ext) {
+    this.msg('جاري فتح النموذج…');
+    let files = null, main = null, mx = ext; const byName = {};
+    if (ext === 'zip') {
+      const { unzipSync } = await import('three/addons/libs/fflate.module.js'); files = unzipSync(new Uint8Array(buf));
+      const names = Object.keys(files).filter(n => !/(^|\/)(__MACOSX|\.)/.test(n));
+      names.forEach(n => { byName[n.split('/').pop().toLowerCase()] = n; byName[n.toLowerCase()] = n; });
+      for (const e of ['glb', 'gltf', 'fbx', 'dae', 'obj', '3ds']) { main = names.find(n => n.toLowerCase().endsWith('.' + e)); if (main) { mx = e; break; } }
+      if (!main) throw new Error('الملف المضغوط ما فيه نموذج 3D (GLB أو FBX أو OBJ أو DAE أو 3DS)');
+    }
+    const urls = [], mgr = new THREE.LoadingManager(); mgr.onLoad = () => { this.dirty = true; };
+    if (files) mgr.setURLModifier(u => { const key = decodeURIComponent(u).replace(/\\/g, '/').split('/').pop().toLowerCase(), n = byName[key]; if (!n) return u; const b = URL.createObjectURL(new Blob([files[n]])); urls.push(b); return b; });
+    const bytes = files ? files[main] : new Uint8Array(buf), data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), text = () => new TextDecoder().decode(bytes);
+    let root;
+    if (mx === 'glb' || mx === 'gltf') root = (await new Promise((res, rej) => new GLTFLoader(mgr).parse(mx === 'gltf' ? text() : data, '', res, rej))).scene;
+    else if (mx === 'fbx') { const { FBXLoader } = await import('three/addons/loaders/FBXLoader.js'); root = new FBXLoader(mgr).parse(data, ''); }
+    else if (mx === 'dae') { const { ColladaLoader } = await import('three/addons/loaders/ColladaLoader.js'); root = new ColladaLoader(mgr).parse(text(), '').scene; }
+    else if (mx === '3ds') { const { TDSLoader } = await import('three/addons/loaders/TDSLoader.js'); root = new TDSLoader(mgr).parse(data, ''); root.rotation.x = -Math.PI / 2; }
+    else { const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js'), ol = new OBJLoader(mgr), src = text(), lib = /^mtllib\s+(.+)$/m.exec(src);
+      if (lib && files) { const mn = byName[lib[1].trim().split(/[\\/]/).pop().toLowerCase()]; if (mn) { const { MTLLoader } = await import('three/addons/loaders/MTLLoader.js'); const mats = new MTLLoader(mgr).parse(new TextDecoder().decode(files[mn]), ''); mats.preload(); ol.setMaterials(mats); } }
+      root = ol.parse(src); }
+    // units: buildings are tens of metres; files in centimetres or millimetres are scaled down to metres
+    const g = new THREE.Group(); g.add(root); g.updateMatrixWorld(true);
+    let bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3()), D = Math.max(sz.x, sz.y, sz.z);
+    if (!isFinite(D) || D <= 0) throw new Error('النموذج فاضي');
+    const k = D > 3000 ? 0.001 : D > 300 ? 0.01 : 1; g.scale.setScalar(k); g.updateMatrixWorld(true);
+    bb = new THREE.Box3().setFromObject(g); const c = bb.getCenter(new THREE.Vector3()); g.position.set(-c.x, -bb.min.y, -c.z);
+    this.parts = []; const tops = root.children.length === 1 && root.children[0].children.length > 1 ? root.children[0].children : root.children;
+    tops.forEach((o, i) => { o.userData.part = 'p' + i; this.parts.push({ k: 'p' + i, l: o.name || 'جزء ' + (i + 1), o }); this.catOn['p' + i] = true; });
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; [].concat(o.material).forEach(m => { if (m) m.side = THREE.DoubleSide; }); } });
+    this.model.add(g); this._modelUrls = urls;
   }
   async _loadIfc(buf) {
     this.msg('جاري تحميل قارئ ملفات IFC…');
@@ -1031,6 +1090,29 @@ export class Viewer {
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     return (this.texCache[pi] = tex);
   }
+  // what hangs under a ceiling in the renders: exposed ducts and linear lights, or downlights in a plain ceiling
+  _ceilingKit(rs, cy, ce, ud, seed) {
+    const DU = [], LT = [], CB = [], box = (l, x0, x1, y0, y1, z0, z1) => { const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0); g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); l.push(g); };
+    const exposed = ce.type === 'exposed';
+    rs.forEach((r, j) => { const w = r.x1 - r.x0, d = r.z1 - r.z0; if (w < 1.2 || d < 1.2) return; const along = w >= d, Lx = along ? w : d, Ly = along ? d : w;
+      const pt = (u, v) => along ? [r.x0 + u, r.z0 + v] : [r.x0 + v, r.z0 + u];
+      if (exposed && Ly > 2.4 && Lx > 3) { // one round duct along the space, with a grille drop now and then
+        const v = Ly * (0.3 + ((seed + j) % 3) * 0.2), g = new THREE.CylinderGeometry(0.22, 0.22, Lx - 0.3, 18, 1, true); g.rotateZ(Math.PI / 2); if (!along) g.rotateY(Math.PI / 2);
+        const [x, z] = pt(Lx / 2, v); g.translate(x, cy - 0.45, z); DU.push(g);
+        for (let u = 1.5; u < Lx - 1; u += 3.2) { const [a, b] = pt(u, v); box(DU, a - 0.12, a + 0.12, cy - 0.78, cy - 0.45, b - 0.12, b + 0.12); }
+      }
+      // lights: linear pendants under an exposed ceiling, recessed squares in a plain one
+      const step = exposed ? 2.4 : 1.8, len = exposed ? Math.min(1.8, Lx - 0.6) : 0.18;
+      for (let v = step / 2; v < Ly; v += step) for (let u = (exposed ? 0.3 + len / 2 : step / 2); u < Lx - (exposed ? len / 2 : 0.2); u += exposed ? len + 0.9 : step) {
+        const [x, z] = pt(u, v), hx = along ? len / 2 : 0.025, hz = along ? 0.025 : len / 2;
+        if (exposed) { const y = cy - 0.95; box(LT, x - hx, x + hx, y - 0.04, y, z - hz, z + hz); box(CB, x - 0.004, x + 0.004, y, cy, z - 0.004, z + 0.004); }
+        else box(LT, x - 0.09, x + 0.09, cy - 0.012, cy - 0.002, z - 0.09, z + 0.09);
+      }
+    });
+    const add = (l, m, ex) => { if (!l.length) return; const mm = new THREE.Mesh(mergeGeometries(l, false), m); mm.userData = { ...ud, cat: 'finish', noCollide: true, ceil: true, ...ex }; this.model.add(mm); l.forEach(g => g.dispose()); };
+    const M = this._kitMat || (this._kitMat = { duct: tag(new THREE.MeshStandardMaterial({ color: '#e9e9e6', roughness: 0.4, metalness: 0.5, side: THREE.DoubleSide }), 'metal'), lamp: new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6e8', emissiveIntensity: 2.2, roughness: 0.3 }), cable: new THREE.MeshStandardMaterial({ color: '#222', roughness: 0.6 }) });
+    add(DU, M.duct); add(LT, M.lamp); add(CB, M.cable);
+  }
   async _buildSheets() {
     this.model.clear(); this.meshes = [];
     const S = this.set, n = S.storeys.length, k = S.k, rg = S.region, [pcx, pcy] = S.center;
@@ -1038,7 +1120,7 @@ export class Viewer {
       wall: tag(new THREE.MeshStandardMaterial({ color: '#efe8dc', roughness: 0.92 }), 'plaster'),
       slab: tag(new THREE.MeshStandardMaterial({ color: '#f4f2ee', roughness: 0.95 }), 'plaster'),
       roof: tag(new THREE.MeshStandardMaterial({ color: '#d6d0c6', roughness: 0.95 }), 'plaster'),
-      glass: tag(new THREE.MeshPhysicalMaterial({ color: '#9ec6da', transparent: true, opacity: 0.26, roughness: 0.03, metalness: 0.1, depthWrite: false }), 'glass'),
+      glass: tag(new THREE.MeshPhysicalMaterial({ color: '#e4f0f3', transparent: true, opacity: 0.13, roughness: 0.02, metalness: 0.1, depthWrite: false }), 'glass'),
       frame: tag(new THREE.MeshStandardMaterial({ color: '#4b4f54', roughness: 0.35, metalness: 0.7 }), 'metal'),
       door: tag(new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.6 }), 'wood'),
       stair: tag(new THREE.MeshStandardMaterial({ color: '#e6dfd2', roughness: 0.5 }), 'stone')
@@ -1103,14 +1185,19 @@ export class Viewer {
       // furniture read from a plan picture, each piece where it is drawn and facing its table
       if (s.furniture && s.furniture.length) {
         const grp = new THREE.Group(), byMat = new Map();
+        // a chair at a desk is a task chair; at a table a meeting chair (on casters in training rooms with light tables)
+        const tops = s.furniture.filter(o => /^(desk|table|rtable|ltable|otable|dining_table)$/.test(o.t));
+        const chairKind = it => { let best = null, bd = 1.8; tops.forEach(o => { const dd = Math.hypot(o.x - it.x, o.z - it.z) - Math.max(o.sx || o.d || 0, o.sz || o.d || 0) / 2; if (dd < bd) { bd = dd; best = o; } }); return best && best.t !== 'desk' ? 'mchair' : 'ochair'; };
         s.furniture.forEach(it => { const L = Math.max(it.sx || 0, it.sz || 0), W = Math.min(it.sx || 0, it.sz || 0), turn = (it.sz || 0) > (it.sx || 0) ? Math.PI / 2 : 0; let q = null;
           if (it.layout) q = { t: it.t, sx: it.t === 'sofa' ? it.sx / 2.2 : it.sx, sz: it.sz, r: it.r, d: it.d };
-          else if (it.t === 'chair') q = { t: 'ochair', r: it.r }; else if (it.t === 'armchair') q = { t: 'armchair', r: it.r };
+          else if (it.t === 'chair') q = { t: chairKind(it), r: it.r }; else if (it.t === 'armchair') q = { t: 'armchair', r: it.r };
           else if (it.t === 'table') q = { t: 'otable', sx: L, sz: W, r: turn }; else if (it.t === 'desk') q = { t: 'desk', sx: L, sz: W, r: turn };
           else if (it.t === 'rtable') q = { t: 'rtable', d: it.d }; else if (it.t === 'cabinet') q = { t: 'cabinet', sx: L, sz: W, r: turn };
           else if (it.t === 'ltable') q = { t: 'ltable', sx: L, sz: W, r: turn }; else if (it.t === 'sofa') q = { t: 'sofa', sx: L / 2.2, r: turn };
           const ar = q && AR.length ? areaAt(i, it.x, it.z) : null, fc = (ar && ar.look.furniture) || {};
-          const col = ar && hex({ chair: fc.chair, armchair: fc.armchair || fc.sofa, table: fc.table, desk: fc.desk, rtable: fc.table, cabinet: fc.cabinet, ltable: fc.table, sofa: fc.sofa || fc.armchair }[it.t]);
+          const col = ar && hex({ chair: fc.chair, ochair: fc.chair, mchair: fc.chair, armchair: fc.armchair || fc.sofa, table: fc.table, desk: fc.desk, rtable: fc.table, cabinet: fc.cabinet, ltable: fc.table, sofa: fc.sofa || fc.armchair }[it.t]);
+          if (q && q.t === 'mchair' && ar && /multi|train|class|lecture|قاعة|تدريب/i.test(ar.look.title || ar.look.room_ar || '') && hex(fc.table) && new THREE.Color(fc.table).getHSL({}).l > 0.75) q.casters = true;
+          if (q && q.t === 'desk' && hex(fc.screen)) q.screen = fc.screen;
           const g = q && buildItem({ ...q, c: (it.layout && hex(it.c)) || col || undefined, x: it.x, y: b, z: it.z }); if (g) { g.position.set(it.x, b + (i ? 0 : 0.15), it.z); g.rotation.y = q.r || 0; grp.add(g); } });
         grp.updateMatrixWorld(true);
         grp.traverse(o => { if (!o.isMesh) return; const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld); (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(g); o.geometry.dispose(); });
@@ -1125,13 +1212,17 @@ export class Viewer {
       add(DR, MAT.door, { ...ud, cat: 'doors', noCollide: true }); add(SL, MAT.slab, { ...ud, cat: 'floor' });
       const tex = S.raster ? this._rasterTex(s.img) : await this._sheetTex(s.page, s.off).catch(e => { console.warn(e); return null; });
       if (tex && s.slab.length) { const m = new THREE.Mesh(quads(s.slab, sy1 + 0.003), new THREE.MeshStandardMaterial({ map: tex, color: '#efe7d8', roughness: 0.55 })); m.userData = { ...ud, cat: 'floor', noCollide: true }; this.model.add(m); }
+      // the rest of the floor in the most used finish of the design, so walking never shows the printed plan underfoot
+      if (AR.length && s.slab.length) { const fa = {}; AR.forEach(r => { const fl = r.look.floor || {}, c = hex(fl.color); if (c) { const k2 = c + '|' + (fl.material || ''); fa[k2] = (fa[k2] || 0) + r.A; } });
+        const top = Object.keys(fa).sort((p, q) => fa[q] - fa[p])[0]; if (top) { const [c, mt] = top.split('|'), m = new THREE.Mesh(quads(s.slab, sy1 + 0.0045), fin(c, FM[mt] || 'floor', { roughness: mt === 'carpet' ? 1 : 0.5 })); m.userData = { ...ud, cat: 'finish', noCollide: true, walkOnly: true }; m.receiveShadow = true; this.model.add(m); } }
       // floor finish and ceiling of each designed area on this storey
       AR.filter((r, q) => r.lvl === i && AR.findIndex(o => o.key.split(':').slice(0, 2).join(':') === r.key.split(':').slice(0, 2).join(':')) === q).forEach((ar, n2) => {
         const cut = (rs, pad) => { const qs = []; rs.forEach(r => { const x0 = Math.max(r.x0, ar.x0), x1 = Math.min(r.x1, ar.x1), z0 = Math.max(r.z0, ar.z0), z1 = Math.min(r.z1, ar.z1); if (x1 - x0 > pad && z1 - z0 > pad) qs.push({ x0, x1, z0, z1 }); }); return qs; };
         const fl = ar.look.floor || {}, qs = cut(s.slab, 0.05);
         if (qs.length) { const m = new THREE.Mesh(quads(qs, sy1 + 0.006 + n2 * 0.0015), fin(hex(fl.color) || '#d9d6d0', FM[fl.material] || 'floor', { roughness: fl.material === 'carpet' ? 1 : 0.5 })); m.userData = { ...ud, cat: 'finish', noCollide: true }; m.receiveShadow = true; this.model.add(m); }
         const above = i + 1 < n ? S.storeys[i + 1].slab : S.roof ? S.roof.slab : [], cy = i + 1 < n ? t - 0.23 : t - 0.26, ce = ar.look.ceiling || {}, qc = cut(above, 0.05);
-        if (qc.length) { const m = new THREE.Mesh(quads(qc, cy - n2 * 0.0015), fin(hex(ce.color) || '#f2f2f0', ce.type === 'exposed' ? 'concrete' : 'plaster', { roughness: 0.95, side: THREE.DoubleSide })); m.userData = { ...ud, cat: 'finish', noCollide: true, ceil: true }; this.model.add(m); }
+        if (qc.length) { const m = new THREE.Mesh(quads(qc, cy - n2 * 0.0015), fin(hex(ce.color) || '#f2f2f0', ce.type === 'exposed' ? 'concrete' : 'plaster', { roughness: 0.95, side: THREE.DoubleSide })); m.userData = { ...ud, cat: 'finish', noCollide: true, ceil: true }; this.model.add(m);
+          this._ceilingKit(qc, cy, ce, ud, n2); }
         counts.finish = (counts.finish || 0) + 1;
       });
       if (i === 0 && tex) { // the site around the building (parking, paving, landscape) from the ground floor sheet
@@ -1194,7 +1285,7 @@ export class Viewer {
       let on = true;
       if (u.cat && this.catOn[u.cat] === false) on = false;
       if (u.part && this.catOn[u.part] === false) on = false;
-      if (on && u.ceil && this.mode !== 'walk') on = false; // ceilings only from inside
+      if (on && (u.ceil || u.walkOnly) && this.mode !== 'walk') on = false; // ceilings (and the finished floor over the printed plan) only from inside
       if (on && selE != null && u.lvl != null) { const s = this.storeys[u.lvl]; on = !!s && s.elev <= selE + 0.01; }
       if (on && selE != null && u.ifc) { const s = this.ifc.storeys[u.st]; on = !!s && s.elev <= selE + 0.01; }
       if (o.userData.ifc != null || u.cat || u.part) o.visible = on;

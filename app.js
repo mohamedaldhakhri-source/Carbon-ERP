@@ -583,12 +583,12 @@ function docsTab(p) {
   return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + (isAiDoc(d) ? '' : fileLink(d.path, 'فتح')) + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 /* ---------- 3D viewer ---------- */
-const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg|layout)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
+const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg|fbx|obj|dae|3ds|layout)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
 // a building the AI designed from a written brief: no file, the design lives on the document itself
 const isAiDoc = d => /\.layout$/i.test(d.path || '');
 const canAi = () => me && ['admin', 'owner', 'gm'].includes(me.role);
 // CAD drawings plotted to PDF (with layers) also open in 3D when filed as drawings or 3D models.
-const ext3dDoc = d => { if (ext3d(d.path)) return ext3d(d.path); const m = /\.(pdf|png|jpe?g|webp)$/i.exec(d.path || ''); return m && ['drawing', 'cad', 'municipality', 'model3d'].includes(d.kind) ? m[1].toLowerCase().replace('jpeg', 'jpg') : null; };
+const ext3dDoc = d => { if (ext3d(d.path)) return ext3d(d.path); const m = /\.(pdf|png|jpe?g|webp|zip)$/i.exec(d.path || ''); return m && ['drawing', 'cad', 'municipality', 'model3d'].includes(d.kind) ? m[1].toLowerCase().replace('jpeg', 'jpg') : null; };
 let V3 = null;
 function vModel3d(id) {
   const d = S.docs.find(x => x.id === id); if (!d) return '<div class="empty">المستند غير موجود.</div>';
@@ -605,7 +605,7 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=59'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=60'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   // finishes read from the design renders in the file (Claude, once per document, saved for everyone)
