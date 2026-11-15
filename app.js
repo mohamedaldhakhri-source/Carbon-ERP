@@ -131,7 +131,7 @@ function stageInfo(r) {
 function canActOn(r) {
   const s = STAGES.find(x => x.k === r.stage); if (!s || !s.role || !me) return false;
   if (me.role === 'admin') return true;
-  if (s.role !== me.role) return false;
+  if (s.role !== me.role && !(s.role === 'gm' && me.role === 'owner')) return false;
   if (s.role === 'head' && !inMyDept(r.dept)) return false;
   return true;
 }
@@ -362,7 +362,7 @@ function vRequests() {
     '<div class="card"><div class="ch"><div class="seg">' + [['mine', 'بانتظار إجرائي (' + q.reqs.length + ')'], ['me', 'طلباتي'], ['open', 'قيد الإجراء'], ['done', 'صدر لها PO'], ['all', 'الكل']].map(([k, l]) => '<button data-act="reqFilter" data-v="' + k + '" class="' + (f === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' + reqTable(list, true) + '</div>' +
     '<div class="card"><h2>مسار الطلب</h2><div class="steps">' + STAGES.map((s, i) => '<div class="step"><span class="dot">' + (i + 1) + '</span>' + s.l + (s.role ? '<span class="muted small">' + ROLES[s.role] + '</span>' : '') + '</div>').join('') + '</div></div>';
 }
-function rejStage(r) { const last = r.hist[r.hist.length - 1] || {}; return ({ head: 'dept', procurement: 'procurement', qs: 'qs', finance: 'finance', gm: 'gm' })[last.role] || 'dept'; }
+function rejStage(r) { const last = r.hist[r.hist.length - 1] || {}; return ({ head: 'dept', procurement: 'procurement', qs: 'qs', finance: 'finance', gm: 'gm', owner: 'gm' })[last.role] || 'dept'; }
 function vRequest(id) {
   const r = R(id); if (!r) return '<div class="empty">الطلب غير موجود</div>';
   const p = P(r.pid), si = stageInfo(r), idx = STAGES.findIndex(s => s.k === r.stage);
@@ -405,7 +405,7 @@ const clName = k => ({ dept: 'رئيس القسم', procurement: 'المشتري
 const askerName = r => r.clarifyBy === 'qs' ? 'مهندس الكميات (QS)' : 'المدير العام';
 function clarifyNote(r) {
   if (!r.clarify) return '';
-  const x = r.hist.slice().reverse().find(h => /طلب المدير العام توضيح|أرجع مهندس الكميات/.test(h.a)) || {};
+  const x = r.hist.slice().reverse().find(h => /طلب (المدير العام|صاحب الشركة) توضيح|أرجع مهندس الكميات/.test(h.a)) || {};
   return '<div class="flag warn"><b>' + askerName(r) + ' يطلب توضيح من ' + clName(r.clarify) + ':</b> ' + esc(x.note || '') + '</div>';
 }
 function answerPanel(r) {
@@ -438,13 +438,13 @@ function poDoc(r, p) {
   const due = (() => { const d = D(r.po.date); if (q.terms === 'credit30') d.setDate(d.getDate() + 30); return iso(d); })();
   const step = re => r.hist.slice().reverse().find(h => re.test(h.a));
   const sig = (l, x) => '<div><span class="muted small">' + l + '</span><b>' + esc((x && x.by) || '—') + '</b><span class="small muted">' + (x && x.t ? fd(x.t) : '') + '</span></div>';
-  const head = step(/^وافق رئيس القسم/), proc = step(/سعّر المواد|حدد المواد/), qs = step(/^راجع مهندس الكميات/), sp = SUP(q.supId), gm = step(/^اعتمد المدير العام/), iss = step(/^أصدر أمر الشراء/);
+  const head = step(/^وافق رئيس القسم/), proc = step(/سعّر المواد|حدد المواد/), qs = step(/^راجع مهندس الكميات/), sp = SUP(q.supId), gm = step(/^اعتمد (المدير العام|صاحب الشركة)/), iss = step(/^أصدر أمر الشراء/);
   const priced = r.items.every(it => it.pr != null), tot = r.items.reduce((a, it) => a + (it.pr || 0) * it.q, 0);
   return '<div class="po"><div class="top"><div><h2>أمر شراء</h2><span class="num">' + esc(r.po.no) + '</span><div class="muted small">التاريخ ' + fd(r.po.date) + '</div></div><div class="po-logo"><img src="assets/logo.png" alt="شعار كربون"></div></div>' +
     '<dl class="dl"><dt>المورّد</dt><dd>' + esc(q.sup) + (sp ? '<div class="small muted">سجل تجاري ' + esc(sp.cr) + ' · ' + esc(sp.phone) + (sp.email ? ' · ' + esc(sp.email) : '') + '</div>' + (sp.bank || sp.iban ? '<div class="small muted">' + esc([sp.bank, sp.accName, sp.acc, sp.iban].filter(Boolean).join(' · ')) + '</div>' : '') : '') + '</dd><dt>المشروع</dt><dd>' + esc(pName(p)) + '</dd><dt>موقع التوريد</dt><dd>' + esc(locText(p) || '—') + '</dd><dt>مرجع الطلب</dt><dd>' + esc(r.no) + ' · قسم ' + DEPTS[r.dept] + (r.boq ? ' · بند BOQ ' + esc(r.boq) : '') + '</dd><dt>شروط الدفع</dt><dd>' + TERMS[q.terms] + (q.terms === 'credit30' ? ' · تاريخ الاستحقاق ' + fd(due) : ' · يُدفع قبل التوريد') + '</dd><dt>مدة التوريد</dt><dd>' + q.days + ' يوم</dd></dl>' +
     '<div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th>' + (priced ? '<th class="n">سعر الوحدة</th><th class="n">الإجمالي</th>' : '') + '</tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td>' + (priced ? '<td class="n">' + money(it.pr) + '</td><td class="n">' + money(it.pr * it.q) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' +
     '<div class="ch"><span class="noprint">' + (q.file ? fileLink(q.file, 'كوتيشن المورّد') : '') + '</span><b class="num">الإجمالي ' + money(priced ? tot : q.amt) + ' ر.ع</b></div>' +
-    '<div class="po-sign">' + sig('طلب المواد', { by: r.by, t: r.date }) + (head ? sig('موافقة رئيس القسم', head) : '') + sig('التسعير والكوتيشن (المشتريات)', proc) + (qs ? sig('مراجعة مهندس الكميات (QS)', qs) : '') + sig('اعتماد المدير العام', gm) + sig('أصدر أمر الشراء', iss) + '</div>' +
+    '<div class="po-sign">' + sig('طلب المواد', { by: r.by, t: r.date }) + (head ? sig('موافقة رئيس القسم', head) : '') + sig('التسعير والكوتيشن (المشتريات)', proc) + (qs ? sig('مراجعة مهندس الكميات (QS)', qs) : '') + sig('اعتماد الشراء (المدير العام)', gm) + sig('أصدر أمر الشراء', iss) + '</div>' +
     '<div class="noprint"><button class="btn sm" data-act="printPO">🖨 طباعة أمر الشراء</button></div></div>';
 }
 function vSuppliers() {

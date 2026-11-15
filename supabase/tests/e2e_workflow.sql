@@ -174,6 +174,14 @@ select public.t_no('الرفض بدون سبب مرفوض', $$select public.reje
 select public.t_ok('رئيس القسم يرفض مع السبب', $$select public.reject_request((select id from public.material_requests where note='طلب للرفض'),'مو محتاجين')$$);
 select public.t_eq('الطلب مرفوض', $$select stage from public.material_requests where note='طلب للرفض'$$, 'rejected');
 
+select public.t_as('qs');
+select public.t_ok('QS يوافق على طلب المشتريات', $$select public.advance_request((select id from public.material_requests where note='طلب مشتريات'))$$);
+select public.t_as('owner');
+select public.t_ok('صاحب الشركة يعتمد الشراء مكان المدير العام', $$select public.advance_request((select id from public.material_requests where note='طلب مشتريات'))$$);
+select public.t_eq('الطلب صار عند المشتريات لأمر الشراء', $$select stage from public.material_requests where note='طلب مشتريات'$$, 'po');
+select public.t_as('fin');
+select public.t_no('المحاسب ما يعتمد الشراء', $$select public.reject_request((select id from public.material_requests where note='طلب مشتريات'),'x')$$);
+
 -- ===== 5. petty cash, VO, documents =====
 select public.t_s('5 البيتي كاش والـ VO والمستندات');
 select public.t_as('site');
@@ -201,7 +209,7 @@ select public.t_as('fin');
 select public.t_eq('المحاسب يشوف البيتي كاش', $$select count(*)::text from public.petty_cash$$, '1');
 select public.t_eq('المحاسب يشوف الموردين', $$select count(*)::text from public.suppliers$$, '1');
 select public.t_no('المحاسب ما يعدل المورّد', $$update public.suppliers set phone='0'$$);
-select public.t_no('المحاسب ما يعتمد طلبات', $$select public.advance_request((select id from public.material_requests where note='طلب مشتريات'))$$);
+select public.t_no('المحاسب ما يصدر أمر الشراء', $$select public.advance_request((select id from public.material_requests where note='طلب مشتريات'))$$);
 select public.t_as('gm');
 select public.t_eq('المدير العام ما يشوف سجل النشاط', $$select count(*)::text from public.audit_log$$, '0');
 select public.t_no('المدير العام ما يحذف بيتي كاش', $$delete from public.petty_cash$$);
