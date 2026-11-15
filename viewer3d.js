@@ -194,7 +194,7 @@ export async function extractPdfPlan(pdfjs, data) {
   }
   return { doc, page, names, paths, text };
 }
-export const PDF_ROLES = { wall: 'جدران', column: 'أعمدة', window: 'زجاج / شبابيك', door: 'أبواب', plant: 'أشجار ونباتات', furniture: 'أثاث مجسّم', plan: 'رسم على الأرضية', skip: 'إخفاء' };
+export const PDF_ROLES = { wall: 'جدران', column: 'أعمدة', low: 'جلسات وأحواض منخفضة', window: 'زجاج / شبابيك', door: 'أبواب', plant: 'أشجار ونباتات', furniture: 'أثاث مجسّم', plan: 'رسم على الأرضية', skip: 'إخفاء' };
 export function guessPdfRoles(layers) {
   const r = {};
   layers.forEach(l => { const n = l.toLowerCase();
@@ -202,6 +202,7 @@ export function guessPdfRoles(layers) {
       : /door|porte|menuiserie - bois|باب/.test(n) ? 'door'
       : /column|colonne|poteau|struct_member|عمود/.test(n) ? 'column'
       : /verdure|arbre|tree|planter|شجر|نبات/.test(n) ? 'plant'
+      : /poch/.test(n) && !/ma[cç]on/.test(n) || /bench|banc|planter box|jardini[eè]re|جلسة|حوض/.test(n) ? 'low'
       : /wall|wals|poch|gypsum|mur|cloison|ma[cç]on|جدار|حائط/.test(n) ? 'wall'
       : /floor|sol|revetement|jardin|am[ée]nagement|ffe|furn|storage|mobilier|piscine|water|cach[ée]|ارضي|أرضي|أثاث|اثاث/.test(n) ? 'plan'
       : 'skip'; });
@@ -547,20 +548,22 @@ export class Viewer {
     if (!isFinite(bb.x0)) { this.msg('اختر طبقة الجدران من القائمة.'); return; }
     const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2, W = q => [(q[0] - cx) * k, -(q[1] - cy) * k]; // -> world x, z
     const seg = (a, b, t, y0, y1) => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]); return L < 0.02 ? null : { a, L, ux: (b[0] - a[0]) / L, uz: (b[1] - a[1]) / L, t, y0, y1 }; };
-    const solids = [], thin = [], glass = [], frames = [], doors = [], furn = [];
-    const addShape = (pts, h, out) => {
-      const w = pts.map(W); let ar = 0; for (let i = 0; i < w.length; i++) { const a = w[i], b = w[(i + 1) % w.length]; ar += a[0] * b[1] - b[0] * a[1]; }
-      if (Math.abs(ar) / 2 < 0.0004) return;
+    const solids = [], thin = [], glass = [], frames = [], doors = [], furn = [], thinLow = [];
+    const addShape = (pts, h, out, maxT) => {
+      const w = pts.map(W); let ar = 0, per = 0; for (let i = 0; i < w.length; i++) { const a = w[i], b = w[(i + 1) % w.length]; ar += a[0] * b[1] - b[0] * a[1]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+      ar = Math.abs(ar) / 2; if (ar < 0.0004) return;
+      if (maxT && ar / (per / 2) > maxT) return; // too fat for a wall: a table, a title block or a hatch area
       const sh = new THREE.Shape(w.map(([x, z]) => new THREE.Vector2(x, -z)));
       const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 1 }); g.rotateX(-Math.PI / 2); out.push(g);
     };
     ['wall', 'column'].forEach(r => use(r).forEach(p => {
-      if (p.filled && p.closed && p.pts.length >= 3) addShape(p.pts, H, solids);
+      if (p.filled && p.closed && p.pts.length >= 3) addShape(p.pts, H, solids, r === 'column' ? 1.6 : 1.0);
       else for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), r === 'column' ? 0.08 : 0.05, 0, H); if (s) thin.push(s); }
     }));
     use('window').forEach(p => { for (let i = 0; i + 1 < p.pts.length; i++) { const a = W(p.pts[i]), b = W(p.pts[i + 1]); const g = seg(a, b, 0.03, 0.02, H - 0.35), f = seg(a, b, 0.08, H - 0.35, H); if (g) glass.push(g); if (f) frames.push(f); } });
     use('door').forEach(p => { if (p.curve) return; for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), 0.045, 0, 2.2); if (s && s.L >= 0.6 && s.L <= 1.6) doors.push(s); } });
     use('furniture').forEach(p => { if (p.closed && p.pts.length >= 3) addShape(p.pts, 0.75, furn); });
+    const low = []; use('low').forEach(p => { if (p.closed && p.pts.length >= 3) addShape(p.pts, 0.9, low, 3); else for (let i = 0; i + 1 < p.pts.length; i++) { const s = seg(W(p.pts[i]), W(p.pts[i + 1]), 0.12, 0, 0.9); if (s) thinLow.push(s); } });
     // trees and planters: one plant per outline, merged when close together
     const trees = [], cell = {};
     use('plant').forEach(p => { const b = box([p]), sz = Math.max(b.x1 - b.x0, b.y1 - b.y0) * k; if (sz < 0.35 || sz > 9) return;
@@ -571,7 +574,8 @@ export class Viewer {
       glass: new THREE.MeshPhysicalMaterial({ color: '#bfe0ef', transparent: true, opacity: 0.28, roughness: 0.05, metalness: 0, depthWrite: false }),
       frame: new THREE.MeshStandardMaterial({ color: '#3a3a3a', roughness: 0.5, metalness: 0.4 }),
       door: new THREE.MeshStandardMaterial({ color: '#8a5a32', roughness: 0.65 }),
-      wood: new THREE.MeshStandardMaterial({ color: '#a8743f', roughness: 0.7 })
+      wood: new THREE.MeshStandardMaterial({ color: '#a8743f', roughness: 0.7 }),
+      stone: new THREE.MeshStandardMaterial({ color: '#cdb594', roughness: 0.85 })
     };
     if (solids.length) for (let s = 0; s < solids.length; s += 2000) { const m = new THREE.Mesh(mergeGeometries(solids.slice(s, s + 2000), false), MAT.wall); m.userData = { cat: 'walls' }; this.model.add(m); }
     solids.forEach(g => g.dispose());
@@ -579,6 +583,8 @@ export class Viewer {
     this._boxes(glass, MAT.glass, 'windows', false);
     this._boxes(frames, MAT.frame, 'windows', true);
     this._boxes(doors, MAT.door, 'doors', true);
+    if (low.length) { const m = new THREE.Mesh(mergeGeometries(low, false), MAT.stone); m.userData = { cat: 'low' }; this.model.add(m); low.forEach(g => g.dispose()); }
+    this._boxes(thinLow, MAT.stone, 'low');
     if (furn.length) { const m = new THREE.Mesh(mergeGeometries(furn, false), MAT.wood); m.userData = { cat: 'furniture', noCollide: true }; this.model.add(m); furn.forEach(g => g.dispose()); }
     if (trees.length) {
       const list = trees.slice(0, 800), n = list.length, d = new THREE.Object3D(), col = new THREE.Color();
@@ -597,8 +603,8 @@ export class Viewer {
     }
     // the drawing itself (furniture, floor patterns, water, landscape) printed on the floor
     try { await this._pdfFloor(bb, cx, cy, k); } catch (e) { console.warn(e); }
-    this.counts = { walls: solids.length + thin.length, windows: glass.length, doors: doors.length, plants: trees.length, furniture: furn.length };
-    ['walls', 'windows', 'doors', 'plants', 'furniture', 'floor'].forEach(c => { if (this.catOn[c] == null) this.catOn[c] = true; });
+    this.counts = { walls: solids.length + thin.length, windows: glass.length, doors: doors.length, plants: trees.length, furniture: furn.length, low: low.length + thinLow.length };
+    ['walls', 'windows', 'doors', 'plants', 'furniture', 'floor', 'low'].forEach(c => { if (this.catOn[c] == null) this.catOn[c] = true; });
   }
   async _pdfFloor(bb, cx, cy, k) {
     const { page, doc, names } = this.pdf, view = page.view, pad = 6 / k;
@@ -657,7 +663,7 @@ export class Viewer {
       for (let k = 0; k < ea.count; k++) if (ea.getX(k) === id) box.expandByPoint(t.fromBufferAttribute(pa, k));
     } else {
       const names = []; let o = h.object; while (o && o !== this.model) { if (o.name) names.unshift(o.name); o = o.parent; }
-      html = '<b>' + esc(names.pop() || ({ walls: 'جدار', windows: 'زجاج / شباك', doors: 'باب', floor: 'أرضية', furniture: 'أثاث' }[h.object.userData.cat] || 'عنصر')) + '</b>' + (names.length ? '<span>' + esc(names.slice(-3).join(' › ')) + '</span>' : '');
+      html = '<b>' + esc(names.pop() || ({ walls: 'جدار', windows: 'زجاج / شباك', doors: 'باب', floor: 'أرضية', furniture: 'أثاث', low: 'جلسة / حوض' }[h.object.userData.cat] || 'عنصر')) + '</b>' + (names.length ? '<span>' + esc(names.slice(-3).join(' › ')) + '</span>' : '');
       box = new THREE.Box3().setFromObject(h.object);
       if (h.object.userData.cat) box = null;
     }
