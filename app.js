@@ -579,18 +579,18 @@ function docsTab(p) {
   const ko = Object.keys(DOCK), ds = S.docs.filter(x => x.pid === p.id).sort((a, b) => ko.indexOf(a.kind) - ko.indexOf(b.kind));
   let h = '<div class="ch" style="margin-bottom:8px"><span class="muted small">العقد وجدول الكميات والمخططات وموافقات الوزارة وأي مستند يخص المشروع.</span><button class="btn pri" data-act="newDoc" data-v="' + p.id + '">+ إضافة مستند</button></div>';
   if (!ds.length) return h + '<div class="empty">ما في مستندات لهذا المشروع بعد.</div>';
-  h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DXF ويتحول 3D تلقائياً.</p>';
-  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : /\.dwg$/i.test(d.path) ? '<div class="muted small">لعرضه 3D احفظه من AutoCAD بصيغة DXF وارفعه</div>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+  h += '<p class="muted small" style="margin:0 0 8px">🧊 تقدر تشوف المبنى ثلاثي الأبعاد وتمشي داخله: ارفع نموذج IFC (من Revit أو Archicad) أو GLB (من SketchUp)، أو مخطط AutoCAD بصيغة DWG أو DXF أو PDF، أو حتى صورة المخطط (PNG / JPG)، ويتحول 3D تلقائياً.</p>';
+  return h + '<div class="tbl"><table><thead><tr><th>المستند</th><th>النوع</th><th>رفعه</th><th>التاريخ</th><th></th></tr></thead><tbody>' + ds.map(d => '<tr><td><b>' + esc(d.title) + '</b></td><td><span class="tag">' + (DOCK[d.kind] || d.kind) + '</span></td><td class="small">' + esc(nameOf(d.byId)) + '</td><td class="small">' + fd(d.date) + '</td><td>' + fileLink(d.path, 'فتح') + (ext3dDoc(d) ? ' <a class="btn sm pri" href="#v3d-' + d.id + '">🧊 عرض 3D</a>' : '') + (me.role === 'admin' ? ' <button class="linkbtn small" style="color:var(--bad)" data-act="docDel" data-v="' + d.id + '">حذف</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 /* ---------- 3D viewer ---------- */
-const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
+const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
 // CAD drawings plotted to PDF (with layers) also open in 3D when filed as drawings or 3D models.
 const ext3dDoc = d => { if (ext3d(d.path)) return ext3d(d.path); const m = /\.(pdf|png|jpe?g|webp)$/i.exec(d.path || ''); return m && ['drawing', 'cad', 'municipality', 'model3d'].includes(d.kind) ? m[1].toLowerCase().replace('jpeg', 'jpg') : null; };
 let V3 = null;
 function vModel3d(id) {
   const d = S.docs.find(x => x.id === id); if (!d) return '<div class="empty">المستند غير موجود.</div>';
   const p = P(d.pid), others = S.docs.filter(x => x.pid === d.pid && ext3dDoc(x));
-  return '<div class="head"><div class="t"><span class="crumb"><a href="#p-' + d.pid + '" data-act="goDocs" data-v="' + d.pid + '">' + esc(pName(p)) + '</a> / عرض 3D</span><h1>' + esc(d.title) + '</h1><span class="muted small">' + ({ ifc: 'نموذج IFC', glb: 'نموذج GLB', gltf: 'نموذج glTF', dxf: 'مخطط AutoCAD (DXF) محوّل تلقائياً', pdf: 'مخطط PDF محوّل تلقائياً', png: 'صورة مخطط محوّلة تلقائياً', jpg: 'صورة مخطط محوّلة تلقائياً', webp: 'صورة مخطط محوّلة تلقائياً' })[ext3dDoc(d)] + '</span></div><div class="actions">' +
+  return '<div class="head"><div class="t"><span class="crumb"><a href="#p-' + d.pid + '" data-act="goDocs" data-v="' + d.pid + '">' + esc(pName(p)) + '</a> / عرض 3D</span><h1>' + esc(d.title) + '</h1><span class="muted small">' + ({ ifc: 'نموذج IFC', glb: 'نموذج GLB', gltf: 'نموذج glTF', dxf: 'مخطط AutoCAD (DXF) محوّل تلقائياً', dwg: 'مخطط AutoCAD (DWG) محوّل تلقائياً', pdf: 'مخطط PDF محوّل تلقائياً', png: 'صورة مخطط محوّلة تلقائياً', jpg: 'صورة مخطط محوّلة تلقائياً', webp: 'صورة مخطط محوّلة تلقائياً' })[ext3dDoc(d)] + '</span></div><div class="actions">' +
     (others.length > 1 ? '<select id="v3-doc" aria-label="النموذج">' + others.map(x => '<option value="' + x.id + '"' + (x.id === id ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>' : '') +
     '<button class="btn" data-act="v3shot">📷 صورة</button>' + fileLink(d.path, 'تنزيل الملف') + '</div></div><div id="v3d-mount" data-doc="' + id + '"></div>';
 }
@@ -602,7 +602,7 @@ async function mount3d() {
   if (V3) { if (V3.viewer) V3.viewer.dispose(); V3 = null; }
   const d = S.docs.find(x => x.id === id); if (!d) return;
   const me3 = V3 = { doc: id, viewer: null };
-  let mod; try { mod = await import('./viewer3d.js?v=53'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
+  let mod; try { mod = await import('./viewer3d.js?v=54'); } catch (e) { mt.innerHTML = '<div class="empty">ما قدرت أحمّل العارض. حدّث الصفحة.</div>'; V3 = null; return; }
   if (V3 !== me3) return;
   // furniture comes from the drawing itself (read automatically), nothing is added by hand
   const viewer = me3.viewer = new mod.Viewer({ canEdit: false,

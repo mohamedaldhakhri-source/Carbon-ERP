@@ -1,4 +1,4 @@
-// 3D viewer for project drawings: IFC (Revit / Archicad), GLB / glTF (SketchUp, Blender…) and AutoCAD DXF plans.
+// 3D viewer for project drawings: IFC (Revit / Archicad), GLB / glTF (SketchUp, Blender…), AutoCAD DWG / DXF / PDF plans and plan pictures.
 // Orbit around the building or walk inside it (mouse + keyboard on a computer, joystick + drag on a phone).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from './vendor/three-mesh-bvh/index.module.js';
 import { readSheet, analyzeSet, recognizeFurniture } from './plan2d.js?v=53';
 import { looksLikePlan, analyzeImages } from './planimg.js?v=53';
+import { dwgToDxf } from './dwg.js?v=53';
 import { LIB, COLORS, buildItem } from './furniture3d.js?v=50';
 import { Look, dressModel } from './look3d.js?v=52';
 
@@ -423,10 +424,10 @@ export class Viewer {
   }
   // heavy reading of drawings runs in a background worker, so the page stays responsive; the same code runs here if workers are not available
   _work(fn, ...args) {
-    const direct = () => ({ analyzeSet, recognizeFurniture, analyzeImages })[fn](...args);
+    const direct = () => ({ analyzeSet, recognizeFurniture, analyzeImages, dwgToDxf })[fn](...args);
     if (!this.worker && !this.noWorker) {
       try {
-        this.worker = new Worker(new URL('./plan2d-worker.js?v=53', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
+        this.worker = new Worker(new URL('./plan2d-worker.js?v=54', import.meta.url), { type: 'module' }); this.wq = new Map(); this.wid = 0;
         this.worker.onmessage = e => { const q = this.wq.get(e.data.id); if (!q) return; this.wq.delete(e.data.id); if (e.data.ok) q.res(e.data.r); else q.rej(new Error(e.data.err)); };
         this.worker.onerror = e => { e.preventDefault && e.preventDefault(); const qs = [...this.wq.values()]; this.wq.clear(); this.worker && this.worker.terminate(); this.worker = null; this.noWorker = true; qs.forEach(q => q.fail()); };
       } catch (e) { this.noWorker = true; this.worker = null; }
@@ -480,6 +481,7 @@ export class Viewer {
       if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (ext === 'dxf') this._loadDxf(new TextDecoder().decode(buf));
+      else if (ext === 'dwg') await this._loadDwg(buf);
       else if (ext === 'pdf') await this._loadPdf(buf);
       else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'webp') await this._loadPictures([buf], ext);
       else throw new Error('نوع الملف غير مدعوم');
@@ -581,6 +583,15 @@ export class Viewer {
     Object.keys(counts).forEach(c => { this.catOn[c] = true; });
     this.storeys = Object.values(storeys).sort((a, b) => a.elev - b.elev);
   }
+  // AutoCAD DWG: converted to DXF by the open-source LibreDWG reader (in the background worker when it can), then read as DXF
+  async _loadDwg(buf) {
+    this.msg('جاري فتح ملف DWG (أول مرة يحمّل قارئ أوتوكاد، لحظات)…'); await new Promise(r => setTimeout(r, 20));
+    let text = null;
+    try { text = await this._work('dwgToDxf', buf.slice(0)); } catch (e) { console.warn(e); }
+    if (!text) { try { text = await dwgToDxf(buf); } catch (e) { console.warn(e); } }
+    if (!text) throw new Error('ما قدرت أقرأ ملف DWG هذا. جرّب تحفظه من AutoCAD بإصدار أقدم (مثلاً 2013 أو 2018) أو بصيغة DXF.');
+    this.ext = 'dxf'; this.fromDwg = true; this._loadDxf(text);
+  }
   _loadDxf(text) {
     this.msg('جاري قراءة مخطط AutoCAD…');
     const d = parseDxf(text); if (!d.segs.length) throw new Error('ما لقيت خطوط في الملف');
@@ -659,10 +670,10 @@ export class Viewer {
     if (Object.keys(st).length < 3) { // plotted without layers (most municipality sets): read the walls from the pens, sheet by sheet
       if (await this._loadSheets(L, ex.doc)) return;
       if (await this._loadRaster(await this._pdfImages(L, ex.doc))) return;
-      throw new Error('ما لقيت في هذا الـ PDF مخطط أدوار أقدر أقرأه (يمكن يكون صورة ممسوحة أو عرض تقديمي). ارفع المخطط المطبوع من AutoCAD، أو ملف DXF أو IFC.');
+      throw new Error('ما لقيت في هذا الـ PDF مخطط أدوار أقدر أقرأه (يمكن يكون صورة ممسوحة أو عرض تقديمي). ارفع ملف DWG أو DXF أو IFC.');
     }
     if (ex.paths.length < 300 && await this._loadRaster(await this._pdfImages(L, ex.doc))) return;
-    if (ex.paths.length < 300) throw new Error('هذا الـ PDF ما فيه رسم كافي يتحول 3D. ارفع المخطط المطبوع من AutoCAD، أو ملف DXF أو IFC.');
+    if (ex.paths.length < 300) throw new Error('هذا الـ PDF ما فيه رسم كافي يتحول 3D. ارفع ملف DWG أو DXF أو IFC.');
     this.pdf = ex; this.dxfCount = st; this.pdfRoles = guessPdfRoles(Object.keys(st));
     const m = /1\s*:\s*(\d{2,4})/.exec(ex.text || ''); this.pdfScale = m ? +m[1] : 100; this.dxfH = 3.5;
     await this._buildPdf();
