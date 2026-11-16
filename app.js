@@ -551,11 +551,17 @@ function invTable(list, showProj) {
         (rest <= 0.0005 ? '<span class="pill p-ok">مستلمة بالكامل</span>' : pd > 0 ? '<span class="pill p-warn">مستلمة جزئياً</span>' : '<span class="pill p-idle">بانتظار الدفع</span>') + '</td><td class="small">' + fileLink(x.file, 'الفاتورة') +
         (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="client_invoices" data-v="' + x.id + '" data-l="' + esc('الفاتورة ' + x.no) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
 }
+// a payment saved without an invoice (e.g. received before the invoice was issued) can be tied to one later
+function payLink(x) {
+  const open = ['finance', 'admin'].includes(me.role) ? S.cinv.filter(i => i.pid === x.pid && i.amt - invPaid(i.id) > 0.0005) : [];
+  if (!open.length) return '<span class="muted">بدون فاتورة</span>';
+  return '<select class="sm" data-payinv="' + x.id + '" title="ربط المبلغ بفاتورة"><option value="">بدون فاتورة · اربطه بفاتورة</option>' + open.map(i => '<option value="' + i.id + '">' + esc(i.no) + ' · باقي ' + money(i.amt - invPaid(i.id)) + '</option>').join('') + '</select>';
+}
 function payTable(list, showProj) {
   if (!list.length) return '<div class="empty">ما في مبالغ مستلمة بعد.</div>';
   return '<div class="tbl"><table><thead><tr><th>تاريخ الاستلام</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th class="n">المبلغ</th><th>مقابل الفاتورة</th><th>طريقة الدفع</th><th>المرجع</th><th>سجّله</th><th></th></tr></thead><tbody>' +
     list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(x => { const iv = S.cinv.find(i => i.id === x.inv);
-      return '<tr><td class="small"><b>' + fd(x.date) + '</b></td>' + (showProj ? '<td class="small"><a href="#p-' + x.pid + '">' + esc(pName(P(x.pid))) + '</a></td>' : '') + '<td class="n"><b>' + money(x.amt) + '</b></td><td class="num small">' + (iv ? esc(iv.no) : '<span class="muted">بدون فاتورة</span>') + '</td><td class="small">' + (PAYM[x.method] || '—') + '</td><td class="small">' + esc(x.ref || '') + (x.note ? '<div class="muted">' + esc(x.note) + '</div>' : '') + '</td><td class="small">' + esc(nameOf(x.byId)) + '</td><td class="small">' + fileLink(x.file, 'الإيصال') +
+      return '<tr><td class="small"><b>' + fd(x.date) + '</b></td>' + (showProj ? '<td class="small"><a href="#p-' + x.pid + '">' + esc(pName(P(x.pid))) + '</a></td>' : '') + '<td class="n"><b>' + money(x.amt) + '</b></td><td class="num small">' + (iv ? esc(iv.no) : payLink(x)) + '</td><td class="small">' + (PAYM[x.method] || '—') + '</td><td class="small">' + esc(x.ref || '') + (x.note ? '<div class="muted">' + esc(x.note) + '</div>' : '') + '</td><td class="small">' + esc(nameOf(x.byId)) + '</td><td class="small">' + fileLink(x.file, 'الإيصال') +
         (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="client_payments" data-v="' + x.id + '" data-l="' + esc('مبلغ ' + money(x.amt) + ' ر.ع') + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
 }
 function recTab(p) {
@@ -1491,6 +1497,7 @@ document.addEventListener('change', async e => {
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   if (e.target.id === 'sup-q') { ui.supQ = e.target.value; render(); return; }
   const t = e.target;
+  if (t.dataset.payinv) { if (t.value) { try { await run(sb.from('client_payments').update({ invoice_id: t.value }).eq('id', t.dataset.payinv), 'انربط المبلغ بالفاتورة'); } catch (x) { } refresh(); } return; }
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-d').innerHTML = deptOptions(p); reqBoqFill(); }
   if (t.id === 'nr-d') reqBoqFill();
