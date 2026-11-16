@@ -147,6 +147,18 @@ function canActOn(r) {
   if (s.role === 'head' && !inMyDept(r.dept)) return false;
   return true;
 }
+// BOQ items added by hand wait for the GM and the owner; each sees the ones still missing their own approval
+const canAddBoq = () => me && ['qs', 'head', 'gm', 'owner', 'admin'].includes(me.role);
+const boqMine = b => b.st === 'pending' && (me.role === 'admin' || (me.role === 'gm' && !b.gm) || (me.role === 'owner' && !b.own));
+function boqNewTable(list, showProj) {
+  if (!list.length) return '';
+  const step = (who, by, at) => by ? '<span class="pill p-ok">' + who + ' ✓</span><div class="muted small">' + esc(nameOf(by)) + (at ? ' · ' + fd(at) : '') + '</div>' : '<span class="pill p-warn">بانتظار ' + who + '</span>';
+  return '<div class="tbl"><table><thead><tr>' + (showProj ? '<th>المشروع</th>' : '') + '<th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th>أضافه</th><th>المدير العام</th><th>صاحب الشركة</th><th></th></tr></thead><tbody>' +
+    list.map(b => '<tr>' + (showProj ? '<td class="small"><a href="#p-' + b.pid + '">' + esc(pName(P(b.pid))) + '</a></td>' : '') + '<td class="num small">' + esc(b.s) + ' / ' + esc(b.c) + '</td><td>' + esc(b.d) + (b.dept ? ' <span class="tag">' + DEPTS[b.dept] + '</span>' : '') + (b.note ? '<div class="muted small">ملاحظة: ' + esc(b.note) + '</div>' : '') + '</td><td class="n">' + b.q + ' ' + esc(b.u) + '</td><td class="n">' + money(b.r) + '</td><td class="n"><b>' + money(b.t) + '</b></td><td class="small">' + esc(nameOf(b.byId)) + (b.at ? '<div class="muted">' + fd(b.at) + '</div>' : '') + '</td>' +
+      (b.st === 'rejected' ? '<td colspan="2"><span class="pill p-bad">مرفوض</span>' + (b.dec ? '<div class="muted small">' + esc(nameOf(b.dec)) + '</div>' : '') + '</td>' : '<td>' + step('المدير العام', b.gm, b.gmAt) + '</td><td>' + step('صاحب الشركة', b.own, b.ownAt) + '</td>') +
+      '<td>' + (boqMine(b) ? '<div class="actions"><button class="btn sm ok" data-act="boqOk" data-v="' + b.id + '">' + (me.role === 'admin' ? 'اعتماد نهائي' : 'موافق') + '</button><button class="btn sm bad" data-act="boqNo" data-v="' + b.id + '">رفض</button></div>' : '') +
+      (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="boq_items" data-v="' + b.id + '" data-l="' + esc('البند ' + b.c) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+}
 function myQueue() {
   const reqs = S.requests.filter(canActOn);
   const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
@@ -154,7 +166,8 @@ function myQueue() {
   const projs = canApprove() ? S.pending.filter(p => p.approval === 'pending') : [];
   const vos = canApprove() ? S.variations.filter(v => v.gm === 'pending') : [];
   const inv = me ? S.petty.filter(c => c.status === 'approved' && !c.inv && c.byId === me.id) : [];
-  return { reqs, pc, sched, projs, vos, inv, n: reqs.length + pc.length + sched.length + projs.length + vos.length + inv.length };
+  const boqs = canApprove() ? S.projects.flatMap(p => p.boqNew).filter(boqMine) : [];
+  return { reqs, pc, sched, projs, vos, inv, boqs, n: reqs.length + pc.length + sched.length + projs.length + vos.length + inv.length + boqs.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
 // One short line per item so the native dropdown stays narrow and readable: "2.3 · Structural design and anal… (600 ر.ع)".
@@ -211,7 +224,8 @@ async function loadAll() {
     status: p.status, stopReason: p.stop_reason, contractV: p.contract_value == null ? null : +p.contract_value, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
     sections: secs.filter(s => s.project_id === p.id).map(s => [s.code, s.name]),
-    boq: items.filter(b => b.project_id === p.id).map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept, ps: b.start_date, pe: b.end_date })),
+    boqNew: items.filter(b => b.project_id === p.id && b.approval && b.approval !== 'approved').map(b => ({ id: b.id, pid: p.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, dept: b.dept, st: b.approval, byId: b.added_by, at: b.added_at, gm: b.gm_ok_by, gmAt: b.gm_ok_at, own: b.owner_ok_by, ownAt: b.owner_ok_at, dec: b.decided_by, note: b.decide_note })),
+    boq: items.filter(b => b.project_id === p.id && (b.approval || 'approved') === 'approved').map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept, ps: b.start_date, pe: b.end_date })),
     tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ id: t.id, n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase, dept: t.dept }))
   }));
   S.projects = allP.filter(p => p.approval === 'approved');
@@ -336,7 +350,9 @@ function vProject(id) {
   if (!showTime && ui.tab === 'time') ui.tab = 'boq';
   h += '<div class="card" style="padding-top:4px"><div class="tabs" role="tablist">' + tabs.filter(t => t[0] !== 'time' || showTime).map(([k, l, n]) => '<button role="tab" data-act="tab" data-v="' + k + '" class="' + (ui.tab === k ? 'on' : '') + '">' + l + '<span class="c num">' + n + '</span>' + (k === 'time' && planN(p) && p.sched.status !== 'approved' ? '<span class="dot-w" title="بانتظار اعتماد المدير العام"></span>' : '') + '</button>').join('') + '</div><div style="padding-top:14px">';
   if (ui.tab === 'boq') {
-    if (!p.boq.length) h += '<div class="empty">لا توجد بنود BOQ لهذا المشروع.</div>';
+    if (canAddBoq() && p.status === 'active') h += '<div class="ch" style="margin-bottom:8px"><span class="muted small">تقدر تضيف بند BOQ بنفسك، ويظهر في المشروع بعد موافقة المدير العام وصاحب الشركة.</span><span class="actions"><button class="btn pri" data-act="boqAdd" data-v="' + p.id + '">+ إضافة بند BOQ</button></span></div>';
+    if (p.boqNew.length) h += '<div class="flag warn" style="display:block;margin-bottom:12px"><b>بنود مضافة بانتظار الموافقة</b> <span class="muted small">ما تنحسب في قيمة المشروع ولا الإنجاز لين يوافق عليها المدير العام وصاحب الشركة.</span>' + boqNewTable(p.boqNew, false) + '</div>';
+    if (!p.boq.length) h += '<div class="empty">لا توجد بنود BOQ معتمدة لهذا المشروع.</div>';
     else {
       const bf = ui.bdept && ui.bdept !== 'all' ? ui.bdept : null; const noDept = p.boq.filter(x => !x.dept).length;
       const usedD = Object.keys(DEPTS).filter(k => p.boq.some(x => x.dept === k));
@@ -832,6 +848,7 @@ function vInbox() {
   if (q.pc.length) h += '<div class="card"><h2>بيتي كاش</h2>' + pettyTable(q.pc, true) + '</div>';
   if (q.projs.length) h += '<div class="card"><h2>مشاريع جديدة بانتظار موافقتك</h2><div class="tbl"><table><tbody>' + q.projs.map(p => '<tr class="click" data-go="p-' + p.id + '"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">من ' + esc(nameOf(p.reqBy)) + ' · ' + p.boq.length + ' بند · ' + money(contract(p)) + ' ر.ع</td><td><span class="pill p-warn">بانتظار الموافقة</span></td></tr>').join('') + '</tbody></table></div></div>';
   if (q.vos.length) h += '<div class="card"><h2>Variation Orders بانتظار اعتمادك</h2>' + voTable(q.vos, true) + '</div>';
+  if (q.boqs.length) h += '<div class="card"><h2>بنود BOQ مضافة بانتظار موافقتك</h2><span class="hint">البند ينضاف للمشروع بعد موافقة المدير العام وصاحب الشركة.</span>' + boqNewTable(q.boqs, true) + '</div>';
   if (q.sched.length) h += '<div class="card"><h2>جداول زمنية بانتظار اعتمادك</h2><div class="tbl"><table><tbody>' + q.sched.map(p => '<tr class="click" data-go="p-' + p.id + '" data-tab="time"><td><b>' + esc(pName(p)) + '</b><div class="muted small">' + esc(p.name) + '</div></td><td class="small">' + planN(p) + (p.boq.some(b => b.ps) ? ' بند' : ' مهمة') + ' · ' + fd(p.start) + ' إلى ' + fd(p.end) + '</td><td><span class="pill p-warn">مسودة</span></td></tr>').join('') + '</tbody></table></div></div>';
   return h;
 }
@@ -1347,6 +1364,23 @@ const A2 = {
     el.disabled = true; try { await run(sb.rpc('set_request_items', { p_req: d.v, p_items: list }), 'انحفظت المواد والأسعار'); } catch (e) { el.disabled = false; return; } refresh();
   },
   projOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_project', { p_project: d.v, p_ok: true }), 'اعتُمد المشروع وصار ظاهر للجميع'); } catch (e) { el.disabled = false; return; } refresh(); },
+  boqAdd: d => {
+    const p = P(d.v), last = p.boq.concat(p.boqNew).slice(-1)[0], sec = last ? last.s : (p.sections[0] || ['1'])[0];
+    const next = s => { const it = p.boq.concat(p.boqNew).filter(b => b.s === s).map(b => b.c), m = it.length ? /^(.*?)(\d+)$/.exec(it[it.length - 1]) : null; return m ? m[1] + (+m[2] + 1) : s + '.' + (it.length + 1); };
+    modal('إضافة بند BOQ - ' + pName(p), '<form class="f" data-form="boqadd" data-v="' + p.id + '"><div class="fr"><label class="fld"><span>القسم</span><select id="ba-s">' + p.sections.map(([c, n]) => '<option value="' + esc(c) + '"' + (c === sec ? ' selected' : '') + '>' + esc(c + ' · ' + (n || 'قسم ' + c)) + '</option>').join('') + '<option value="__new">+ قسم جديد</option></select></label><label class="fld"><span>رقم البند</span><input id="ba-c" required dir="ltr" value="' + esc(next(sec)) + '"></label></div>' +
+      '<div class="fr" id="ba-ns" hidden><label class="fld"><span>رقم القسم الجديد</span><input id="ba-sc" dir="ltr"></label><label class="fld"><span>اسم القسم الجديد</span><input id="ba-sn"></label></div>' +
+      '<label class="fld"><span>وصف البند</span><textarea id="ba-d" rows="2" required></textarea></label>' +
+      '<div class="fr"><label class="fld"><span>الكمية</span><input id="ba-q" type="number" min="0.001" step="any" required value="1"></label><label class="fld"><span>الوحدة</span><input id="ba-u" placeholder="م2، م3، عدد، مقطوعية"></label></div>' +
+      '<div class="fr"><label class="fld"><span>سعر الوحدة (ر.ع)</span><input id="ba-r" type="number" min="0" step="0.001" required></label><label class="fld"><span>القسم المسؤول</span>' + deptSel(null, 'id="ba-dp"') + '</label></div>' +
+      '<p class="muted small" id="ba-t" style="margin:0 0 8px"></p><p class="muted small">البند يروح للمدير العام وصاحب الشركة للموافقة، وبعد موافقتهم الاثنين يظهر في المشروع ويدخل في القيمة والإنجاز.</p>' +
+      '<div class="actions"><button class="btn pri" type="submit">إرسال للموافقة</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
+    const f = document.querySelector('form[data-form=boqadd]'), tot = () => { const q = +f.querySelector('#ba-q').value || 0, r = +f.querySelector('#ba-r').value || 0; f.querySelector('#ba-t').textContent = q && r ? 'قيمة البند: ' + money(q * r) + ' ر.ع (بدون الضريبة)' : ''; };
+    f.addEventListener('input', tot);
+    f.querySelector('#ba-s').addEventListener('change', e => { const nw = e.target.value === '__new'; f.querySelector('#ba-ns').hidden = !nw; f.querySelector('#ba-sc').required = nw; if (!nw) f.querySelector('#ba-c').value = next(e.target.value); });
+    if (!p.sections.length) { f.querySelector('#ba-s').value = '__new'; f.querySelector('#ba-ns').hidden = false; f.querySelector('#ba-sc').required = true; f.querySelector('#ba-c').value = ''; }
+  },
+  boqOk: async (d, el) => { el.disabled = true; try { const r = await run(sb.rpc('decide_boq_item', { p_item: d.v, p_ok: true })); toast(r === 'approved' ? 'اعتُمد البند وصار ظاهر في المشروع' : 'انسجلت موافقتك، والبند بانتظار الموافقة الثانية'); } catch (e) { el.disabled = false; return; } refresh(); },
+  boqNo: d => modal('رفض بند BOQ', '<form class="f" data-form="boqNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="bn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   projNo: d => modal('رفض المشروع', '<form class="f" data-form="projNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="pn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد أمر التغيير VO (منفصل عن قيمة العقد)'); } catch (e) { el.disabled = false; return; } refresh(); },
   voNo: d => modal('رفض العمل الإضافي', '<form class="f" data-form="voNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="vn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
@@ -1630,6 +1664,13 @@ document.addEventListener('submit', async e => {
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));
       const cnt = n.items.length, dated = n.items.some(i => i.start); ui.np = null; ui.tab = dated ? 'time' : 'boq';
       await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (!isAdmin() ? '، وراح للمدير العام للموافقة' : dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+    } else if (kind === 'boqadd') {
+      const nw = v('ba-s') === '__new', sc = nw ? v('ba-sc') : v('ba-s');
+      await run(sb.rpc('add_boq_item', { p_project: f.dataset.v, p_section: sc, p_section_name: nw ? v('ba-sn') : null, p_code: v('ba-c'), p_desc: v('ba-d'), p_qty: +v('ba-q'), p_unit: v('ba-u'), p_rate: +v('ba-r'), p_dept: v('ba-dp') || null }), ['gm', 'owner'].includes(me.role) ? 'انضاف البند وبانتظار الموافقة الثانية' : 'انضاف البند وراح للمدير العام وصاحب الشركة للموافقة');
+      closeModal(); ui.tab = 'boq'; refresh();
+    } else if (kind === 'boqNo') {
+      await run(sb.rpc('decide_boq_item', { p_item: f.dataset.v, p_ok: false, p_note: v('bn-n') }), 'انرفض البند');
+      closeModal(); refresh();
     } else if (kind === 'projNo') {
       await run(sb.rpc('decide_project', { p_project: f.dataset.v, p_ok: false, p_note: v('pn-n') }), 'انرفض المشروع');
       closeModal(); refresh();
