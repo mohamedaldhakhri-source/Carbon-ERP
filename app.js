@@ -119,7 +119,7 @@ function spent(p) {
 function committed(p, code, exceptId) {
   return S.requests.filter(r => r.pid === p.id && ['finance', 'gm', 'po'].includes(r.stage) && r.id !== exceptId && (code === undefined || r.boq === code)).reduce((a, r) => a + reqAmt(r), 0);
 }
-function progress(p) { const t = contract(p); return t ? p.boq.reduce((a, b) => a + b.t * b.p, 0) / t : 0; }
+function progress(p) { const t = boqTotal(p); return t ? p.boq.reduce((a, b) => a + b.t * b.p, 0) / t : 0; } // weighted by the BOQ, whatever the contract value
 function secProgress(p, s) { const it = p.boq.filter(b => b.s === s); const t = it.reduce((a, b) => a + b.t, 0); return t ? it.reduce((a, b) => a + b.t * b.p, 0) / t : 0; }
 function timePct(p) { const a = D(p.start), b = D(p.end); return Math.max(0, Math.min(100, (today - a) / (b - a) * 100)); }
 function daysLeft(p) { return daysBetween(today, D(p.end)); }
@@ -574,8 +574,13 @@ function vReceipts() {
   return h;
 }
 function invForm(pid) {
-  modal('فاتورة للعميل - ' + pName(P(pid)), '<form class="f" data-form="cinv" data-v="' + pid + '"><div class="fr"><label class="fld"><span>رقم الفاتورة</span><input id="ci-no" required dir="ltr"></label><label class="fld"><span>تاريخ الفاتورة</span><input id="ci-d" type="date" required value="' + iso(today) + '"></label></div>' +
-    '<div class="fr"><label class="fld"><span>مبلغ الفاتورة (ر.ع)</span><input id="ci-a" type="number" min="0.001" step="0.001" required></label><label class="fld"><span>نسبة الإنجاز في الفاتورة % (اختياري)</span><input id="ci-p" type="number" min="0" max="100" step="any"></label></div>' +
+  // the project's overall progress (from its BOQ items) fills in by itself, with the amount it makes due
+  const p = P(pid), hasBoq = p.boq.length > 0, pr = Math.round(progress(p) * 10) / 10, rs = recStats(p);
+  const earned = rs.value * pr / 100, due = Math.max(0, Math.round((earned - rs.invoiced) * 1000) / 1000);
+  const hint = hasBoq ? 'إنجاز المشروع الحين ' + pr + '% من بنود BOQ' + (rs.value > 0 ? ' · يعني ' + money(earned) + ' ر.ع من قيمة ' + money(rs.value) + (rs.invoiced > 0 ? ' · انفوتر قبل ' + money(rs.invoiced) : '') + ' · المستحق الحين ' + money(due) + ' ر.ع' : '') : 'المشروع ما فيه بنود BOQ بعد، فالنسبة ما تطلع تلقائياً. أضف البنود وحدّث إنجازها، أو اكتب النسبة بنفسك.';
+  modal('فاتورة للعميل - ' + pName(p), '<form class="f" data-form="cinv" data-v="' + pid + '"><div class="fr"><label class="fld"><span>رقم الفاتورة</span><input id="ci-no" required dir="ltr"></label><label class="fld"><span>تاريخ الفاتورة</span><input id="ci-d" type="date" required value="' + iso(today) + '"></label></div>' +
+    '<div class="fr"><label class="fld"><span>مبلغ الفاتورة (ر.ع)</span><input id="ci-a" type="number" min="0.001" step="0.001" required' + (hasBoq && due > 0 ? ' value="' + due + '"' : '') + '></label><label class="fld"><span>' + (hasBoq ? 'نسبة إنجاز المشروع % (تلقائي)' : 'نسبة الإنجاز في الفاتورة %') + '</span><input id="ci-p" type="number" min="0" max="100" step="any"' + (hasBoq ? ' value="' + pr + '"' : '') + '></label></div>' +
+    '<p class="muted small" style="margin:-4px 0 8px">' + hint + '</p>' +
     '<label class="fld"><span>العمل المنجز اللي تشمله الفاتورة</span><input id="ci-w" placeholder="مثال: الدفعة الثانية - أعمال الهيكل"></label><label class="fld"><span>نسخة الفاتورة (اختياري)</span><input id="ci-f" type="file" accept="image/*,.pdf"></label>' +
     '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>');
 }
