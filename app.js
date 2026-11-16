@@ -143,6 +143,28 @@ function stageInfo(r) {
   if (r.clarify) return { l: askerName(r) + ' يطلب توضيح من ' + clName(r.clarify), c: 'p-warn' };
   const s = STAGES.find(x => x.k === r.stage); return { l: 'بانتظار: ' + s.l, c: r.stage === 'dept' ? 'p-idle' : 'p-warn' };
 }
+/* ---------- who has a request now, and since when ---------- */
+// the people who hold a permission (heads and site engineers only for their departments); nobody → the system admin
+function holders(perm, dept) {
+  const rs = S.perms[perm] || [];
+  let l = S.profiles.filter(u => rs.includes(u.role) && (!dept || !['head', 'site'].includes(u.role) || !myDepts(u).length || myDepts(u).includes(dept)));
+  if (!l.length) l = S.profiles.filter(u => u.role === 'admin');
+  return l;
+}
+const whoNames = l => l.map(u => u.full_name || u.email).join('، ') || '—';
+function ago(t) {
+  if (!t) return '';
+  const m = Math.max(0, Math.round((Date.now() - new Date(t)) / 60000));
+  return m < 60 ? (m <= 1 ? 'من دقيقة' : 'من ' + m + ' دقيقة') : m < 1440 ? 'من ' + Math.round(m / 60) + ' ساعة' : 'من ' + Math.round(m / 1440) + ' يوم';
+}
+// where a material request sits: the step, the people, since when
+function reqAt(r) {
+  if (['done', 'rejected'].includes(r.stage)) return null;
+  const st = STAGES.find(x => x.k === r.stage) || {};
+  const ppl = r.stage === 'finance' ? S.profiles.filter(u => u.role === 'finance') : holders(st.perm, r.stage === 'dept' ? r.dept : null);
+  const last = r.hist.length ? r.hist[r.hist.length - 1].t : r.date;
+  return { step: r.clarify ? 'توضيح مطلوب من ' + clName(r.clarify) : st.l, ppl, since: last };
+}
 function canActOn(r) {
   const s = STAGES.find(x => x.k === r.stage); if (!s || !s.role || !me) return false;
   if (me.role === 'admin') return true;
@@ -225,7 +247,7 @@ async function loadAll() {
   S.profiles = profs;
   const codeOf = {}; items.forEach(b => { codeOf[b.id] = b.code; });
   const allP = pr.map(p => ({
-    approval: p.approval || 'approved', reqBy: p.requested_by, apBy: p.approval_by, apAt: p.approval_at, apNote: p.approval_note,
+    approval: p.approval || 'approved', reqBy: p.requested_by, reqAt: p.created_at, apBy: p.approval_by, apAt: p.approval_at, apNote: p.approval_note,
     id: p.id, code: p.code, name: p.name, short: p.short_name, client: p.client, type: p.type, kind: p.type === 'gov' ? 'gov' : p.client_type === 'company' ? 'company' : 'private', cPhone: p.client_phone, cEmail: p.client_email, cId: p.client_id_no, cIdFile: p.client_id_path, cCr: p.client_cr, depts: p.depts || [], start: p.start_date, end: p.end_date,
     status: p.status, stopReason: p.stop_reason, contractV: p.contract_value == null ? null : +p.contract_value, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
@@ -282,6 +304,7 @@ function views() {
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
   if (h === 'perms') return vPerms();
+  if (h === 'mine') return vMine();
   if (h === 'log') return vLog();
   return vDash();
 }
@@ -396,10 +419,11 @@ function vProject(id) {
   h += '</div></div>';
   return h;
 }
+const atCell = a => a ? '<b>' + esc(whoNames(a.ppl)) + '</b><div class="muted">' + ago(a.since) + '</div>' : '<span class="muted">—</span>';
 function reqTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات.</div>';
-  return '<div class="tbl"><table><thead><tr><th>رقم الطلب</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>المواد</th><th>البند</th><th class="n">المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead><tbody>' +
-    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(r => { const si = stageInfo(r), p = P(r.pid); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.no) + '</b></td>' + (showProj ? '<td>' + esc(pName(p)) + '</td>' : '') + '<td>' + esc(r.items[0] ? r.items[0].d : '') + (r.items.length > 1 ? ' <span class="muted small">+' + (r.items.length - 1) + '</span>' : '') + '</td><td class="num small">' + (r.boq ? esc(r.boq) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</td><td class="n">' + (reqAmt(r) ? money(reqAmt(r)) : '<span class="muted">—</span>') + '</td><td class="small">' + fd(r.date) + '</td><td><span class="pill ' + si.c + '">' + si.l + '</span></td></tr>'; }).join('') + '</tbody></table></div>';
+  return '<div class="tbl"><table><thead><tr><th>رقم الطلب</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>المواد</th><th>البند</th><th class="n">المبلغ</th><th>التاريخ</th><th>الحالة</th><th>عند مين الحين</th></tr></thead><tbody>' +
+    list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(r => { const si = stageInfo(r), p = P(r.pid); return '<tr class="click" data-go="r-' + r.id + '"><td class="num small"><b>' + esc(r.no) + '</b></td>' + (showProj ? '<td>' + esc(pName(p)) + '</td>' : '') + '<td>' + esc(r.items[0] ? r.items[0].d : '') + (r.items.length > 1 ? ' <span class="muted small">+' + (r.items.length - 1) + '</span>' : '') + '</td><td class="num small">' + (r.boq ? esc(r.boq) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</td><td class="n">' + (reqAmt(r) ? money(reqAmt(r)) : '<span class="muted">—</span>') + '</td><td class="small">' + fd(r.date) + '</td><td><span class="pill ' + si.c + '">' + si.l + '</span></td><td class="small">' + atCell(reqAt(r)) + '</td></tr>'; }).join('') + '</tbody></table></div>';
 }
 function pettyTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
@@ -414,7 +438,7 @@ function vRequests() {
   if (f === 'mine') list = q.reqs; else if (f === 'open') list = list.filter(r => !['done', 'rejected'].includes(r.stage)); else if (f === 'done') list = list.filter(r => r.stage === 'done'); else if (f === 'me') list = list.filter(r => r.byId === me.id);
   return '<div class="head"><div class="t"><h1>طلبات المواد</h1><span class="muted">من الموقع حتى أمر الشراء</span></div><div class="actions"><button class="btn pri" data-act="newReq">+ طلب مواد جديد</button></div></div>' +
     '<div class="card"><div class="ch"><div class="seg">' + [['mine', 'بانتظار إجرائي (' + q.reqs.length + ')'], ['me', 'طلباتي'], ['open', 'قيد الإجراء'], ['done', 'صدر لها PO'], ['all', 'الكل']].map(([k, l]) => '<button data-act="reqFilter" data-v="' + k + '" class="' + (f === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div></div>' + reqTable(list, true) + '</div>' +
-    '<div class="card"><h2>مسار الطلب</h2><div class="steps">' + STAGES.map((s, i) => '<div class="step"><span class="dot">' + (i + 1) + '</span>' + s.l + (s.role ? '<span class="muted small">' + ROLES[s.role] + '</span>' : '') + '</div>').join('') + '</div></div>';
+    '<div class="card"><h2>مسار الطلب</h2><div class="steps">' + STAGES.map((s, i) => '<div class="step"><span class="dot">' + (i + 1) + '</span>' + s.l + (s.perm ? '<span class="muted small">' + (stepOn(s.perm) || !['mr.head', 'mr.qs'].includes(s.perm) ? permWho(s.perm) : 'موقفة') + '</span>' : '') + '</div>').join('') + '</div></div>';
 }
 function rejStage(r) { const last = r.hist[r.hist.length - 1] || {}; return ({ head: 'dept', procurement: 'procurement', qs: 'qs', finance: 'finance', gm: 'gm', owner: 'gm' })[last.role] || 'dept'; }
 function vRequest(id) {
@@ -423,7 +447,7 @@ function vRequest(id) {
   const rejIdx = r.stage === 'rejected' ? STAGES.findIndex(s => s.k === rejStage(r)) : -1;
   const bi = r.boq ? itemByCode(p, r.boq) : null;
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#requests">طلبات المواد</a> / ' + esc(r.no) + '</span><h1>طلب مواد ' + esc(r.no) + '</h1><div class="actions"><span class="pill ' + si.c + '">' + si.l + '</span><a class="tag" href="#p-' + p.id + '">' + esc(pName(p)) + '</a><span class="tag">' + DEPTS[r.dept] + '</span>' + (me.role === 'admin' ? '<button class="btn sm bad" data-act="adminDel" data-t="material_requests" data-v="' + r.id + '" data-l="' + esc('طلب المواد ' + r.no) + '">حذف الطلب</button>' : '') + '</div></div></div>';
-  h += '<div class="card"><div class="steps">' + STAGES.map((s, i) => { let c = ''; if (r.stage === 'rejected') { c = i < rejIdx ? 'done' : i === rejIdx ? 'rej' : ''; } else if (r.stage === 'done' || i < idx) c = 'done'; else if (i === idx) c = 'cur'; return '<div class="step ' + c + '"><span class="dot">' + (c === 'done' ? '✓' : c === 'rej' ? '✕' : i + 1) + '</span>' + s.l + '</div>'; }).join('') + '</div></div>';
+  h += '<div class="card"><div class="steps">' + STAGES.map((s, i) => { let c = ''; if (r.stage === 'rejected') { c = i < rejIdx ? 'done' : i === rejIdx ? 'rej' : ''; } else if (r.stage === 'done' || i < idx) c = 'done'; else if (i === idx) c = 'cur'; const at = c === 'cur' ? reqAt(r) : null; return '<div class="step ' + c + '"><span class="dot">' + (c === 'done' ? '✓' : c === 'rej' ? '✕' : i + 1) + '</span>' + s.l + (at ? '<span class="small" style="color:var(--warn)">عند ' + esc(whoNames(at.ppl)) + ' · ' + ago(at.since) + '</span>' : '') + '</div>'; }).join('') + '</div>' + (reqAt(r) ? '<p class="small" style="margin:10px 0 0">📍 الطلب الحين عند <b>' + esc(whoNames(reqAt(r).ppl)) + '</b> (' + esc(reqAt(r).step) + ')، ' + ago(reqAt(r).since) + '.</p>' : '') + '</div>';
   h += '<div class="grid2"><div style="display:flex;flex-direction:column;gap:18px;min-width:0">';
   h += actionPanel(r, p);
   const priced = r.items.some(it => it.pr != null), itot = r.items.reduce((a, it) => a + (it.pr || 0) * it.q, 0);
@@ -890,6 +914,37 @@ function vPerms() {
           PERM_ROLES.map(r => '<td class="c"><input type="checkbox" data-perm="' + k + '" data-role="' + r + '"' + ((S.perms[k] || []).includes(r) ? ' checked' : '') + ' aria-label="' + esc(l + ' - ' + ROLES[r]) + '"></td>').join('') +
           '<td class="c"><input type="checkbox" checked disabled aria-label="مدير النظام"></td></tr>'; }).join('') + '</tbody></table></div>';
   });
+  return h + '</div>';
+}
+/* ---------- my requests: everything I sent, where it is and with whom ---------- */
+function vMine() {
+  const all = ui.mineAll, rows = [];
+  const add = (o) => { if (all || o.open) rows.push(o); };
+  S.requests.filter(r => r.byId === me.id).forEach(r => { const a = reqAt(r), si = stageInfo(r);
+    add({ open: !!a, t: r.date, kind: 'طلب مواد', no: r.no, pid: r.pid, what: (r.items[0] ? r.items[0].d : '') + (r.items.length > 1 ? ' +' + (r.items.length - 1) : ''), amt: reqAmt(r), st: si, at: a, go: 'r-' + r.id,
+      steps: STAGES.filter(x => x.perm).map(x => ({ l: x.l, c: r.stage === 'done' ? 'done' : x.k === r.stage ? 'cur' : STAGES.findIndex(y => y.k === x.k) < STAGES.findIndex(y => y.k === r.stage) ? 'done' : '' })) }); });
+  S.petty.filter(c => c.byId === me.id).forEach(c => {
+    const a = c.status === 'pending' ? { step: 'اعتماد البيتي كاش', ppl: holders('pc.approve'), since: c.date } : c.status === 'approved' && !c.inv ? { step: 'إرفاق الفاتورة', ppl: [me], since: c.decAt } : null;
+    add({ open: !!a, t: c.date, kind: 'بيتي كاش', no: c.no, pid: c.pid, what: c.d, amt: c.amt, st: c.status === 'pending' ? { l: 'بانتظار الاعتماد', c: 'p-warn' } : c.status === 'rejected' ? { l: 'مرفوض', c: 'p-bad' } : c.inv ? { l: 'معتمد · الفاتورة مرفقة', c: 'p-ok' } : { l: 'معتمد · ارفق الفاتورة', c: 'p-warn' }, at: a, go: 'p-' + c.pid, tab: 'pc' }); });
+  S.variations.filter(v => v.byId === me.id).forEach(v => {
+    const a = v.gm === 'pending' ? { step: 'اعتماد العمل الإضافي', ppl: holders('vo.approve'), since: v.date } : null;
+    add({ open: !!a, t: v.date, kind: 'Variation Order', no: v.no, pid: v.pid, what: v.title, amt: v.amt, st: v.gm === 'pending' ? { l: 'بانتظار الاعتماد', c: 'p-warn' } : v.gm === 'approved' ? { l: 'معتمد', c: 'p-ok' } : { l: 'مرفوض', c: 'p-bad' }, at: a, go: 'p-' + v.pid, tab: 'vo' }); });
+  S.projects.concat(S.pending).forEach(p => (p.boqNew || []).filter(b => b.byId === me.id).forEach(b => {
+    const need = (S.perms['boq.approve'] || []).filter(r => !b.oks[r]);
+    const a = b.st === 'pending' ? { step: 'موافقة ' + (need.map(r => ROLES[r]).join(' و ') || ROLES.admin), ppl: need.length ? S.profiles.filter(u => need.includes(u.role)) : holders('x'), since: b.at } : null;
+    add({ open: !!a, t: b.at, kind: 'بند BOQ', no: b.c, pid: p.id, what: b.d, amt: b.t, st: b.st === 'pending' ? { l: 'بانتظار الموافقة', c: 'p-warn' } : { l: 'مرفوض', c: 'p-bad' }, at: a, go: 'p-' + p.id, tab: 'boq' }); }));
+  S.pending.filter(p => p.reqBy === me.id).forEach(p => {
+    const a = p.approval === 'pending' ? { step: 'اعتماد المشروع', ppl: holders('proj.approve'), since: p.reqAt } : null;
+    add({ open: !!a, t: p.reqAt, kind: 'مشروع جديد', no: p.code || '', pid: p.id, what: p.name, amt: contract(p), st: p.approval === 'pending' ? { l: 'بانتظار الاعتماد', c: 'p-warn' } : { l: 'مرفوض', c: 'p-bad' }, at: a, go: 'p-' + p.id }); });
+  rows.sort((x, y) => String(y.t || '').localeCompare(String(x.t || '')));
+  const nOpen = rows.filter(x => x.open).length;
+  let h = '<div class="head"><div class="t"><h1>طلباتي</h1><span class="muted">كل شي أرسلته: وين واصل الحين، وعند مين، ومن متى.</span></div></div>';
+  h += '<div class="card"><div class="ch"><div class="seg"><button data-act="mineAll" data-v="" class="' + (!all ? 'on' : '') + '">قيد الإجراء</button><button data-act="mineAll" data-v="1" class="' + (all ? 'on' : '') + '">الكل</button></div></div>';
+  if (!rows.length) return h + '<div class="empty">' + (all ? 'ما أرسلت أي طلب بعد.' : 'ما عندك طلبات قيد الإجراء الحين.') + '</div></div>';
+  h += '<div class="mine">' + rows.map(x => '<div class="mi click" data-go="' + x.go + '"' + (x.tab ? ' data-tab="' + x.tab + '"' : '') + ' tabindex="0" role="link"><div class="ch"><div><span class="tag">' + x.kind + '</span> <b class="num">' + esc(x.no || '') + '</b> <span class="muted small">' + esc(pName(P(x.pid))) + ' · ' + fd(x.t) + '</span></div><span class="pill ' + x.st.c + '">' + esc(x.st.l) + '</span></div>' +
+    '<div class="small" style="margin:4px 0">' + esc(x.what || '') + (x.amt ? ' · <b class="num">' + money(x.amt) + '</b> ر.ع' : '') + '</div>' +
+    (x.steps ? '<div class="mini">' + x.steps.map(s => '<span class="' + s.c + '" title="' + esc(s.l) + '"></span>').join('') + '</div>' : '') +
+    (x.at ? '<div class="where">📍 ' + esc(x.at.step) + ' · عند <b>' + esc(x.at.ppl.length === 1 && x.at.ppl[0].id === me.id ? 'أنت' : whoNames(x.at.ppl)) + '</b> · ' + ago(x.at.since) + '</div>' : '') + '</div>').join('') + '</div>';
   return h + '</div>';
 }
 function vInbox() {
@@ -1434,6 +1489,7 @@ const A2 = {
   },
   boqOk: async (d, el) => { el.disabled = true; try { const r = await run(sb.rpc('decide_boq_item', { p_item: d.v, p_ok: true })); toast(r === 'approved' ? 'اعتُمد البند وصار ظاهر في المشروع' : 'انسجلت موافقتك، والبند بانتظار الموافقة الثانية'); } catch (e) { el.disabled = false; return; } refresh(); },
   boqNo: d => modal('رفض بند BOQ', '<form class="f" data-form="boqNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="bn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
+  mineAll: d => { ui.mineAll = !!d.v; render(); },
   projNo: d => modal('رفض المشروع', '<form class="f" data-form="projNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="pn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   voOk: async (d, el) => { el.disabled = true; try { await run(sb.rpc('decide_variation', { p_id: d.v, p_ok: true }), 'اعتُمد أمر التغيير VO (منفصل عن قيمة العقد)'); } catch (e) { el.disabled = false; return; } refresh(); },
   voNo: d => modal('رفض العمل الإضافي', '<form class="f" data-form="voNo" data-v="' + d.v + '"><label class="fld"><span>سبب الرفض</span><input id="vn-n" required></label><div class="actions"><button class="btn bad" type="submit">رفض</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
@@ -1761,7 +1817,7 @@ function render() {
   if (me.role === 'pending') { root.innerHTML = vPending(); return; }
   const q = myQueue(); const h = location.hash.slice(1) || 'dashboard';
   const sec = h.startsWith('p-') || h.startsWith('sr-') || h === 'new-project' ? 'projects' : h.startsWith('r-') ? 'requests' : h.startsWith('rep-') ? 'reports' : h.startsWith('v3d-') ? 'projects' : h;
-  const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
+  const items = [['dashboard', 'لوحة المتابعة', 'dash', 'المتابعة'], ['projects', 'المشاريع', 'proj', 'المشاريع'], ['requests', 'طلبات المواد', 'req', 'الطلبات'], ['petty', 'بيتي كاش', 'cash', 'بيتي كاش'], ['mine', 'طلباتي', 'req', 'طلباتي'], ['inbox', 'بانتظار إجرائي', 'inbox', 'إجرائي']];
   if (canFinance()) items.splice(4, 0, ['expenses', 'المصروفات', 'cash', 'المصروفات']);
   if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
   if (canSeeRec()) items.splice(items.findIndex(x => x[0] === 'petty'), 0, ['receipts', 'المبالغ المستلمة', 'cash', 'المستلم']);
