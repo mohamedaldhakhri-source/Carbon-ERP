@@ -221,6 +221,8 @@ const tag = (m, look) => { m.userData.look = look; return m; };
 /* ---------- viewer ---------- */
 // the key a browser reading of a drawing set is kept under; the number changes when the reading itself changes
 const LOCAL_SHEETS = 'local:sheets:59';
+// the same for plans that are pictures (presentations like RIYADA): the reading plus the plan pictures and design views it needs
+const LOCAL_RASTER = 'local:raster:69';
 export class Viewer {
   constructor(opts) {
     this.opts = opts || {};
@@ -512,10 +514,11 @@ export class Viewer {
     try {
       // a plan the AI already read for this document opens straight away, with no new cost
       let lk = null; if (pic && this.opts.looks) { try { this.msg('جاري فتح المخطط…'); lk = await this.opts.looks.load(); } catch (e) { console.warn(e); } }
-      const saved = lk && lk.layout, kept = lk && lk[LOCAL_SHEETS];
+      const saved = lk && lk.layout, kept = lk && lk[LOCAL_SHEETS], keptR = lk && lk[LOCAL_RASTER];
       if (saved) await this._loadLayout(saved);
       // a drawing this program already read once opens from that reading, without going through the pages again
       else if (ext === 'pdf' && kept && kept.set && await this._openKept(buf, kept.set)) { }
+      else if (ext === 'pdf' && keptR && keptR.set && await this._openRaster(keptR, lk)) { }
       else if (ext === 'ifc') await this._loadIfc(buf);
       else if (ext === 'glb' || ext === 'gltf') await this._loadGltf(buf);
       else if (['fbx', 'obj', 'dae', '3ds', 'zip'].includes(ext)) await this._loadModel(buf, ext);
@@ -1000,13 +1003,35 @@ export class Viewer {
     this.rasterImgs = imgs; this.rasterOpt = opt || {}; this.set = set; this.texCache = {};
     this.areas = this._areas(imgs.scenes || []); this.looks = null;
     if (this.areas.length && this.opts.looks) { try { this.looks = (await this.opts.looks.load()) || null; } catch (e) { console.warn(e); } }
-    await this._buildSheets(); return true;
+    await this._buildSheets(); this._keepRaster(); return true;
+  }
+  // keep a picture-plan reading with the file: the reading, the plan pictures (PNG) and the design views (smaller JPEGs)
+  _keepRaster() {
+    const lk = this.opts.looks; if (!lk || !lk.keep || this.ext !== 'pdf' || !this.set || !this.rasterImgs) return;
+    try {
+      const png = im => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(im.data), im.width, im.height), 0, 0); return c.toDataURL('image/png'); };
+      const small = (u, max, q) => new Promise(res => { const i = new Image(); i.onload = () => { const s = Math.min(1, max / Math.max(i.width, i.height)), c = document.createElement('canvas'); c.width = Math.round(i.width * s); c.height = Math.round(i.height * s); c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', q)); }; i.onerror = () => res(u); i.src = u; });
+      const imgs = this.rasterImgs.map(im => ({ png: png(im), width: im.width, height: im.height, page: im.page }));
+      Promise.all((this.rasterImgs.scenes || []).map(async sc => ({ page: sc.page, title: sc.title, mark: sc.mark, thumb: sc.thumb, jpg: await small(sc.jpg, 640, 0.66) })))
+        .then(scenes => lk.keep(LOCAL_RASTER, { set: this.set, opt: this.rasterOpt || {}, imgs, scenes, at: new Date().toISOString() })).catch(e => console.warn(e));
+    } catch (e) { console.warn(e); }
+  }
+  async _openRaster(kr, lk) {
+    try {
+      this.msg('جاري فتح المخطط…');
+      const pic = d => new Promise((res, rej) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = d.width; c.height = d.height; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(i, 0, 0); res({ width: d.width, height: d.height, page: d.page, data: x.getImageData(0, 0, d.width, d.height).data }); }; i.onerror = rej; i.src = d.png; });
+      const imgs = await Promise.all((kr.imgs || []).map(pic)); if (!imgs.length) return false;
+      imgs.scenes = kr.scenes || [];
+      this.rasterImgs = imgs; this.rasterOpt = kr.opt || {}; this.set = kr.set; this.texCache = {};
+      this.areas = this._areas(imgs.scenes); this.looks = this.areas.length ? lk : null;
+      await this._buildSheets(); return true;
+    } catch (e) { console.warn(e); this.model.clear(); this.meshes = []; this.set = null; this.rasterImgs = null; return false; }
   }
   async rebuildRaster(opt) {
     this.msg('جاري تحديث المجسم…'); await new Promise(r => setTimeout(r, 20));
     const o = { ...this.rasterOpt, ...opt }; let set = null; try { set = await this._work('analyzeImages', this.rasterImgs, o); } catch (e) { console.warn(e); }
     if (!set) { this.msg('ما قدرت أبني المخطط بهذي القيم.'); return; }
-    this.rasterOpt = o; this.set = set; this.texCache = {};
+    this.rasterOpt = o; this.set = set; this.texCache = {}; this._keepRaster();
     this.scene.children.filter(o => o.userData.ground).forEach(o => this.scene.remove(o));
     await this._buildSheets(); this._finish();
   }
