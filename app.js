@@ -197,7 +197,7 @@ async function loadAll() {
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
     q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), sb.from('project_docs').select('id,project_id,kind,title,path,uploaded_by,created_at').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on')]);
-  const bad = res.find(r => r.error); if (bad) throw bad.error;
+  const bad = res.find(r => r.error); if (bad) throw bad.error; S.loadedAt = Date.now();
   const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups, cinv, cpay] = res.map(r => r.data);
   S.cinv = (cinv || []).map(x => ({ id: x.id, pid: x.project_id, no: x.invoice_no, date: x.invoice_date, amt: +x.amount, desc: x.work_desc, pct: x.work_pct == null ? null : +x.work_pct, file: x.file_path, byId: x.created_by }));
   S.cpay = (cpay || []).map(x => ({ id: x.id, pid: x.project_id, inv: x.invoice_id, amt: +x.amount, date: x.received_on, method: x.method, ref: x.reference, note: x.note, file: x.file_path, byId: x.created_by }));
@@ -323,10 +323,12 @@ function vProject(id) {
   if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
   else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
   else if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
-  h += '<div class="kpis k5">' +
+  const rs = canFinance() ? recStats(p) : null;
+  h += '<div class="kpis ' + (rs ? 'k6' : 'k5') + '">' +
     '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + (p.contractV != null ? 'حسب العقد' + (p.boq.length && Math.abs(boqTotal(p) - c) > 0.5 ? ' · مجموع BOQ ' + money(boqTotal(p)) : '') : 'القيمة الأصلية حسب BOQ') + '</span></div>' +
     '<div class="kpi vo"><span class="l">Variation Orders (VO) المعتمدة</span><span class="v">' + money(va) + ' <small>ر.ع</small></span><span class="s">' + voSub(p) + '</span></div>' +
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>' +
+    (rs ? '<button type="button" class="kpi kbtn" data-act="tab" data-v="rec" title="تفاصيل المبالغ المستلمة"><span class="l">المستلم من العميل</span><span class="v">' + money(rs.received) + ' <small>ر.ع</small></span><span class="s">' + (rs.value > 0 ? Math.round(rs.received / rs.value * 100) + '% من القيمة' : 'آخر مبلغ ' + fd(rs.last)) + (rs.due > 0.0005 ? ' · باقي من الفواتير ' + money(rs.due) : '') + '</span></button>' : '') +
     '<div class="kpi"><span class="l">نسبة الإنجاز</span><span class="v">' + Math.round(pr) + '%</span><span class="s">الوقت المنقضي ' + Math.round(timePct(p)) + '%</span></div>' +
     '<div class="kpi' + (dl < 0 && p.status === 'active' ? ' alert' : '') + '"><span class="l">موعد التسليم</span><span class="v">' + fd(p.end) + '</span><span class="s">' + (ended(p) ? 'المشروع مغلق' : dl < 0 ? 'متأخر ' + (-dl) + ' يوم' : 'باقي ' + dl + ' يوم') + ' · البداية ' + fd(p.start) + '</span></div></div>';
   const tabs = [['boq', 'بنود BOQ', p.boq.length], ['time', 'الجدول الزمني', planN(p)], ['req', 'طلبات المواد', reqs.length], ['pc', 'بيتي كاش', pcs.length], ['vo', 'Variation Orders', vos.length], ['docs', 'المستندات', S.docs.filter(x => x.pid === p.id).length + (p.cIdFile ? 1 : 0)]].concat(canSeeRec() ? [['rec', 'المبالغ المستلمة', S.cpay.filter(x => x.pid === p.id).length]] : []).concat(me.role === 'admin' ? [['log', 'السجل', '']] : []);
@@ -1640,7 +1642,8 @@ document.addEventListener('submit', async e => {
   } catch (err) { /* toast already shown */ }
   finally { if (btn && document.body.contains(btn)) { btn.disabled = false; if (btn.dataset.t) btn.textContent = btn.dataset.t; } }
 });
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); if (session && me && Date.now() - (S.loadedAt || 0) > 20000) refresh(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && session && me && Date.now() - (S.loadedAt || 0) > 20000) refresh(); });
 
 /* ---------- shell ---------- */
 function render() {
