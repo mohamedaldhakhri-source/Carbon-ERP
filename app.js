@@ -52,6 +52,7 @@ const fd = s => { if (!s) return '—'; const d = D(s); return String(d.getDate(
 const ftime = s => { if (!s) return ''; const d = new Date(s); return fd(d.toISOString()) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const daysBetween = (a, b) => Math.round((b - a) / 864e5);
+const langBtn = cls => '<button type="button" class="linkbtn small notr ' + (cls || '') + '" data-act="lang" title="' + (window.LANG === 'en' ? 'عربي' : 'English') + '">' + (window.LANG === 'en' ? 'عربي' : 'English') + '</button>';
 const P = id => S.projects.find(p => p.id === id) || S.pending.find(p => p.id === id);
 // What each role may do comes from role_perms, edited by the system admin on #perms. The admin may do everything.
 const can = k => !!me && (me.role === 'admin' || (S.perms[k] || []).includes(me.role));
@@ -272,7 +273,7 @@ async function refresh() { try { await loadAll(); render(); } catch (e) { toast(
 
 /* ---------- auth ---------- */
 function vAuth() {
-  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner">' +
+  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner"><div style="text-align:end">' + langBtn() + '</div>' +
     '<h1>تسجيل الدخول</h1>' + (ui.authErr ? '<div class="err">' + esc(ui.authErr) + '</div>' : '') +
     '<form class="f" data-form="login">' +
     '<label class="fld"><span>البريد الإلكتروني</span><input id="a-email" type="email" required autocomplete="email" dir="ltr"></label>' +
@@ -281,7 +282,7 @@ function vAuth() {
     '<span class="hint">ما عندك حساب أو نسيت كلمة المرور؟ تواصل مع مدير النظام.</span></div></div></div>';
 }
 function vPending() {
-  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner"><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button></div></div></div></div>';
+  return '<div class="auth"><div class="box">' + LOGO + '<div class="inner"><h1>حسابك بانتظار التفعيل</h1><p class="muted">أهلاً ' + esc(me.full_name) + '. يحتاج مدير النظام يفعّل حسابك ويحدد دورك وقسمك. بعدها حدّث الصفحة.</p><div class="actions"><button class="btn pri" data-act="reloadPage">تحديث</button><button class="btn" data-act="logout">خروج</button> ' + langBtn() + '</div></div></div></div>';
 }
 
 /* ---------- views ---------- */
@@ -1073,7 +1074,7 @@ function gantt(p, rows) {
   rows.forEach(r => { if (r.s && D(r.s) < a) a = D(r.s); if (r.e && D(r.e) > z) z = D(r.e); });
   a = new Date(a.getFullYear(), a.getMonth(), 1); z = new Date(z.getFullYear(), z.getMonth() + 1, 0);
   const span = z - a + 864e5, pos = d => (D(d) - a) / span * 100, nowPos = (today - a) / span * 100;
-  const months = []; for (const m = new Date(a); m <= z; m.setMonth(m.getMonth() + 1)) { const nx = new Date(m.getFullYear(), m.getMonth() + 1, 1); months.push({ x: (m - a) / span * 100, w: (Math.min(nx, new Date(z.getTime() + 864e5)) - m) / span * 100, l: m.toLocaleDateString('ar', { month: 'short' }) + ' ' + String(m.getFullYear()).slice(2) }); }
+  const months = []; for (const m = new Date(a); m <= z; m.setMonth(m.getMonth() + 1)) { const nx = new Date(m.getFullYear(), m.getMonth() + 1, 1); months.push({ x: (m - a) / span * 100, w: (Math.min(nx, new Date(z.getTime() + 864e5)) - m) / span * 100, l: m.toLocaleDateString(window.LANG === 'en' ? 'en-GB' : 'ar', { month: 'short' }) + ' ' + String(m.getFullYear()).slice(2) }); }
   const grid = months.map(m => '<i style="inset-inline-start:' + m.x.toFixed(2) + '%"></i>').join('') + (nowPos >= 0 && nowPos <= 100 ? '<b class="gnow" style="inset-inline-start:' + nowPos.toFixed(2) + '%"></b>' : '');
   const col = ui.gcol || {};
   let h = '<div class="gx"><div class="g2"><div class="g2h"><div class="g2l"><span>البند</span><span class="n">المدة</span><span>من - إلى</span></div><div class="g2c">' + months.map(m => '<span style="inset-inline-start:' + m.x.toFixed(2) + '%;width:' + m.w.toFixed(2) + '%">' + m.l + '</span>').join('') + '</div></div>';
@@ -1568,6 +1569,7 @@ const A = {
   tab: d => { ui.tab = d.v; if (d.v === 'log') ui.plog = {}; render(); },
   reqFilter: d => { ui.reqFilter = d.v; render(); },
   authMode: () => { ui.authMode = ui.authMode === 'login' ? 'signup' : 'login'; ui.authErr = ''; render(); },
+  lang: () => window.setLang(window.LANG === 'en' ? 'ar' : 'en'),
   logout: async () => { try { await sb.rpc('log_event', { p_action: 'logout' }); } catch (e) { } await sb.auth.signOut(); },
   reloadPage: () => location.reload(),
   newReq: d => newReqForm(d.p), newPetty: d => newPettyForm(d.p), newVO: d => newVOForm(d.p), projStatus: d => projStatusForm(d.p),
@@ -1827,15 +1829,15 @@ function render() {
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
   root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
     items.map(([k, l, i]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + l + badge(k) + '</a>').join('') +
-    '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
-    '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + greet() + views() + '</div></main>' +
+    '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div><div class="rbtns"><button type="button" data-act="logout">تسجيل خروج</button>' + langBtn() + '</div></div></aside>' +
+    '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button> ' + langBtn() + '</div>' + greet() + views() + '</div></main>' +
     '<nav class="bnav">' + items.filter(x => x[0] !== 'users' && x[0] !== 'perms').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
   mount3d();
 }
 
 function greet() {
   const hr = new Date().getHours(), first = String(me.full_name || '').trim().split(/\s+/)[0] || '';
-  return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' ' + esc(first) : '') + '</b><span class="muted small">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + ' · ' + new Date().toLocaleDateString('ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
+  return '<div class="greet"><b>' + (hr >= 4 && hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? ' <span>' + esc(first) + '</span>' : '') + '</b><span class="muted small">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + ' · ' + new Date().toLocaleDateString(window.LANG === 'en' ? 'en-GB' : 'ar', { weekday: 'long', day: 'numeric', month: 'long' }) + '</span></div>';
 }
 // Sign-in (or opening the app with a saved session, once per browser tab) goes to the activity log.
 // The server takes the IP from the request; the city here is an approximate lookup from that IP.

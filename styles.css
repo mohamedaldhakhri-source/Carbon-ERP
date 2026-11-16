@@ -480,3 +480,4 @@ input.ro{background:var(--sunk);color:var(--muted);cursor:default}
 .perm th.c,.perm td.c{text-align:center;white-space:nowrap}.perm td.c input{width:18px;height:18px;accent-color:var(--brand,#1f5f8b)}
 .mine{display:flex;flex-direction:column;gap:10px}.mine .mi{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--surface);cursor:pointer}.mine .mi:hover{border-color:var(--muted)}
 .mine .where{font-size:.85rem;margin-top:6px;color:var(--warn)}.mine .mini{display:flex;gap:4px;margin:6px 0 2px}.mine .mini span{flex:1;height:5px;border-radius:3px;background:var(--line)}.mine .mini span.done{background:var(--ok)}.mine .mini span.cur{background:var(--warn)}
+.rolebox .rbtns{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
