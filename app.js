@@ -18,11 +18,11 @@ const OMAN = {
 };
 const ROLES = { admin: 'مدير النظام', owner: 'صاحب الشركة', gm: 'المدير العام', head: 'رئيس قسم', site: 'مهندس موقع', procurement: 'المشتريات', qs: 'مهندس الكميات (QS)', finance: 'المالية', pending: 'بانتظار التفعيل' };
 const STAGES = [
-  { k: 'dept', l: 'موافقة رئيس القسم', role: 'head' },
-  { k: 'procurement', l: 'التسعير والكوتيشن', role: 'procurement' },
-  { k: 'qs', l: 'مراجعة مهندس الكميات (QS)', role: 'qs' },
-  { k: 'gm', l: 'اعتماد المدير العام', role: 'gm' },
-  { k: 'po', l: 'إصدار أمر الشراء', role: 'procurement' },
+  { k: 'dept', l: 'موافقة رئيس القسم', role: 'head', perm: 'mr.head' },
+  { k: 'procurement', l: 'التسعير والكوتيشن', role: 'procurement', perm: 'mr.price' },
+  { k: 'qs', l: 'مراجعة مهندس الكميات (QS)', role: 'qs', perm: 'mr.qs' },
+  { k: 'gm', l: 'اعتماد المدير العام', role: 'gm', perm: 'mr.final' },
+  { k: 'po', l: 'إصدار أمر الشراء', role: 'procurement', perm: 'mr.po' },
   { k: 'done', l: 'أُرسل PO للمورّد' }
 ];
 const TERMS = { advance: 'دفعة مقدّمة', credit30: 'آجل 30 يوم' };
@@ -41,7 +41,7 @@ const ico = k => '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true
 
 /* ---------- state ---------- */
 let session = null, me = null;
-let S = { projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [], suppliers: [], cinv: [], cpay: [] };
+let S = { perms: {}, projects: [], pending: [], requests: [], petty: [], variations: [], profiles: [], docs: [], suppliers: [], cinv: [], cpay: [] };
 let ui = { filter: 'all', tab: 'boq', reqFilter: 'mine', authMode: 'login', authErr: '' };
 
 /* ---------- helpers ---------- */
@@ -53,29 +53,32 @@ const ftime = s => { if (!s) return ''; const d = new Date(s); return fd(d.toISO
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 const daysBetween = (a, b) => Math.round((b - a) / 864e5);
 const P = id => S.projects.find(p => p.id === id) || S.pending.find(p => p.id === id);
-const canApprove = () => me && ['gm', 'owner', 'admin'].includes(me.role);
-const canNewProject = () => isAdmin() || (me && me.role === 'head');
+// What each role may do comes from role_perms, edited by the system admin on #perms. The admin may do everything.
+const can = k => !!me && (me.role === 'admin' || (S.perms[k] || []).includes(me.role));
+const stepOn = k => (S.perms[k] || []).length > 0;
+const permWho = k => (S.perms[k] || []).map(r => ROLES[r]).join(' أو ') || ROLES.admin;
+const canNewProject = () => can('proj.create') || can('proj.request');
 const DOCK = { contract: 'العقد', boq: 'جدول الكميات BOQ', cad: 'مخطط معماري (AutoCAD)', municipality: 'مخطط معتمد من البلدية', drawing: 'مخططات أخرى', model3d: 'نموذج 3D (IFC / GLB / DXF)', ministry: 'موافقة الوزارة / العميل', other: 'مستند آخر' };
 const R = id => S.requests.find(r => r.id === id);
 const nameOf = id => { const p = S.profiles.find(x => x.id === id); return p ? p.full_name : '—'; };
 const selQuote = r => (r.quotes || []).find(q => q.sel);
 const reqAmt = r => { const q = selQuote(r); return q ? +q.amt : 0; };
 const KIND = { gov: 'حكومي', company: 'شركات', private: 'خاص' };
-const isAdmin = () => me && ['admin', 'owner', 'gm'].includes(me.role);
+const isAdmin = () => can('proj.edit');
 const itemByCode = (p, c) => p.boq.find(b => b.c === c);
-const canPrice = () => me && ['gm', 'owner', 'admin'].includes(me.role);
-const canSched = () => me && (me.role === 'gm' || me.role === 'admin');
-const canDates = p => me && ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && !ended(p);
+const canPrice = () => can('boq.edit');
+const canSched = () => can('sched.approve');
+const canDates = p => can('boq.progress') && !ended(p);
 // A user may hold several departments (profiles.depts); none means all departments.
 const myDepts = (u = me) => u && u.depts && u.depts.length ? u.depts : u && u.dept ? [u.dept] : [];
 const deptNames = (u = me) => myDepts(u).map(d => DEPTS[d]).join('، ');
 const inMyDept = d => !myDepts().length || myDepts().includes(d);
-const canSeeSup = () => me && ['admin', 'owner', 'gm', 'procurement', 'qs', 'finance'].includes(me.role);
-const canEditSup = () => me && ['admin', 'owner', 'gm', 'procurement'].includes(me.role);
+const canSeeSup = () => can('sup.view') || can('sup.edit') || can('mr.price');
+const canEditSup = () => can('sup.edit');
 const SUP = id => S.suppliers.find(x => x.id === id);
 const supOptions = () => '<option value="">اختر المورّد من القائمة</option>' + S.suppliers.filter(x => x.active).map(x => '<option value="' + x.id + '">' + esc(x.name) + ' · سجل ' + esc(x.cr) + '</option>').join('');
-const canSeeRec = () => me && ['finance', 'owner', 'gm', 'admin'].includes(me.role);
-const canEditRec = () => me && ['finance', 'admin'].includes(me.role);
+const canSeeRec = () => can('fin.view') || can('fin.record');
+const canEditRec = () => can('fin.record');
 const PAYM = { transfer: 'تحويل بنكي', cheque: 'شيك', cash: 'نقداً' };
 function recStats(p) {
   const inv = S.cinv.filter(x => x.pid === p.id), pay = S.cpay.filter(x => x.pid === p.id);
@@ -84,7 +87,7 @@ function recStats(p) {
   return { inv, pay, value, invoiced, received, due: invoiced - received, last };
 }
 const invPaid = id => S.cpay.filter(x => x.inv === id).reduce((a, x) => a + x.amt, 0);
-const canFinance = () => me && ['finance', 'admin', 'gm', 'owner'].includes(me.role);
+const canFinance = () => can('fin.view') || can('fin.record');
 const myItem = b => !['head', 'site'].includes(me.role) || inMyDept(b.dept);
 const planN = p => p.boq.filter(b => b.ps && b.pe).length || p.tasks.length;
 const locText = p => [p.wil, p.gov].filter(Boolean).join('، ') + (p.loc ? (p.wil || p.gov ? ' - ' : '') + p.loc : '');
@@ -143,30 +146,32 @@ function stageInfo(r) {
 function canActOn(r) {
   const s = STAGES.find(x => x.k === r.stage); if (!s || !s.role || !me) return false;
   if (me.role === 'admin') return true;
-  if (s.role !== me.role && !(s.role === 'gm' && me.role === 'owner')) return false;
-  if (s.role === 'head' && !inMyDept(r.dept)) return false;
+  if (r.stage === 'finance') return ['finance', 'gm'].includes(me.role);
+  if (!s.perm || !can(s.perm)) return false;
+  if (r.stage === 'dept' && ['head', 'site'].includes(me.role) && !inMyDept(r.dept)) return false;
   return true;
 }
 // BOQ items added by hand wait for the GM and the owner; each sees the ones still missing their own approval
-const canAddBoq = () => me && ['qs', 'head', 'gm', 'owner', 'admin'].includes(me.role);
-const boqMine = b => b.st === 'pending' && (me.role === 'admin' || (me.role === 'gm' && !b.gm) || (me.role === 'owner' && !b.own));
+const canAddBoq = () => can('boq.add');
+const boqMine = b => b.st === 'pending' && (me.role === 'admin' || ((S.perms['boq.approve'] || []).includes(me.role) && !b.oks[me.role]));
 function boqNewTable(list, showProj) {
   if (!list.length) return '';
-  const step = (who, by, at) => by ? '<span class="pill p-ok">' + who + ' ✓</span><div class="muted small">' + esc(nameOf(by)) + (at ? ' · ' + fd(at) : '') + '</div>' : '<span class="pill p-warn">بانتظار ' + who + '</span>';
-  return '<div class="tbl"><table><thead><tr>' + (showProj ? '<th>المشروع</th>' : '') + '<th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th>أضافه</th><th>المدير العام</th><th>صاحب الشركة</th><th></th></tr></thead><tbody>' +
+  const step = (who, ok) => ok ? '<span class="pill p-ok">' + who + ' ✓</span><div class="muted small">' + esc(nameOf(ok.by)) + (ok.at ? ' · ' + fd(ok.at) : '') + '</div>' : '<span class="pill p-warn">بانتظار ' + who + '</span>';
+  const appr = S.perms['boq.approve'] || [];
+  return '<div class="tbl"><table><thead><tr>' + (showProj ? '<th>المشروع</th>' : '') + '<th>البند</th><th>الوصف</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th>أضافه</th>' + (appr.length ? appr.map(r => '<th>' + ROLES[r] + '</th>').join('') : '<th>الاعتماد</th>') + '<th></th></tr></thead><tbody>' +
     list.map(b => '<tr>' + (showProj ? '<td class="small"><a href="#p-' + b.pid + '">' + esc(pName(P(b.pid))) + '</a></td>' : '') + '<td class="num small">' + esc(b.s) + ' / ' + esc(b.c) + '</td><td>' + esc(b.d) + (b.dept ? ' <span class="tag">' + DEPTS[b.dept] + '</span>' : '') + (b.note ? '<div class="muted small">ملاحظة: ' + esc(b.note) + '</div>' : '') + '</td><td class="n">' + b.q + ' ' + esc(b.u) + '</td><td class="n">' + money(b.r) + '</td><td class="n"><b>' + money(b.t) + '</b></td><td class="small">' + esc(nameOf(b.byId)) + (b.at ? '<div class="muted">' + fd(b.at) + '</div>' : '') + '</td>' +
-      (b.st === 'rejected' ? '<td colspan="2"><span class="pill p-bad">مرفوض</span>' + (b.dec ? '<div class="muted small">' + esc(nameOf(b.dec)) + '</div>' : '') + '</td>' : '<td>' + step('المدير العام', b.gm, b.gmAt) + '</td><td>' + step('صاحب الشركة', b.own, b.ownAt) + '</td>') +
+      (b.st === 'rejected' ? '<td colspan="' + Math.max(1, appr.length) + '"><span class="pill p-bad">مرفوض</span>' + (b.dec ? '<div class="muted small">' + esc(nameOf(b.dec)) + '</div>' : '') + '</td>' : appr.length ? appr.map(r => '<td>' + step(ROLES[r], b.oks[r]) + '</td>').join('') : '<td>' + step(ROLES.admin, b.oks.admin) + '</td>') +
       '<td>' + (boqMine(b) ? '<div class="actions"><button class="btn sm ok" data-act="boqOk" data-v="' + b.id + '">' + (me.role === 'admin' ? 'اعتماد نهائي' : 'موافق') + '</button><button class="btn sm bad" data-act="boqNo" data-v="' + b.id + '">رفض</button></div>' : '') +
       (me.role === 'admin' ? ' <button class="x" data-act="adminDel" data-t="boq_items" data-v="' + b.id + '" data-l="' + esc('البند ' + b.c) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
 }
 function myQueue() {
   const reqs = S.requests.filter(canActOn);
-  const pc = me && (me.role === 'gm' || me.role === 'admin') ? S.petty.filter(c => c.status === 'pending') : [];
+  const pc = can('pc.approve') ? S.petty.filter(c => c.status === 'pending') : [];
   const sched = canSched() ? S.projects.filter(p => !ended(p) && planN(p) && p.sched.status !== 'approved') : [];
-  const projs = canApprove() ? S.pending.filter(p => p.approval === 'pending') : [];
-  const vos = canApprove() ? S.variations.filter(v => v.gm === 'pending') : [];
+  const projs = can('proj.approve') ? S.pending.filter(p => p.approval === 'pending') : [];
+  const vos = can('vo.approve') ? S.variations.filter(v => v.gm === 'pending') : [];
   const inv = me ? S.petty.filter(c => c.status === 'approved' && !c.inv && c.byId === me.id) : [];
-  const boqs = canApprove() ? S.projects.flatMap(p => p.boqNew).filter(boqMine) : [];
+  const boqs = S.projects.flatMap(p => p.boqNew).filter(boqMine);
   return { reqs, pc, sched, projs, vos, inv, boqs, n: reqs.length + pc.length + sched.length + projs.length + vos.length + inv.length + boqs.length };
 }
 function bar(pct, cls, marker) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.min(100, Math.max(0, pct)).toFixed(1) + '%"></i>' + (marker != null ? '<b style="inset-inline-start:calc(' + Math.min(100, marker).toFixed(1) + '% - 1px)" title="الوقت المنقضي"></b>' : '') + '</div>'; }
@@ -209,9 +214,10 @@ async function loadAll() {
   const q = t => sb.from(t).select('*');
   const res = await Promise.all([q('projects').order('created_at'), q('boq_sections').order('sort'), q('boq_items').order('sort'), q('tasks').order('sort'),
     q('material_requests').order('created_at'), q('request_items'), q('quotes').order('created_at'), q('request_history').order('created_at'),
-    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), sb.from('project_docs').select('id,project_id,kind,title,path,uploaded_by,created_at').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on')]);
+    q('petty_cash').order('created_at'), q('variations').order('created_at'), q('profiles').order('created_at'), sb.from('project_docs').select('id,project_id,kind,title,path,uploaded_by,created_at').order('created_at'), q('suppliers').order('name'), q('client_invoices').order('invoice_date'), q('client_payments').order('received_on'), q('role_perms')]);
   const bad = res.find(r => r.error); if (bad) throw bad.error; S.loadedAt = Date.now();
-  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups, cinv, cpay] = res.map(r => r.data);
+  const [pr, secs, items, tasks, reqs, ritems, quotes, hist, petty, vars, profs, docs, sups, cinv, cpay, perms] = res.map(r => r.data);
+  S.perms = {}; (perms || []).forEach(x => { (S.perms[x.perm] = S.perms[x.perm] || []).push(x.role); });
   S.cinv = (cinv || []).map(x => ({ id: x.id, pid: x.project_id, no: x.invoice_no, date: x.invoice_date, amt: +x.amount, desc: x.work_desc, pct: x.work_pct == null ? null : +x.work_pct, file: x.file_path, byId: x.created_by }));
   S.cpay = (cpay || []).map(x => ({ id: x.id, pid: x.project_id, inv: x.invoice_id, amt: +x.amount, date: x.received_on, method: x.method, ref: x.reference, note: x.note, file: x.file_path, byId: x.created_by }));
   S.suppliers = (sups || []).map(x => ({ id: x.id, name: x.name, cr: x.cr_no, crPath: x.cr_path, act: x.activity, contact: x.contact_name, phone: x.phone, email: x.email, addr: x.address, bank: x.bank_name, accName: x.account_name, acc: x.bank_account, iban: x.iban, notes: x.notes, active: x.active }));
@@ -224,12 +230,12 @@ async function loadAll() {
     status: p.status, stopReason: p.stop_reason, contractV: p.contract_value == null ? null : +p.contract_value, vat: +p.vat, gov: p.governorate, wil: p.wilayat, loc: p.location_note,
     sched: { status: p.schedule_status, by: p.schedule_approved_by, at: p.schedule_approved_at, note: p.schedule_note },
     sections: secs.filter(s => s.project_id === p.id).map(s => [s.code, s.name]),
-    boqNew: items.filter(b => b.project_id === p.id && b.approval && b.approval !== 'approved').map(b => ({ id: b.id, pid: p.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, dept: b.dept, st: b.approval, byId: b.added_by, at: b.added_at, gm: b.gm_ok_by, gmAt: b.gm_ok_at, own: b.owner_ok_by, ownAt: b.owner_ok_at, dec: b.decided_by, note: b.decide_note })),
+    boqNew: items.filter(b => b.project_id === p.id && b.approval && b.approval !== 'approved').map(b => ({ id: b.id, pid: p.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, dept: b.dept, st: b.approval, byId: b.added_by, at: b.added_at, oks: b.oks || {}, dec: b.decided_by, note: b.decide_note })),
     boq: items.filter(b => b.project_id === p.id && (b.approval || 'approved') === 'approved').map(b => ({ id: b.id, c: b.code, s: b.section_code, d: b.description, q: +b.qty, u: b.unit, r: +b.rate, t: +b.total, p: b.progress, sp: +b.prior_spent, dept: b.dept, ps: b.start_date, pe: b.end_date })),
     tasks: tasks.filter(t => t.project_id === p.id).map(t => ({ id: t.id, n: t.name, s: t.start_date, e: t.end_date, ph: t.is_phase, dept: t.dept }))
   }));
   S.projects = allP.filter(p => p.approval === 'approved');
-  S.pending = allP.filter(p => p.approval !== 'approved' && (canApprove() || p.reqBy === me.id));
+  S.pending = allP.filter(p => p.approval !== 'approved' && (can('proj.approve') || p.reqBy === me.id));
   S.requests = reqs.map(r => ({
     id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
     date: r.created_at, need: r.need_by, note: r.note, stage: r.stage, clarify: r.clarify, clarifyBy: r.clarify_by || 'gm', po: r.po_no ? { no: r.po_no, date: r.po_date } : null,
@@ -275,6 +281,7 @@ function views() {
   if (h.startsWith('rep-')) return vReport(h.slice(4));
   if (h === 'inbox') return vInbox();
   if (h === 'users') return vUsers();
+  if (h === 'perms') return vPerms();
   if (h === 'log') return vLog();
   return vDash();
 }
@@ -331,10 +338,10 @@ function vProject(id) {
   const p = P(id); if (!p) return '<div class="empty">المشروع غير موجود</div>';
   const hh = health(p), pr = progress(p), c = contract(p), va = varsApproved(p), b = budget(p), s = spent(p), cm = committed(p), dl = daysLeft(p);
   const reqs = S.requests.filter(r => r.pid === id), pcs = S.petty.filter(x => x.pid === id), vos = S.variations.filter(v => v.pid === id);
-  const canProg = ['site', 'head', 'gm', 'owner', 'admin'].includes(me.role) && p.status === 'active';
+  const canProg = can('boq.progress') && p.status === 'active';
   let h = '<div class="head"><div class="t"><span class="crumb"><a href="#projects">المشاريع</a> / ' + esc(pName(p)) + '</span><h1>' + esc(p.name) + '</h1><div class="actions"><span class="pill ' + hh.c + '">' + hh.l + '</span><span class="tag ' + (p.type === 'gov' ? 'gov' : '') + '">' + 'مشروع ' + KIND[p.kind] + '</span>' + p.depts.map(d => '<span class="tag">' + DEPTS[d] + '</span>').join('') + '</div><span class="muted small">كود المشروع <b class="num">' + esc(p.code || '—') + '</b>' + (locText(p) ? ' · 📍 ' + esc(locText(p)) : '') + '</span>' + clientCard(p) + '</div>' +
     '<div class="actions">' + (p.approval === 'approved' && !ended(p) ? '<button class="btn pri" data-act="newReq" data-p="' + id + '">+ طلب مواد</button><button class="btn" data-act="newPetty" data-p="' + id + '">+ بيتي كاش</button><button class="btn" data-act="newVO" data-p="' + id + '">+ Variation Order (VO)</button>' : '') + (S.docs.find(x => x.pid === id && ext3dDoc(x)) ? '<a class="btn" href="#v3d-' + S.docs.filter(x => x.pid === id && ext3dDoc(x)).pop().id + '">🧊 المبنى 3D</a>' : '') + (isAdmin() ? '<button class="btn" data-act="projStatus" data-p="' + id + '">بيانات وحالة المشروع</button>' : '') + '</div></div>';
-  if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (canApprove() ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
+  if (p.approval === 'pending') h += '<div class="flag warn ch"><span>هذا المشروع طلبه ' + esc(nameOf(p.reqBy)) + ' وبانتظار موافقة المدير العام. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.</span>' + (can('proj.approve') ? '<span class="actions"><button class="btn ok" data-act="projOk" data-v="' + p.id + '">اعتماد المشروع</button><button class="btn bad" data-act="projNo" data-v="' + p.id + '">رفض</button></span>' : '') + '</div>';
   else if (p.approval === 'rejected') h += '<div class="flag bad">رفض المدير العام هذا المشروع' + (p.apNote ? ': ' + esc(p.apNote) : '') + '</div>';
   else if (hh.why) h += '<div class="flag ' + (hh.k === 'late' ? 'bad' : 'warn') + '">' + esc(hh.why) + '</div>';
   const rs = canFinance() ? recStats(p) : null;
@@ -357,8 +364,8 @@ function vProject(id) {
       const bf = ui.bdept && ui.bdept !== 'all' ? ui.bdept : null; const noDept = p.boq.filter(x => !x.dept).length;
       const usedD = Object.keys(DEPTS).filter(k => p.boq.some(x => x.dept === k));
       h += '<div class="ch" style="margin-bottom:8px"><div class="seg">' + [['all', 'كل الأقسام']].concat(usedD.map(k => [k, DEPTS[k]])).concat(noDept ? [['none', 'بدون قسم (' + noDept + ')']] : []).map(([k, l]) => '<button data-act="bdeptFilter" data-v="' + k + '" class="' + ((ui.bdept || 'all') === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
-        (isAdmin() && noDept ? '<button class="btn sm" data-act="boqClassify" data-v="' + p.id + '">وزّع ' + noDept + ' بند على الأقسام بالذكاء</button>' : '') + '</div>' +
-        '<span class="muted small">' + (canProg ? 'حدّث نسبة الإنجاز لكل بند مباشرة من الجدول.' : 'نسبة الإنجاز يحدّثها مهندس الموقع أو رئيس القسم.') + (isAdmin() ? ' تقدر تغيّر القسم المسؤول عن أي بند.' : '') + '</span>' +
+        (canPrice() && noDept ? '<button class="btn sm" data-act="boqClassify" data-v="' + p.id + '">وزّع ' + noDept + ' بند على الأقسام بالذكاء</button>' : '') + '</div>' +
+        '<span class="muted small">' + (canProg ? 'حدّث نسبة الإنجاز لكل بند مباشرة من الجدول.' : 'نسبة الإنجاز يحدّثها مهندس الموقع أو رئيس القسم.') + (canPrice() ? ' تقدر تغيّر القسم المسؤول عن أي بند.' : '') + '</span>' +
         '<div class="tbl"><table><thead><tr><th>البند</th><th>الوصف</th><th>القسم</th><th class="n">الكمية</th><th class="n">سعر الوحدة</th><th class="n">القيمة</th><th class="n">المصروف</th><th>الإنجاز</th></tr></thead><tbody>';
       const match = x => !bf || (bf === 'none' ? !x.dept : x.dept === bf);
       p.sections.forEach(([sc, sn]) => {
@@ -366,7 +373,7 @@ function vProject(id) {
         h += '<tr class="sec"><td>' + esc(sc) + '</td><td>' + esc(sn || 'قسم ' + sc) + (canPrice() ? ' <button class="linkbtn small" data-act="secRename" data-p="' + p.id + '" data-v="' + esc(sc) + '" title="تعديل اسم القسم">✎</button>' : '') + '</td><td></td><td></td><td></td><td class="n">' + money(st) + '</td><td class="n">' + money(ss) + '</td><td><div class="barrow">' + bar(secProgress(p, sc)) + '<span>' + Math.round(secProgress(p, sc)) + '%</span></div></td></tr>';
         it.forEach(x => {
           const isp = itemSpent(p, x.c);
-          h += '<tr><td class="num small">' + esc(x.c) + '</td><td>' + esc(x.d) + '</td><td>' + (isAdmin() ? deptSel(x.dept, 'class="dsel" data-bdept="' + x.id + '" aria-label="قسم البند ' + esc(x.c) + '"') : (x.dept ? '<span class="tag">' + DEPTS[x.dept] + '</span>' : '<span class="muted">—</span>')) + '</td><td class="n">' + x.q + ' ' + esc(x.u) + '</td><td class="n">' + money(x.r) + '</td><td class="n">' + money(x.t) + '</td><td class="n"' + (isp > x.t ? ' style="color:var(--bad)" title="تجاوز قيمة البند"' : '') + '>' + money(isp) + '</td><td style="min-width:150px"><div class="barrow">' + bar(x.p, x.p >= 100 ? 'ok' : '') + (canProg && myItem(x) ? '<input class="prog-in num" type="number" min="0" max="100" value="' + x.p + '" data-prog="' + x.id + '" aria-label="نسبة إنجاز البند ' + esc(x.c) + '">' : '<span>' + x.p + '%</span>') + '</div></td></tr>';
+          h += '<tr><td class="num small">' + esc(x.c) + '</td><td>' + esc(x.d) + '</td><td>' + (canPrice() ? deptSel(x.dept, 'class="dsel" data-bdept="' + x.id + '" aria-label="قسم البند ' + esc(x.c) + '"') : (x.dept ? '<span class="tag">' + DEPTS[x.dept] + '</span>' : '<span class="muted">—</span>')) + '</td><td class="n">' + x.q + ' ' + esc(x.u) + '</td><td class="n">' + money(x.r) + '</td><td class="n">' + money(x.t) + '</td><td class="n"' + (isp > x.t ? ' style="color:var(--bad)" title="تجاوز قيمة البند"' : '') + '>' + money(isp) + '</td><td style="min-width:150px"><div class="barrow">' + bar(x.p, x.p >= 100 ? 'ok' : '') + (canProg && myItem(x) ? '<input class="prog-in num" type="number" min="0" max="100" value="' + x.p + '" data-prog="' + x.id + '" aria-label="نسبة إنجاز البند ' + esc(x.c) + '">' : '<span>' + x.p + '%</span>') + '</div></td></tr>';
         });
       });
       if (bf) { const fl = p.boq.filter(match); h += '<tr class="sec"><td></td><td>إجمالي ' + (bf === 'none' ? 'البنود بدون قسم' : 'بنود ' + DEPTS[bf]) + '</td><td></td><td></td><td></td><td class="n">' + money(fl.reduce((a, x) => a + x.t, 0)) + '</td><td class="n">' + money(fl.reduce((a, x) => a + itemSpent(p, x.c), 0)) + '</td><td></td></tr></tbody></table></div>'; }
@@ -396,7 +403,7 @@ function reqTable(list, showProj) {
 }
 function pettyTable(list, showProj) {
   if (!list.length) return '<div class="empty">لا توجد طلبات بيتي كاش.</div>';
-  const gm = me.role === 'gm' || me.role === 'admin';
+  const gm = can('pc.approve');
   return '<div class="tbl"><table><thead><tr><th>الرقم</th>' + (showProj ? '<th>المشروع</th>' : '') + '<th>التفاصيل</th><th class="n">المبلغ</th><th>مقدم الطلب</th><th>الحالة</th>' + (me.role === 'admin' ? '<th></th>' : '') + '</tr></thead><tbody>' +
     list.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).map(c => '<tr><td class="num small"><b>' + esc(c.no) + '</b><div class="muted">' + fd(c.date) + '</div></td>' + (showProj ? '<td><a href="#p-' + c.pid + '">' + esc(pName(P(c.pid))) + '</a></td>' : '') + '<td>' + esc(c.d) + '<div class="muted small">' + (c.boq ? 'بند ' + esc(c.boq) : 'مصروف عام للمشروع') + ' ' + fileLink(c.file, 'مرفق الطلب') + '</div>' + (c.note ? '<div class="small">ملاحظة المدير: ' + esc(c.note) + '</div>' : '') + '</td><td class="n">' + money(c.amt) + '</td><td class="small">' + esc(c.by) + '</td><td>' +
       (c.status === 'pending' ? (gm ? '<div class="actions"><button class="btn sm ok" data-act="pcOk" data-v="' + c.id + '">اعتماد</button><button class="btn sm bad" data-act="pcNo" data-v="' + c.id + '">رفض</button></div>' : '<span class="pill p-warn">بانتظار المدير العام</span>') : c.status === 'approved' ? (c.inv ? '<span class="pill p-ok">معتمد · الفاتورة مرفقة</span>' + fileLink(c.inv, 'الفاتورة') : c.byId === me.id || me.role === 'admin' ? '<span class="pill p-warn">معتمد · بانتظار الفاتورة</span><div class="actions" style="margin-top:6px"><button class="btn sm pri" data-act="pcInv" data-v="' + c.id + '">ارفق الفاتورة</button></div>' : '<span class="pill p-warn">معتمد · بانتظار فاتورة ' + esc(c.by) + '</span>') : '<span class="pill p-bad">مرفوض</span>') + '</td>' + (me.role === 'admin' ? '<td>' + '<button class="x" data-act="adminDel" data-t="petty_cash" data-v="' + c.id + '" data-l="' + esc('بيتي كاش ' + c.no) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>';
@@ -463,7 +470,7 @@ function actionPanel(r, p) {
   if (r.stage === 'done') return '<div class="flag ok">تم إصدار أمر الشراء ' + esc(r.po.no) + ' وإرساله للمورّد.</div>';
   if (r.stage === 'rejected') { const l = r.hist[r.hist.length - 1] || {}; return '<div class="flag bad">رُفض الطلب: ' + esc(l.note || l.a) + '</div>'; }
   const cl = clarifyNote(r);
-  if (!canActOn(r)) return cl + '<div class="panel wait"><b>بانتظار ' + ROLES[st.role] + (st.role === 'head' ? ' ' + DEPTS[r.dept] : '') + '</b><span class="muted small">' + st.l + '</span>' + (['finance', 'qs', 'gm'].includes(r.stage) ? budgetCheck(r, p) : '') + '</div>';
+  if (!canActOn(r)) return cl + '<div class="panel wait"><b>بانتظار ' + (st.perm ? permWho(st.perm) : ROLES[st.role]) + (st.k === 'dept' ? ' ' + DEPTS[r.dept] : '') + '</b><span class="muted small">' + st.l + '</span>' + (['finance', 'qs', 'gm'].includes(r.stage) ? budgetCheck(r, p) : '') + '</div>';
   const noteF = '<label class="fld"><span>ملاحظة (اختياري، وإلزامية عند الرفض)</span><textarea id="actnote" placeholder="سبب الرفض أو أي توجيه"></textarea></label>';
   const btns = (ok) => '<div class="actions"><button class="btn ok" data-act="approve" data-v="' + r.id + '">' + ok + '</button><button class="btn bad" data-act="reject" data-v="' + r.id + '">' + (r.stage === 'procurement' ? 'إلغاء الطلب' : 'رفض') + '</button></div>';
   if (r.stage === 'dept' && r.clarify) return cl + answerPanel(r);
@@ -550,7 +557,7 @@ function voTable(list, showProj) {
       return '<tr><td class="num small">' + esc(v.no) + '</td><td><b>' + esc(v.title) + '</b><div class="muted small">' + esc(v.d) + '</div><div class="muted small">طلبه ' + esc(v.by) + '</div></td>' + (showProj ? '<td class="small"><a href="#p-' + v.pid + '">' + esc(pName(p)) + '</a></td>' : '') + '<td class="n">' + money(v.amt) + '</td>' +
         '<td class="small">' + (v.file ? fileLink(v.file, 'عرض الموافقة') : ((v.byId === me.id || isAdmin()) ? '<button class="btn sm" data-act="voApprove" data-v="' + v.id + '">إرفاق الموافقة</button>' : '<span class="pill p-warn">ما انرفقت</span>')) + '</td>' +
         '<td>' + (v.gm === 'approved' ? '<span class="pill p-ok">معتمد' + (v.gmBy ? ' من ' + esc(nameOf(v.gmBy)) : '') + '</span>' : v.gm === 'rejected' ? '<span class="pill p-bad">مرفوض</span>' + (v.gmNote ? '<div class="muted small">' + esc(v.gmNote) + '</div>' : '') :
-          (canApprove() ? (v.file ? '<span class="actions"><button class="btn sm ok" data-act="voOk" data-v="' + v.id + '">اعتماد</button><button class="btn sm bad" data-act="voNo" data-v="' + v.id + '">رفض</button></span>' : '<span class="muted small">بانتظار إرفاق الموافقة</span>') : '<span class="pill p-warn">بانتظار المدير العام</span>')) + '</td>' +
+          (can('vo.approve') ? (v.file ? '<span class="actions"><button class="btn sm ok" data-act="voOk" data-v="' + v.id + '">اعتماد</button><button class="btn sm bad" data-act="voNo" data-v="' + v.id + '">رفض</button></span>' : '<span class="muted small">بانتظار إرفاق الموافقة</span>') : '<span class="pill p-warn">بانتظار المدير العام</span>')) + '</td>' +
         '<td class="small">' + fd(v.date) + '</td>' + (me.role === 'admin' ? '<td>' + '<button class="x" data-act="adminDel" data-t="variations" data-v="' + v.id + '" data-l="' + esc('Variation Order ' + v.no) + '" title="حذف (مدير النظام)" aria-label="حذف">🗑</button>' + '</td>' : '') + '</tr>'; }).join('') + '</tbody></table></div>';
 }
 function recKpis(t) {
@@ -569,7 +576,7 @@ function invTable(list, showProj) {
 }
 // a payment saved without an invoice (e.g. received before the invoice was issued) can be tied to one later
 function payLink(x) {
-  const open = ['finance', 'admin'].includes(me.role) ? S.cinv.filter(i => i.pid === x.pid && i.amt - invPaid(i.id) > 0.0005) : [];
+  const open = can('fin.record') ? S.cinv.filter(i => i.pid === x.pid && i.amt - invPaid(i.id) > 0.0005) : [];
   if (!open.length) return '<span class="muted">بدون فاتورة</span>';
   return '<select class="sm" data-payinv="' + x.id + '" title="ربط المبلغ بفاتورة"><option value="">بدون فاتورة · اربطه بفاتورة</option>' + open.map(i => '<option value="' + i.id + '">' + esc(i.no) + ' · باقي ' + money(i.amt - invPaid(i.id)) + '</option>').join('') + '</select>';
 }
@@ -627,7 +634,7 @@ function docsTab(p) {
 const ext3d = path => { const m = /\.(ifc|glb|gltf|dxf|dwg|fbx|obj|dae|3ds|layout)$/i.exec(path || ''); return m ? m[1].toLowerCase() : null; };
 // a building the AI designed from a written brief: no file, the design lives on the document itself
 const isAiDoc = d => /\.layout$/i.test(d.path || '');
-const canAi = () => me && ['admin', 'owner', 'gm'].includes(me.role);
+const canAi = () => can('ai.use');
 // CAD drawings plotted to PDF (with layers) also open in 3D when filed as drawings or 3D models.
 const ext3dDoc = d => { if (ext3d(d.path)) return ext3d(d.path); const m = /\.(pdf|png|jpe?g|webp|zip)$/i.exec(d.path || ''); return m && ['drawing', 'cad', 'municipality', 'model3d'].includes(d.kind) ? m[1].toLowerCase().replace('jpeg', 'jpg') : null; };
 let V3 = null;
@@ -678,7 +685,7 @@ async function mount3d() {
 }
 
 /* ---------- reports (GM, owner, admin) ---------- */
-const canReports = () => me && ['gm', 'owner', 'admin'].includes(me.role);
+const canReports = () => can('reports.view');
 const BRAND = '<div class="brandmark"><img src="assets/mark.svg" alt="شعار كربون"><div><b>CARBON</b><span>ENGINEERING DESIGN</span></div></div>';
 const REPORTS = [
   ['projects', 'ملخص المشاريع', 'قيمة كل مشروع، الإنجاز، المصروف، المستلم من العميل، وموعد التسليم'],
@@ -839,6 +846,52 @@ function repCsv(k) {
   a.download = 'Carbon-' + k + '-' + iso(today) + '.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 
+/* ---------- permissions per role (system admin) ---------- */
+// kind: 'any' = any one ticked role is enough, 'all' = every ticked role has to approve, 'step' = a request step that is skipped when nobody holds it
+const PERMS = [
+  ['المشاريع', [
+    ['proj.create', 'يضيف مشروع جديد مباشرة (بدون موافقة)'],
+    ['proj.request', 'يقترح مشروع جديد (يحتاج اعتماد)'],
+    ['proj.approve', 'يعتمد المشاريع المقترحة', 'any'],
+    ['proj.edit', 'يعدل بيانات المشروع وحالته وقيمة العقد والجدول الزمني'],
+    ['sched.approve', 'يعتمد الجدول الزمني', 'any']]],
+  ['بنود BOQ', [
+    ['boq.add', 'يضيف بند BOQ لمشروع شغال'],
+    ['boq.approve', 'يوافق على البنود المضافة', 'all'],
+    ['boq.edit', 'يعدل الكميات والأسعار وأقسام البنود'],
+    ['boq.progress', 'يحدث نسبة الإنجاز ومدة البنود (رئيس القسم ومهندس الموقع لأقسامهم فقط)']]],
+  ['طلبات المواد', [
+    ['mr.head', 'موافقة القسم على الطلب (رئيس القسم لقسمه)', 'step'],
+    ['mr.price', 'يسعّر المواد ويرفق الكوتيشن'],
+    ['mr.qs', 'مراجعة الطلب مقابل BOQ والميزانية', 'step'],
+    ['mr.final', 'الاعتماد النهائي للطلب', 'any'],
+    ['mr.po', 'يصدر أمر الشراء للمورّد']]],
+  ['بيتي كاش والأعمال الإضافية', [
+    ['pc.approve', 'يعتمد البيتي كاش', 'any'],
+    ['vo.approve', 'يعتمد الأعمال الإضافية (VO)', 'any']]],
+  ['المالية والموردين والتقارير', [
+    ['fin.view', 'يشوف المبالغ المستلمة والفواتير والمصروفات'],
+    ['fin.record', 'يسجل فواتير العملاء والمبالغ المستلمة'],
+    ['sup.view', 'يشوف سجل الموردين'],
+    ['sup.edit', 'يضيف ويعدل الموردين'],
+    ['reports.view', 'يشوف التقارير'],
+    ['ai.use', 'يستخدم الـ AI في قراءة BOQ وتوزيع البنود']]]
+];
+const PERM_ROLES = ['owner', 'gm', 'head', 'site', 'procurement', 'qs', 'finance'];
+function vPerms() {
+  if (me.role !== 'admin') return '<div class="empty">الصلاحيات لمدير النظام فقط.</div>';
+  const KN = { any: 'يكفي واحد', all: 'لازم الكل يوافقون', step: 'خطوة' };
+  let h = '<div class="head"><div class="t"><h1>الصلاحيات</h1><span class="muted">حدد لكل دور شو يقدر يسوي في البرنامج. التغيير يشتغل على طول لكل المستخدمين. مدير النظام يقدر يسوي كل شي دايماً.</span></div></div>';
+  h += '<div class="card"><p class="muted small" style="margin-top:0">• <b>يكفي واحد</b>: أي دور محدد يقدر يعتمد لحاله. • <b>لازم الكل يوافقون</b>: كل دور محدد لازم يوافق. • <b>خطوة</b>: إذا ما حددت أي دور، الخطوة تنشال من مسار الطلب.</p>';
+  PERMS.forEach(([g, list]) => {
+    h += '<h2 style="margin:18px 0 8px">' + g + '</h2><div class="tbl"><table class="perm"><thead><tr><th>الصلاحية</th>' + PERM_ROLES.map(r => '<th class="c">' + ROLES[r] + '</th>').join('') + '<th class="c">' + ROLES.admin + '</th></tr></thead><tbody>' +
+      list.map(([k, l, kind]) => { const n = (S.perms[k] || []).length;
+        return '<tr><td><b>' + l + '</b>' + (kind ? ' <span class="tag">' + KN[kind] + '</span>' : '') + (!n ? '<div class="small" style="color:var(--warn)">' + (kind === 'step' ? 'الخطوة موقفة، الطلب يتعداها' : 'ما فيه أحد غير مدير النظام') + '</div>' : '') + '</td>' +
+          PERM_ROLES.map(r => '<td class="c"><input type="checkbox" data-perm="' + k + '" data-role="' + r + '"' + ((S.perms[k] || []).includes(r) ? ' checked' : '') + ' aria-label="' + esc(l + ' - ' + ROLES[r]) + '"></td>').join('') +
+          '<td class="c"><input type="checkbox" checked disabled aria-label="مدير النظام"></td></tr>'; }).join('') + '</tbody></table></div>';
+  });
+  return h + '</div>';
+}
 function vInbox() {
   const q = myQueue();
   let h = '<div class="head"><div class="t"><h1>بانتظار إجرائي</h1><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div></div>';
@@ -1407,7 +1460,7 @@ function modal(title, body, cls) { document.getElementById('layer').innerHTML = 
 function closeModal() { document.getElementById('layer').innerHTML = ''; }
 function curProject(pid) { pid = pid || (location.hash.startsWith('#p-') ? location.hash.slice(3) : null); return P(pid) || S.projects.find(p => !ended(p)); }
 function deptOptions(p) { const ds = p.depts.length ? p.depts : Object.keys(DEPTS); const def = ds.find(d => myDepts().includes(d)) || ds[0]; return ds.map(d => '<option value="' + d + '"' + (d === def ? ' selected' : '') + '>' + DEPTS[d] + '</option>').join(''); }
-const isProc = () => me && me.role === 'procurement';
+const isProc = () => me && me.role !== 'admin' && can('mr.price');
 function newReqForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   const pr = isProc();
@@ -1449,7 +1502,7 @@ function projStatusForm(pid) {
     '<label class="fld"><span>تفاصيل الموقع</span><input id="ps-l" value="' + esc(p.loc || '') + '"></label><label class="fld"><span>الحالة</span><select id="ps-s"><option value="active"' + (p.status === 'active' ? ' selected' : '') + '>جاري</option><option value="stopped"' + (p.status === 'stopped' ? ' selected' : '') + '>متوقف</option><option value="done"' + (p.status === 'done' ? ' selected' : '') + '>منجز (تم التسليم)</option><option value="closed"' + (p.status === 'closed' ? ' selected' : '') + '>مغلق</option></select></label>' +
     '<label class="fld"><span>سبب التوقف (إن وجد)</span><input id="ps-r" value="' + esc(p.stopReason || '') + '"></label>' +
     '<label class="fld"><span>موعد التسليم</span><input id="ps-e" type="date" value="' + p.end + '"></label>' +
-    (['gm', 'owner', 'admin'].includes(me.role) ? '<label class="fld"><span>قيمة العقد بدون الضريبة (ر.ع)</span><input id="ps-v" type="number" min="0" step="0.001" dir="ltr" value="' + (p.contractV != null ? p.contractV : '') + '" placeholder="' + (p.boq.length ? 'فاضي = مجموع BOQ ' + money(boqTotal(p)) : 'مثال: 85000') + '"><small class="muted">اتركها فاضية إذا تبي القيمة تنحسب من بنود BOQ.</small></label>' : '') +
+    (can('proj.edit') ? '<label class="fld"><span>قيمة العقد بدون الضريبة (ر.ع)</span><input id="ps-v" type="number" min="0" step="0.001" dir="ltr" value="' + (p.contractV != null ? p.contractV : '') + '" placeholder="' + (p.boq.length ? 'فاضي = مجموع BOQ ' + money(boqTotal(p)) : 'مثال: 85000') + '"><small class="muted">اتركها فاضية إذا تبي القيمة تنحسب من بنود BOQ.</small></label>' : '') +
     '<div class="actions"><button class="btn pri" type="submit">حفظ</button><button class="btn" type="button" data-act="close">إلغاء</button>' + (me.role === 'admin' ? '<span style="flex:1"></span><button class="btn bad" type="button" data-act="projDel" data-v="' + pid + '">حذف المشروع</button>' : '') + '</div></form>');
 }
 
@@ -1476,7 +1529,7 @@ const A = {
   supNew: () => supForm(null),
   supEdit: d => supForm(d.v),
   printPO: () => { document.body.classList.add('print-po'); const off = () => { document.body.classList.remove('print-po'); window.removeEventListener('afterprint', off); }; window.addEventListener('afterprint', off); window.print(); },
-  clarify: d => { const r = R(d.v); modal('طلب توضيح - ' + r.no, '<form class="f" data-form="clarify" data-v="' + r.id + '"><label class="fld"><span>من تبغى التوضيح؟</span><select id="cl-to"><option value="procurement">المشتريات (الأسعار أو المورّد أو الكوتيشن)</option>' + (r.stage === 'gm' ? '<option value="qs">مهندس الكميات QS (المراجعة مقابل BOQ والمشروع)</option>' : '') + '<option value="dept">رئيس القسم ' + esc(DEPTS[r.dept] || '') + ' (الكميات أو الحاجة للمواد)</option></select></label><label class="fld"><span>وش التوضيح المطلوب؟</span><textarea id="cl-n" required></textarea></label><span class="muted small">بعد ما يرد، يرجع الطلب لك مباشرة.</span><div class="actions"><button class="btn pri" type="submit">إرسال</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
+  clarify: d => { const r = R(d.v); modal('طلب توضيح - ' + r.no, '<form class="f" data-form="clarify" data-v="' + r.id + '"><label class="fld"><span>من تبغى التوضيح؟</span><select id="cl-to"><option value="procurement">المشتريات (الأسعار أو المورّد أو الكوتيشن)</option>' + (r.stage === 'gm' && stepOn('mr.qs') ? '<option value="qs">مهندس الكميات QS (المراجعة مقابل BOQ والمشروع)</option>' : '') + '<option value="dept">رئيس القسم ' + esc(DEPTS[r.dept] || '') + ' (الكميات أو الحاجة للمواد)</option></select></label><label class="fld"><span>وش التوضيح المطلوب؟</span><textarea id="cl-n" required></textarea></label><span class="muted small">بعد ما يرد، يرجع الطلب لك مباشرة.</span><div class="actions"><button class="btn pri" type="submit">إرسال</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'); },
   qfile: d => modal('إرفاق ملف الكوتيشن', '<form class="f" data-form="qfile" data-v="' + d.v + '"><label class="fld"><span>ملف الكوتيشن (PDF أو صورة)</span><input id="qf-f" type="file" accept="image/*,.pdf" required></label><div class="actions"><button class="btn pri" type="submit">رفع</button><button class="btn" type="button" data-act="close">إلغاء</button></div></form>'),
   addLine: () => { document.getElementById('nr-lines').insertAdjacentHTML('beforeend', lineRow(isProc())); },
   delLine: (d, el) => { if (document.querySelectorAll('#nr-lines .line').length > 1) el.closest('.line').remove(); },
@@ -1531,6 +1584,7 @@ document.addEventListener('change', async e => {
   if (e.target.id === 'exp-p') { ui.expP = e.target.value; render(); return; }
   if (e.target.id === 'sup-q') { ui.supQ = e.target.value; render(); return; }
   const t = e.target;
+  if (t.dataset.perm) { t.disabled = true; try { await run(sb.rpc('set_role_perm', { p_perm: t.dataset.perm, p_role: t.dataset.role, p_on: t.checked }), 'انحفظت الصلاحية'); } catch (x) { t.checked = !t.checked; } t.disabled = false; refresh(); return; }
   if (t.dataset.payinv) { if (t.value) { try { await run(sb.from('client_payments').update({ invoice_id: t.value }).eq('id', t.dataset.payinv), 'انربط المبلغ بالفاتورة'); } catch (x) { } refresh(); } return; }
   if (t.dataset.prog) { try { await run(sb.rpc('set_progress', { p_item: t.dataset.prog, p_progress: Math.round(+t.value || 0) }), 'تم تحديث الإنجاز'); } catch (x) { } refresh(); return; }
   if (t.id === 'nr-p') { const p = P(t.value); document.getElementById('nr-d').innerHTML = deptOptions(p); reqBoqFill(); }
@@ -1615,6 +1669,7 @@ document.addEventListener('submit', async e => {
       let qpath = null; if (pr) { if (!fileOf('nr-qf')) return toast('ارفق ملف الكوتيشن', true); qpath = await upload(fileOf('nr-qf'), 'quotes'); if (!qpath) return; }
       const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
       await run(sb.from('request_items').insert(items.map(i => Object.assign({ request_id: r.id }, i))));
+      if (!pr && !stepOn('mr.head')) await run(sb.rpc('start_proc_request', { p_req: r.id }));
       if (pr) {
         await run(sb.rpc('start_proc_request', { p_req: r.id }));
         await run(sb.from('quotes').insert({ request_id: r.id, supplier: nsp.name, supplier_id: nsp.id, amount: Math.round(items.reduce((a, i) => a + i.qty * i.unit_price, 0) * 1000) / 1000, terms: v('nr-terms'), delivery_days: +v('nr-days') || 0, selected: true, file_path: qpath }));
@@ -1658,15 +1713,15 @@ document.addEventListener('submit', async e => {
       if (kind !== 'gov' && !n.idFile) { toast(kind === 'company' ? 'ارفق نسخة من السجل التجاري للشركة' : 'ارفق نسخة من البطاقة الشخصية للعميل', true); return; }
       const idPath = kind !== 'gov' ? await upload(n.idFile, 'clients') : null;
       if (kind !== 'gov' && !idPath) return;
-      const pr = await run(sb.from('projects').insert(Object.assign({}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: kind === 'gov' ? 'gov' : 'private', client_type: kind === 'gov' ? null : kind === 'company' ? 'company' : 'individual', client_phone: kind === 'gov' ? null : pf.cPhone || null, client_email: kind === 'gov' ? null : pf.cEmail || null, client_id_no: kind === 'private' ? pf.cId || null : null, client_id_path: idPath, client_cr: kind === 'company' ? pf.cCr || null : null, approval: isAdmin() ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
+      const pr = await run(sb.from('projects').insert(Object.assign({}, { name: pf.name, short_name: pf.short, client: pf.client || '', type: kind === 'gov' ? 'gov' : 'private', client_type: kind === 'gov' ? null : kind === 'company' ? 'company' : 'individual', client_phone: kind === 'gov' ? null : pf.cPhone || null, client_email: kind === 'gov' ? null : pf.cEmail || null, client_id_no: kind === 'private' ? pf.cId || null : null, client_id_path: idPath, client_cr: kind === 'company' ? pf.cCr || null : null, approval: can('proj.create') ? 'approved' : 'pending', requested_by: me.id, depts: pf.depts, start_date: pf.start, end_date: pf.end, governorate: pf.gov || null, wilayat: pf.wil || null, location_note: pf.loc || null })).select().single());
       const secs = n.sections.slice(); n.items.forEach(i => { if (!secs.find(x => x[0] === i.sec)) secs.push([i.sec, 'قسم ' + i.sec]); });
       if (secs.length) await run(sb.from('boq_sections').insert(secs.map((x, i) => ({ project_id: pr.id, code: x[0], name: x[1], sort: i }))));
       if (n.items.length) await run(sb.from('boq_items').insert(n.items.map((b, i) => ({ project_id: pr.id, section_code: b.sec, code: b.code, description: b.desc, qty: b.qty, unit: b.unit, rate: b.rate, total: b.total, dept: b.dept || null, start_date: b.start || null, end_date: b.end || null, sort: i }))));
       const cnt = n.items.length, dated = n.items.some(i => i.start); ui.np = null; ui.tab = dated ? 'time' : 'boq';
-      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (!isAdmin() ? '، وراح للمدير العام للموافقة' : dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
+      await loadAll(); location.hash = 'p-' + pr.id; toast('أُضيف المشروع ' + pr.code + (cnt ? ' مع ' + cnt + ' بند' : '') + (!can('proj.create') ? '، وراح لـ' + permWho('proj.approve') + ' للموافقة' : dated && !canSched() ? '، والجدول عند المدير العام للاعتماد' : ''));
     } else if (kind === 'boqadd') {
       const nw = v('ba-s') === '__new', sc = nw ? v('ba-sc') : v('ba-s');
-      await run(sb.rpc('add_boq_item', { p_project: f.dataset.v, p_section: sc, p_section_name: nw ? v('ba-sn') : null, p_code: v('ba-c'), p_desc: v('ba-d'), p_qty: +v('ba-q'), p_unit: v('ba-u'), p_rate: +v('ba-r'), p_dept: v('ba-dp') || null }), ['gm', 'owner'].includes(me.role) ? 'انضاف البند وبانتظار الموافقة الثانية' : 'انضاف البند وراح للمدير العام وصاحب الشركة للموافقة');
+      await run(sb.rpc('add_boq_item', { p_project: f.dataset.v, p_section: sc, p_section_name: nw ? v('ba-sn') : null, p_code: v('ba-c'), p_desc: v('ba-d'), p_qty: +v('ba-q'), p_unit: v('ba-u'), p_rate: +v('ba-r'), p_dept: v('ba-dp') || null }), 'انضاف البند');
       closeModal(); ui.tab = 'boq'; refresh();
     } else if (kind === 'boqNo') {
       await run(sb.rpc('decide_boq_item', { p_item: f.dataset.v, p_ok: false, p_note: v('bn-n') }), 'انرفض البند');
@@ -1711,14 +1766,14 @@ function render() {
   if (canSeeSup()) items.splice(3, 0, ['suppliers', 'الموردين', 'users', 'الموردين']);
   if (canSeeRec()) items.splice(items.findIndex(x => x[0] === 'petty'), 0, ['receipts', 'المبالغ المستلمة', 'cash', 'المستلم']);
   if (canReports()) items.splice(items.findIndex(x => x[0] === 'inbox'), 0, ['reports', 'التقارير', 'rep', 'التقارير']);
-  if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
+  if (me.role === 'admin') items.push(['users', 'المستخدمين', 'users', 'المستخدمين'], ['perms', 'الصلاحيات', 'users', 'الصلاحيات'], ['log', 'سجل النشاط', 'inbox', 'السجل']);
   const pendUsers = me.role === 'admin' ? S.profiles.filter(u => u.role === 'pending').length : 0;
   const badge = k => k === 'inbox' && q.n ? '<span class="badge">' + q.n + '</span>' : k === 'users' && pendUsers ? '<span class="badge">' + pendUsers + '</span>' : '';
   root.innerHTML = '<div class="app"><aside class="side"><div class="brand"><img src="assets/mark.png" alt="شعار كربون"><div><b>CARBON</b><span>إدارة المشاريع</span></div></div><nav class="nav">' +
     items.map(([k, l, i]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + l + badge(k) + '</a>').join('') +
     '</nav><div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="rolebox" style="margin-top:0"><div class="me"><b>' + esc(me.full_name) + '</b><span class="muted">' + ROLES[me.role] + (myDepts().length ? ' · ' + deptNames() : '') + '</span></div><button type="button" data-act="logout">تسجيل خروج</button></div></aside>' +
     '<main><div class="wrap"><div class="mrole"><img src="assets/mark.png" alt=""><span class="small"><b>' + esc(me.full_name) + '</b> · ' + ROLES[me.role] + '</span><span style="flex:1"></span><button class="linkbtn small" data-act="logout">خروج</button></div>' + greet() + views() + '</div></main>' +
-    '<nav class="bnav">' + items.filter(x => x[0] !== 'users').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
+    '<nav class="bnav">' + items.filter(x => x[0] !== 'users' && x[0] !== 'perms').map(([k, l, i, s]) => '<a href="#' + k + '" class="' + (sec === k ? 'on' : '') + '">' + ico(i) + '<span>' + s + '</span>' + badge(k) + '</a>').join('') + '</nav></div>';
   mount3d();
 }
 
