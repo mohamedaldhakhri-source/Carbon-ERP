@@ -1637,5 +1637,22 @@ window.EN = {
 "١": "1",
 "٢": "2",
 "٣": "3",
-"٤": "4"
+"٤": "4",
+"موافقة وإرسال": "Approve and send",
+"بعد موافقتك يكمل الطلب للخطوة اللي بعدها.": "After your approval the request moves to the next step.",
+"بعد موافقتك يروح للاعتماد النهائي.": "After your approval it goes for final approval.",
+"البند يروح للموافقة، وبعد ما ينوافق عليه يظهر في المشروع ويدخل في القيمة والإنجاز.": "The item goes for approval, and once approved it shows in the project and counts in the value and progress.",
+"تم اعتماد الشراء.": "The purchase was approved.",
+"مشاريع بانتظار الموافقة": "Projects awaiting approval",
+"تم رفض هذا المشروع": "This project was rejected",
+"مصروفات سريعة تحتاج موافقة وتُحسب على المشروع": "Quick expenses that need approval and count on the project",
+"الاعتماد: ____________________": "Approval: ____________________",
+"، والجدول بانتظار الاعتماد": ", and the schedule is awaiting approval",
+"الاعتماد النهائي": "Final approval",
+"وبانتظار الموافقة.": "and awaiting approval.",
+"ويظهر في المشروع بعد الموافقة عليه.": "and it shows in the project once approved.",
+"لين تنوافق.": "until approved.",
+"وبعدها ينعتمد ويُضاف": "then it is approved and added",
+"تمت الموافقة على طلبك.": "Your request was approved.",
+"البند ينضاف للمشروع بعد الموافقة عليه.": "The item is added to the project once approved."
 };
