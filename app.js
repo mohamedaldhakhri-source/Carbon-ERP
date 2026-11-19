@@ -260,7 +260,7 @@ async function loadAll() {
   S.projects = allP.filter(p => p.approval === 'approved');
   S.pending = allP.filter(p => p.approval !== 'approved' && (can('proj.approve') || p.reqBy === me.id));
   S.requests = reqs.map(r => ({
-    id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
+    id: r.id, no: r.no, pid: r.project_id, boqId: r.boq_item_id, boq: r.boq_item_id ? codeOf[r.boq_item_id] : null, clientOk: r.client_ok_path || null, dept: r.dept, byId: r.requested_by, by: nameOf(r.requested_by),
     date: r.created_at, need: r.need_by, note: r.note, stage: r.stage, clarify: r.clarify, clarifyBy: r.clarify_by || 'gm', po: r.po_no ? { no: r.po_no, date: r.po_date } : null,
     items: ritems.filter(i => i.request_id === r.id).map(i => ({ id: i.id, d: i.description, q: +i.qty, u: i.unit, pr: i.unit_price == null ? null : +i.unit_price })),
     quotes: quotes.filter(x => x.request_id === r.id).map(x => ({ id: x.id, sup: x.supplier, amt: +x.amount, terms: x.terms, days: x.delivery_days, sel: x.selected, file: x.file_path, supId: x.supplier_id })),
@@ -455,7 +455,7 @@ function vRequest(id) {
   if (!(r.stage === 'procurement' && canActOn(r))) h += '<div class="card"><h2>المواد المطلوبة</h2><div class="tbl"><table><thead><tr><th>#</th><th>الوصف</th><th class="n">الكمية</th><th>الوحدة</th>' + (priced ? '<th class="n">سعر الوحدة</th><th class="n">الإجمالي</th>' : '') + '</tr></thead><tbody>' + r.items.map((it, i) => '<tr><td class="num">' + (i + 1) + '</td><td>' + esc(it.d) + '</td><td class="n">' + it.q + '</td><td>' + esc(it.u) + '</td>' + (priced ? '<td class="n">' + (it.pr != null ? money(it.pr) : '—') + '</td><td class="n">' + (it.pr != null ? money(it.pr * it.q) : '—') + '</td>' : '') + '</tr>').join('') + (priced ? '<tr class="sec"><td></td><td>إجمالي المواد</td><td></td><td></td><td></td><td class="n">' + money(itot) + '</td></tr>' : '') + '</tbody></table></div>' + (r.note ? '<p class="muted small" style="margin:10px 0 0">ملاحظة: ' + esc(r.note) + '</p>' : '') + '</div>';
   if (r.quotes.length && !(r.stage === 'procurement' && canActOn(r))) h += '<div class="card"><h2>عروض الأسعار</h2>' + quotesTable(r, false) + '</div>';
   if (r.po) h += poDoc(r, p);
-  h += '</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a></dd><dt>بند BOQ</dt><dd>' + (bi ? esc(bi.c + ' ' + bi.d) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</dd><dt>القسم</dt><dd>' + DEPTS[r.dept] + '</dd><dt>مقدم الطلب</dt><dd>' + esc(r.by) + '</dd><dt>تاريخ الطلب</dt><dd>' + fd(r.date) + '</dd><dt>مطلوب قبل</dt><dd>' + fd(r.need) + '</dd></dl></div>' +
+  h += '</div><div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card"><h2>تفاصيل الطلب</h2><dl class="dl"><dt>المشروع</dt><dd><a href="#p-' + p.id + '">' + esc(pName(p)) + '</a></dd><dt>بند BOQ</dt><dd>' + (bi ? esc(bi.c + ' ' + bi.d) : '<span style="color:var(--warn)">خارج BOQ</span>') + '</dd>' + (r.boqId || r.clientOk ? '<dt>موافقة العميل</dt><dd>' + (r.clientOk ? fileLink(r.clientOk, 'عرض موافقة العميل') : '<span class="muted">ما انرفقت (طلب قديم)</span>') + '</dd>' : '') + '<dt>القسم</dt><dd>' + DEPTS[r.dept] + '</dd><dt>مقدم الطلب</dt><dd>' + esc(r.by) + '</dd><dt>تاريخ الطلب</dt><dd>' + fd(r.date) + '</dd><dt>مطلوب قبل</dt><dd>' + fd(r.need) + '</dd></dl></div>' +
     '<div class="card"><h2>سجل الإجراءات</h2><ul class="log">' + r.hist.map(x => '<li class="' + (/رفض/.test(x.a) ? 'r' : '') + '"><div><b>' + esc(x.a) + '</b><div class="muted small">' + esc(x.by) + ' · ' + ftime(x.t) + '</div>' + (x.note ? '<div class="small">' + esc(x.note) + '</div>' : '') + '</div></li>').join('') + '</ul></div></div></div>';
   return h;
 }
@@ -1537,7 +1537,7 @@ function newReqForm(pid) {
   const p = curProject(pid); if (!p) return toast('لا توجد مشاريع جارية', true);
   const pr = isProc();
   modal('طلب مواد جديد', '<form class="f" data-form="req"><div class="fr"><label class="fld"><span>المشروع</span><select id="nr-p">' + projOptions(p.id) + '</select></label><label class="fld"><span>القسم</span><select id="nr-d">' + deptOptions(p) + '</select></label></div>' +
-    '<label class="fld"><span>بند BOQ (بنود القسم المختار)</span><select id="nr-b"></select></label>' +
+    '<div class="fr"><label class="fld"><span>بند BOQ (بنود القسم المختار)</span><select id="nr-b"></select></label><label class="fld" id="nr-okw"><span>موافقة العميل على المادة (إلزامي لبنود BOQ)</span><input id="nr-ok" type="file" accept="image/*,.pdf"></label></div>' +
     '<div class="fld"><span>المواد المطلوبة</span><div class="line lh small muted' + (pr ? ' pr' : '') + '"><span>اسم المادة</span><span>الكمية</span>' + (pr ? '<span>سعر الوحدة (ر.ع)</span><span>الإجمالي</span>' : '') + '<span></span></div><div class="lines" id="nr-lines">' + lineRow(pr) + '</div><div><button type="button" class="btn sm" data-act="addLine">+ مادة أخرى</button></div></div>' +
     (pr ? '<div class="sub-card"><b>عرض المورّد (الكوتيشن)</b><div class="fr"><label class="fld"><span>المورّد (من قائمة الموردين)</span><select id="nr-sup" required>' + supOptions() + '</select></label><label class="fld"><span>طريقة الدفع</span><select id="nr-terms"><option value="credit30">آجل 30 يوم (كردت)</option><option value="advance">دفعة مقدّمة</option></select></label></div><div class="fr"><label class="fld"><span>مدة التوريد (يوم)</span><input id="nr-days" type="number" min="0" value="3"></label><label class="fld"><span>ملف الكوتيشن (PDF أو صورة، إلزامي)</span><input id="nr-qf" type="file" accept="image/*,.pdf" required></label></div><div class="qtot"><span>إجمالي العرض</span><b class="num" id="nr-tot">0.000 ر.ع</b></div></div>' : '') +
     '<div class="fr"><label class="fld"><span>مطلوب قبل</span><input id="nr-need" type="date" value="' + iso(new Date(today.getTime() + 5 * 864e5)) + '"></label><label class="fld"><span>ملاحظة</span><input id="nr-note" placeholder="مثال: للطابق الأرضي"></label></div>' +
@@ -1739,8 +1739,10 @@ document.addEventListener('submit', async e => {
       const items = [...f.querySelectorAll('#nr-lines .line')].map(l => Object.assign({ description: l.querySelector('.l-d').value.trim(), qty: +l.querySelector('.l-q').value, unit: '' }, pr ? { unit_price: +l.querySelector('.l-p').value } : {})).filter(i => i.description);
       if (!items.length) return toast('اكتب مادة وحدة على الأقل', true);
       const nsp = pr ? SUP(v('nr-sup')) : null; if (pr && !nsp) return toast('اختر المورّد من القائمة', true);
+      if (v('nr-b') && !fileOf('nr-ok')) { toast('ارفق موافقة العميل على المادة، لأن الطلب ضمن بند BOQ', true); const e = document.getElementById('nr-ok'); if (e) e.focus(); return; }
+      const okPath = v('nr-b') ? await upload(fileOf('nr-ok'), 'client-ok') : null; if (v('nr-b') && !okPath) return;
       let qpath = null; if (pr) { if (!fileOf('nr-qf')) return toast('ارفق ملف الكوتيشن', true); qpath = await upload(fileOf('nr-qf'), 'quotes'); if (!qpath) return; }
-      const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
+      const r = await run(sb.from('material_requests').insert({ project_id: v('nr-p'), boq_item_id: v('nr-b') || null, client_ok_path: okPath, dept: v('nr-d'), need_by: v('nr-need') || null, note: v('nr-note') || null, requested_by: me.id }).select().single());
       await run(sb.from('request_items').insert(items.map(i => Object.assign({ request_id: r.id }, i))));
       if (!pr && !stepOn('mr.head')) await run(sb.rpc('start_proc_request', { p_req: r.id }));
       if (pr) {
@@ -1748,7 +1750,7 @@ document.addEventListener('submit', async e => {
         await run(sb.from('quotes').insert({ request_id: r.id, supplier: nsp.name, supplier_id: nsp.id, amount: Math.round(items.reduce((a, i) => a + i.qty * i.unit_price, 0) * 1000) / 1000, terms: v('nr-terms'), delivery_days: +v('nr-days') || 0, selected: true, file_path: qpath }));
         await run(sb.rpc('advance_request', { p_req: r.id, p_note: null }));
       }
-      closeModal(); await loadAll(); location.hash = 'r-' + r.id; render(); toast('أُرسل الطلب ' + r.no + (pr ? ' لمهندس الكميات (QS)' : ' لرئيس القسم'));
+      closeModal(); await loadAll(); location.hash = 'r-' + r.id; render(); toast('أُرسل الطلب ' + r.no + ' للموافقة');
     } else if (kind === 'quote') {
       const rid = f.dataset.v; const r = R(rid); const amt = +v('q-amt');
       if (!fileOf('q-f')) return toast('ارفق ملف الكوتيشن', true);

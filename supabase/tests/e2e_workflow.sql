@@ -100,7 +100,8 @@ select public.t_ok('ويرجعه جاري', $$update public.projects set status=
 -- ===== 3. material request: full path =====
 select public.t_s('3 طلب المواد (المسار الكامل)');
 select public.t_as('site');
-select public.t_ok('مهندس الموقع يسوي طلب مواد', $$insert into public.material_requests(project_id,boq_item_id,dept,requested_by,need_by,note) select p.id,b.id,'contracting',public.t_id('site'),'2026-11-20','للقواعد' from public.projects p join public.boq_items b on b.project_id=p.id and b.code='1.1' where p.name='فيلا تجريبية'$$);
+select public.t_no('طلب ضمن بند BOQ بدون موافقة العميل يُرفض', $$insert into public.material_requests(project_id,boq_item_id,dept,requested_by,need_by,note) select p.id,b.id,'contracting',public.t_id('site'),'2026-11-20','للقواعد' from public.projects p join public.boq_items b on b.project_id=p.id and b.code='1.1' where p.name='فيلا تجريبية'$$);
+select public.t_ok('مهندس الموقع يسوي طلب مواد', $$insert into public.material_requests(project_id,boq_item_id,client_ok_path,dept,requested_by,need_by,note) select p.id,b.id,'client-ok/t.pdf','contracting',public.t_id('site'),'2026-11-20','للقواعد' from public.projects p join public.boq_items b on b.project_id=p.id and b.code='1.1' where p.name='فيلا تجريبية'$$);
 select public.t_ok('ويضيف المواد', $$insert into public.request_items(request_id,description,qty) select id,d,q from public.material_requests, (values ('اسمنت',50),('حديد 16مم',2)) v(d,q) where note='للقواعد'$$);
 select public.t_eq('رقم الطلب بالترقيم الجديد', $$select (no ~ '^CEC-MR-')::text from public.material_requests where note='للقواعد'$$, 'true');
 select public.t_no('مهندس الموقع ما يقدر يعتمد طلبه', $$select public.advance_request((select id from public.material_requests where note='للقواعد'))$$);

@@ -1654,5 +1654,16 @@ window.EN = {
 "لين تنوافق.": "until approved.",
 "وبعدها ينعتمد ويُضاف": "then it is approved and added",
 "تمت الموافقة على طلبك.": "Your request was approved.",
-"البند ينضاف للمشروع بعد الموافقة عليه.": "The item is added to the project once approved."
+"البند ينضاف للمشروع بعد الموافقة عليه.": "The item is added to the project once approved.",
+"موافقة العميل على المادة (إلزامي لبنود BOQ)": "Client approval of the material (required for BOQ items)",
+"ارفق موافقة العميل على المادة، لأن الطلب ضمن بند BOQ": "Attach the client's approval of the material, as the request is within a BOQ item",
+"عرض موافقة العميل": "View client approval",
+"ما انرفقت (طلب قديم)": "Not attached (older request)",
+"أجزاء ما انقرأت (كل جزء صفحتين):": "Parts not read (two pages each):",
+"راجعها أو اقرأ الملف مرة ثانية": "check them or read the file again",
+"ما لقى الـ AI بنود في الملف": "The AI found no items in the file",
+"ما قدرت أقرأ بنود من هذا الملف": "I couldn't read items from this file",
+"الأسعار المكتوبة بخط اليد ما تنقرأ صح هنا، راجع الأرقام قبل الحفظ": "handwritten prices can't be read well here, check the figures before saving",
+"الـ AI ما اشتغل:": "the AI didn't run:",
+"ما قدرت أقرأ بنود من هذي الصورة": "I couldn't read items from this picture"
 };
