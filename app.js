@@ -1338,22 +1338,24 @@ async function pdfParts(file, per) {
   }
   return out;
 }
-async function pool(jobs, size, onDone) {
+async function pool(jobs, size, onDone, keepGoing) {
   const res = new Array(jobs.length); let next = 0, done = 0;
-  async function worker() { while (next < jobs.length) { const i = next++; try { res[i] = await jobs[i](); } catch (e) { res[i] = await jobs[i](); } onDone(++done, jobs.length); } }
+  async function worker() { while (next < jobs.length) { const i = next++; try { res[i] = await jobs[i](); } catch (e) { try { res[i] = await jobs[i](); } catch (e2) { if (!keepGoing) throw e2; res[i] = { failed: e2, part: i + 1 }; } } onDone(++done, jobs.length); } }
   await Promise.all(Array.from({ length: Math.min(size, jobs.length) }, worker));
   return res;
 }
 const quietAi = async body => { const { data, error } = await sb.functions.invoke('analyze-boq', { body }); let msg = data && data.error; if (error && !msg) { try { msg = (await error.context.json()).error; } catch (e) { msg = errMsg(error); } } if (msg) throw new Error(msg); return data; };
 async function readWithAI(bodies, progress) {
-  const parts = await pool(bodies.map((b, i) => () => quietAi(Object.assign({ mode: 'extract', part: { n: i + 1, of: bodies.length } }, b))), 4, progress);
+  const parts = await pool(bodies.map((b, i) => () => quietAi(Object.assign({ mode: 'extract', part: { n: i + 1, of: bodies.length } }, b))), 6, progress, true);
+  const bad = parts.filter(d => d && d.failed).length; if (bad === parts.length) throw parts[0].failed;
   const res = { sections: [], items: [], stated: 0, warnings: [], notes: [] };
   parts.forEach(d => {
     (d.sections || []).forEach(x => { if (!res.sections.find(y => y[0] === x.code)) res.sections.push([x.code, x.name]); });
-    (d.items || []).forEach(i => { if (!res.items.find(y => y.code === i.code)) res.items.push({ code: i.code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: i.section_code || String(i.code).split('.')[0], sub: '', dept: i.dept || null }); });
+    (d.items || []).forEach(i => { let code = String(i.code || '').trim() || String(res.items.length + 1); if (res.items.find(y => y.code === code && y.desc === i.description && y.total === (+i.total || 0))) return; for (let q = 2; res.items.find(y => y.code === code); q++) code = String(i.code) + '·' + q; res.items.push({ code, desc: i.description, qty: +i.qty || 1, unit: i.unit || '', rate: +i.rate || 0, total: +i.total || 0, sec: String(i.section_code || String(i.code).split(/[./-]/)[0]), sub: '', dept: i.dept || null }); });
     if (+d.stated_total > res.stated) res.stated = +d.stated_total;
     if (d.notes && d.notes.trim()) res.notes.push(d.notes.trim());
   });
+  const miss = parts.filter(d => d && d.failed).map(d => d.part); if (miss.length) res.notes.unshift('أجزاء ما انقرأت (كل جزء صفحتين): ' + miss.join('، ') + '. راجعها أو اقرأ الملف مرة ثانية');
   res.notes = res.notes.join(' · ');
   return res;
 }
@@ -1387,24 +1389,37 @@ async function npAnalyze() {
       try { res = await readPdfText(file); } catch (e) { res = null; }
       if (res) npTake(n, res, 'انقرأ من نص ملف PDF في ' + ((Date.now() - t0) / 1000).toFixed(1) + ' ثانية');
       else {
-        // Scanned PDF: read it inside the app first (free); Claude is only the fallback.
-        let rows = null;
-        try { const doc = await pdfDoc(file); busy('الملف مصوّر، جاري قراءة الصور…'); rows = await BOQOCR.readPdf(doc, (p, t) => busy('قُرئت ' + p + ' من ' + t + ' صفحات…')); } catch (e) { console.warn(e); }
-        const ocr = rows ? BOQ.parseRows(rows) : null;
-        if (ocr && ocr.items.length) { npTake(n, ocr, 'الملف مصوّر وانقرأ داخل البرنامج في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام قبل الحفظ'); toast('تمت قراءة ' + n.items.length + ' بند'); n.busy = ''; render(); return; }
-        busy('القراءة بالذكاء الاصطناعي…');
-        const bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
-        busy('القراءة بالذكاء الاصطناعي… 0 من ' + bodies.length);
-        const r = await readWithAI(bodies, (d, t) => busy('القراءة بالذكاء الاصطناعي… ' + d + ' من ' + t));
-        npTake(n, r, 'الملف مصوّر فانقرأ بالذكاء الاصطناعي في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام');
+        // Scanned PDF: the AI reads it first (it also reads prices written by hand); the app's own reader is the
+        // fallback, and the only reader for people who can't start the AI.
+        let r = null, aiErr = null;
+        if (canAi()) {
+          try {
+            busy('القراءة بالذكاء الاصطناعي…');
+            const bodies = (await pdfParts(file, 2)).map(d => ({ file: { name: file.name, mime: 'application/pdf', data: d } }));
+            busy('القراءة بالذكاء الاصطناعي… 0 من ' + bodies.length);
+            r = await readWithAI(bodies, (d, t) => busy('القراءة بالذكاء الاصطناعي… ' + d + ' من ' + t));
+            if (!r.items.length) { aiErr = new Error(r.notes || 'ما لقى الـ AI بنود في الملف'); r = null; }
+          } catch (e) { console.warn(e); aiErr = e; r = null; }
+        }
+        if (r) npTake(n, r, 'الملف مصوّر فانقرأ بالذكاء الاصطناعي في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. راجع الأرقام قبل الحفظ');
+        else {
+          let rows = null;
+          try { const doc = await pdfDoc(file); busy('الملف مصوّر، جاري قراءة الصور…'); rows = await BOQOCR.readPdf(doc, (p, t) => busy('قُرئت ' + p + ' من ' + t + ' صفحات…')); } catch (e) { console.warn(e); }
+          const ocr = rows ? BOQ.parseRows(rows) : null;
+          if (!ocr || !ocr.items.length) throw aiErr || new Error('ما قدرت أقرأ بنود من هذا الملف');
+          npTake(n, ocr, 'الملف مصوّر وانقرأ داخل البرنامج في ' + Math.round((Date.now() - t0) / 1000) + ' ثانية. الأسعار المكتوبة بخط اليد ما تنقرأ صح هنا، راجع الأرقام قبل الحفظ' + (aiErr ? ' (الـ AI ما اشتغل: ' + errMsg(aiErr) + ')' : ''));
+        }
       }
     } else if (/^image\//.test(file.type)) {
-      busy('جاري قراءة الصورة…');
-      let ocr = null; try { ocr = BOQ.parseRows(await BOQOCR.readImage(file)); } catch (e) { console.warn(e); }
-      if (ocr && ocr.items.length) { npTake(n, ocr, 'انقرأت الصورة داخل البرنامج. راجع الأرقام قبل الحفظ'); toast('تمت قراءة ' + n.items.length + ' بند'); n.busy = ''; render(); return; }
-      busy('القراءة بالذكاء الاصطناعي…');
-      const r = await readWithAI([{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }], () => {});
-      npTake(n, r, 'انقرأت الصورة بالذكاء الاصطناعي. راجع الأرقام');
+      let r = null, aiErr = null;
+      if (canAi()) { try { busy('القراءة بالذكاء الاصطناعي…'); r = await readWithAI([{ file: { name: file.name, mime: file.type, data: await fileB64(file) } }], () => {}); if (!r.items.length) r = null; } catch (e) { console.warn(e); aiErr = e; } }
+      if (r) npTake(n, r, 'انقرأت الصورة بالذكاء الاصطناعي. راجع الأرقام قبل الحفظ');
+      else {
+        busy('جاري قراءة الصورة…');
+        let ocr = null; try { ocr = BOQ.parseRows(await BOQOCR.readImage(file)); } catch (e) { console.warn(e); }
+        if (!ocr || !ocr.items.length) throw aiErr || new Error('ما قدرت أقرأ بنود من هذي الصورة');
+        npTake(n, ocr, 'انقرأت الصورة داخل البرنامج. راجع الأرقام قبل الحفظ' + (aiErr ? ' (الـ AI ما اشتغل: ' + errMsg(aiErr) + ')' : ''));
+      }
     } else throw new Error('نوع الملف غير مدعوم. ارفع Excel أو PDF أو صورة');
     toast('تمت قراءة ' + n.items.length + ' بند');
   } catch (e) { toast(errMsg(e), true); }

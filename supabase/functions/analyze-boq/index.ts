@@ -122,6 +122,9 @@ async function ask(client: Anthropic, system: string, content: Anthropic.Content
   return { data: JSON.parse(text), usage: msg.usage };
 }
 
+// A secret's name is shown to the admin only when it cannot be a pasted key or token.
+const safeName = (k: string) => (/^sk-|^[A-Za-z0-9_\-]{32,}$/.test(k) ? "(سر اسمه يشبه مفتاح، احذفه)" : k);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -137,15 +140,15 @@ Deno.serve(async (req) => {
     // Accept the key even if the secret name has a typo or stray space: any secret whose value looks like an Anthropic key.
     const env = Deno.env.toObject();
     const keyName = Object.keys(env).find((k) => k.trim().toUpperCase() === "ANTHROPIC_API_KEY" && env[k].trim()) ||
-      Object.keys(env).find((k) => env[k].trim().startsWith("sk-ant-"));
+      Object.keys(env).find((k) => env[k].trim().startsWith("sk-ant-api"));
     const apiKey = keyName ? env[keyName].trim() : "";
     if (!apiKey) {
-      // Names only, never values, so the admin can see what Supabase actually holds.
-      const names = Object.keys(env).filter((k) => !/^(SUPABASE_|DENO_|SB_|PATH$|HOME$|HOSTNAME$|LANG$|PWD$|TZ$|EDGE_|PORT$|VERIFY_JWT$|_)/.test(k));
-      console.log("analyze-boq: no Anthropic key. custom secret names:", JSON.stringify(names));
-      return json({ error: "مفتاح Claude API غير موجود في Supabase. الأسرار الموجودة: " + (names.join("، ") || "لا شي") }, 503);
+      // Names only, never values, and never a name that looks like a key pasted into the name box.
+      const names = Object.keys(env).filter((k) => !/^(SUPABASE_|DENO_|SB_|PATH$|HOME$|HOSTNAME$|LANG$|PWD$|TZ$|EDGE_|PORT$|VERIFY_JWT$|_)/.test(k)).map(safeName);
+      console.log("analyze-boq: no Anthropic key. custom secrets:", names.length);
+      return json({ error: "مفتاح الـ AI غير موجود في Supabase. الأسرار الموجودة: " + (names.join("، ") || "لا شي") }, 503);
     }
-    if (keyName !== "ANTHROPIC_API_KEY") console.log("analyze-boq: using key from secret named", JSON.stringify(keyName));
+    if (keyName !== "ANTHROPIC_API_KEY") console.log("analyze-boq: using key from secret named", JSON.stringify(safeName(keyName)));
     const client = new Anthropic({ apiKey });
 
     const body = (await req.json()) as Body;
@@ -165,8 +168,12 @@ Deno.serve(async (req) => {
       if (!content.length) return json({ error: "ارفع ملف BOQ أولاً" }, 400);
       content.push({
         type: "text",
-        text: (body.part && body.part.of > 1 ? `This is part ${body.part.n} of ${body.part.of} of a longer BOQ. Extract only what is on this part. If an item's section header is not in this part, use the item number's prefix before the first dot as section_code. ` : "") +
-          "Extract every priced line item of this Bill of Quantities, in document order, with its section, and assign each item to the one department that will deliver it. Section header rows go in sections, not items. Keep numbers exactly as printed (no rounding, no thousands separators). If a line has a total but no quantity, use qty 1. Skip subtotal, VAT and grand-total rows. Write notes in Arabic, and leave notes empty if there is nothing worth flagging.",
+        text: (body.part && body.part.of > 1 ? `This is part ${body.part.n} of ${body.part.of} of a longer BOQ. Extract only what is on this part. If an item's section header is not in this part, use the bill number from the page header, or else the item number's prefix before the first dot, as section_code. ` : "") +
+          "Extract every line item of this Bill of Quantities, in document order, with its section, and assign each item to the one department that will deliver it. Section header rows go in sections, not items. Keep numbers exactly as printed (no rounding, no thousands separators). If a line has a total but no quantity, use qty 1. Skip subtotal, collection, 'carried to summary', VAT and grand-total rows.\n" +
+          "Priced BOQs are often a printed form with the rates and amounts filled in by hand: read handwritten figures carefully. Amounts are Omani rials with three decimals (baisa) and commas as thousands separators: '15,200.000' is 15200 and '21,213.260' is 21213.26. When the amount says 'included', 'incl.' or a dash, set rate 0 and total 0 and keep the item.\n" +
+          "When the document is divided into bills (e.g. 'BILL NO: 04 MAIN BUILDING'), each bill is a section: section_code is the bill number without leading zeros ('4') and the name is the bill's title. Many BOQs letter their items A, B, C… again on every page: then make each code unique by prefixing the page reference printed at the foot of the page, e.g. '4/12-A' for item A on page 4/12 (if there is no page reference, use '<bill>-p<page>-<letter>').\n" +
+          "Pages with no items (cover pages, preambles, conditions) give no items. stated_total is the total before VAT from the general summary or final summary, when it is on this part.\n" +
+          "Write notes in Arabic, and leave notes empty if there is nothing worth flagging.",
       });
       const { data, usage } = await ask(client,
         "You read construction and fit-out BOQs for Carbon Engineering, a company in Oman.\n" + DEPT_GUIDE,
@@ -221,9 +228,9 @@ Rules:
     return json({ error: "طلب غير معروف" }, 400);
   } catch (e) {
     const err = e as { status?: number; message?: string };
-    if (err.status === 401) return json({ error: "مفتاح Claude API غير صحيح" }, 502);
+    if (err.status === 401) return json({ error: "مفتاح الـ AI غير صحيح" }, 502);
     if (err.status === 429) return json({ error: "ضغط على خدمة الذكاء الاصطناعي، حاول بعد دقيقة" }, 502);
-    if (err.status === 400 && /credit|balance/i.test(err.message || "")) return json({ error: "رصيد Claude API خلص، اشحن الرصيد من console.anthropic.com" }, 502);
+    if (err.status === 400 && /credit|balance/i.test(err.message || "")) return json({ error: "رصيد الـ AI خلص، اشحن الرصيد من console.anthropic.com" }, 502);
     console.error(e);
     return json({ error: "تعذّر التحليل: " + (err.message || String(e)).slice(0, 300) }, 500);
   }
