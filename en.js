@@ -1665,5 +1665,10 @@ window.EN = {
 "ما قدرت أقرأ بنود من هذا الملف": "I couldn't read items from this file",
 "الأسعار المكتوبة بخط اليد ما تنقرأ صح هنا، راجع الأرقام قبل الحفظ": "handwritten prices can't be read well here, check the figures before saving",
 "الـ AI ما اشتغل:": "the AI didn't run:",
-"ما قدرت أقرأ بنود من هذي الصورة": "I couldn't read items from this picture"
+"ما قدرت أقرأ بنود من هذي الصورة": "I couldn't read items from this picture",
+"يشوف الأرقام المالية: قيمة العقد وأسعار BOQ والميزانية والصرف": "Sees financial figures: contract value, BOQ prices, budget and spending",
+"المشاريع الجارية": "Running projects",
+"متوسط الإنجاز": "Average progress",
+"للمشاريع الجارية": "for running projects",
+"صدر أمر الشراء رقم": "Purchase order no."
 };
