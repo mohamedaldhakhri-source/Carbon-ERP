@@ -54,7 +54,12 @@
   function tr(s) {
     if (!s || !AR.test(s)) return s;
     let r = cache.get(s); if (r != null) return r;
-    r = s; RULES.forEach(([a, b]) => { r = r.replace(a, b); });
+    // a whole text that is in the dictionary (also when it mixes in Latin words like BOQ or VO) wins over word runs
+    const lead = s.match(/^\s*/)[0], tail = s.match(/\s*$/)[0], whole = D()[norm(s)];
+    if (whole != null) { r = lead + whole + tail; cache.set(s, r); return r; }
+    // or each part between separators ("… · …", "… - …") that is in the dictionary as a whole
+    r = s.split(/(\s[·\-–|]\s)/).map(x => { const w = /[؀-ۿ]/.test(x) && /[A-Za-z0-9]/.test(x) ? D()[norm(x)] : null; return w != null ? x.match(/^\s*/)[0] + w + x.match(/\s*$/)[0] : x; }).join('');
+    RULES.forEach(([a, b]) => { r = r.replace(a, b); });
     r = r.replace(RUN, m => piece(m)).replace(/،/g, ',').replace(/؟/g, '?').replace(/؛/g, ';')
       .replace(/\b1 (items|requests|tasks|days)\b/g, (m, u) => '1 ' + u.slice(0, -1)).replace(/\b(\d+) Running projects/g, (m, n) => n + ' running project' + (n == 1 ? '' : 's')).replace(/(\d+) (Request|Task|Item)\b/g, (m, n, u) => n + ' ' + u.toLowerCase() + (n == 1 ? '' : 's'));
     if (cache.size > 20000) cache.clear();

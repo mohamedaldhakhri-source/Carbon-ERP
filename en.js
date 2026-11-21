@@ -1673,5 +1673,17 @@ window.EN = {
 "صدر أمر الشراء رقم": "Purchase order no.",
 "قيمة المشاريع الجارية (بدون الضريبة)": "Value of running projects (excluding VAT)",
 "مع الضريبة": "with VAT",
-"حسب BOQ": "per BOQ"
+"حسب BOQ": "per BOQ",
+"تقدر تضيف بند BOQ بنفسك، ويظهر في المشروع بعد الموافقة عليه.": "You can add a BOQ item yourself; it shows in the project once approved.",
+"ما تنحسب في قيمة المشروع ولا الإنجاز لين تنوافق.": "They don't count in the project value or progress until approved.",
+"(الـ AI ما اشتغل:": "(the AI didn't run:",
+"الأعمال خارج العقد وموافقة العميل والاعتماد": "Work outside the contract, client approval and sign-off",
+"العمل الإضافي (خارج العقد) يحتاج مرفق موافقة الوزارة أو العميل، وبعدها ينعتمد ويُضاف لقيمة المشروع وميزانيته.": "Extra work (outside the contract) needs the ministry's or client's approval attached; then it is approved and added to the project value and budget.",
+"تمت الموافقة على طلبك. ارفق فاتورة الشراء حتى يتقفل الطلب وما يبقى عليك شي.": "Your request was approved. Attach the purchase invoice so the request is closed and nothing is left on you.",
+"ر.ع زيادة": "OMR over",
+"ر.ع من قيمة": "OMR of the value of",
+"راجع المواد والكميات والأسعار مقابل بند BOQ وميزانية المشروع والكوتيشن. بعد موافقتك يروح للاعتماد النهائي.": "Review the materials, quantities and prices against the BOQ item, the project budget and the quotation. After your approval it goes for final approval.",
+"راجع المواد والكميات. بعد موافقتك يكمل الطلب للخطوة اللي بعدها.": "Review the materials and quantities. After your approval the request moves to the next step.",
+"مسودة بانتظار مراجعة والاعتماد": "Draft awaiting review and approval",
+"وبانتظار الموافقة. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.": "and awaiting approval. Not visible to other staff, and no requests can be made on it until it is approved."
 };
