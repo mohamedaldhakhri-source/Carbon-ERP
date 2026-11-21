@@ -2,8 +2,9 @@
 // (text, placeholders, tooltips) is swapped for its English from en.js as it is added, and the page turns left-to-right.
 // What people typed themselves (project names, descriptions) has no entry and stays as written.
 (function () {
-  let lang = 'ar';
-  try { lang = localStorage.getItem('lang') === 'en' ? 'en' : 'ar'; } catch (e) { }
+  // English unless this person picked Arabic (Mohamed 2026-11-21: the site opens in English)
+  let lang = 'en';
+  try { lang = localStorage.getItem('lang') === 'ar' ? 'ar' : 'en'; } catch (e) { }
   window.LANG = lang;
   window.setLang = l => { try { localStorage.setItem('lang', l); } catch (e) { } location.reload(); };
   document.documentElement.lang = lang;
