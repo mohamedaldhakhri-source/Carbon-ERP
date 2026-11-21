@@ -1685,5 +1685,7 @@ window.EN = {
 "راجع المواد والكميات والأسعار مقابل بند BOQ وميزانية المشروع والكوتيشن. بعد موافقتك يروح للاعتماد النهائي.": "Review the materials, quantities and prices against the BOQ item, the project budget and the quotation. After your approval it goes for final approval.",
 "راجع المواد والكميات. بعد موافقتك يكمل الطلب للخطوة اللي بعدها.": "Review the materials and quantities. After your approval the request moves to the next step.",
 "مسودة بانتظار مراجعة والاعتماد": "Draft awaiting review and approval",
-"وبانتظار الموافقة. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.": "and awaiting approval. Not visible to other staff, and no requests can be made on it until it is approved."
+"وبانتظار الموافقة. ما يظهر لباقي الموظفين ولا ينفع عليه طلبات لين يتعتمد.": "and awaiting approval. Not visible to other staff, and no requests can be made on it until it is approved.",
+"اكتب اسم المشروع والاسم المختصر": "Write the project name and short name",
+"اكتب اسم الجهة": "Write the entity name"
 };
