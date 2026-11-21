@@ -1670,5 +1670,8 @@ window.EN = {
 "المشاريع الجارية": "Running projects",
 "متوسط الإنجاز": "Average progress",
 "للمشاريع الجارية": "for running projects",
-"صدر أمر الشراء رقم": "Purchase order no."
+"صدر أمر الشراء رقم": "Purchase order no.",
+"قيمة المشاريع الجارية (بدون الضريبة)": "Value of running projects (excluding VAT)",
+"مع الضريبة": "with VAT",
+"حسب BOQ": "per BOQ"
 };

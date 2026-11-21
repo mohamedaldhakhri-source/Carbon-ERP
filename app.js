@@ -319,7 +319,7 @@ const segFilter = () => '<div class="seg" role="group" aria-label="نوع الم
 function vDash() {
   const all = S.projects.filter(p => ui.filter === 'all' || p.kind === ui.filter);
   const active = all.filter(p => p.status === 'active');
-  const val = active.reduce((a, p) => a + budget(p), 0), sp = active.reduce((a, p) => a + spent(p), 0);
+  const val = active.reduce((a, p) => a + budget(p), 0), sp = active.reduce((a, p) => a + spent(p), 0), valV = active.reduce((a, p) => a + budget(p) * (1 + (+p.vat || 0) / 100), 0);
   const hs = all.map(p => ({ p, h: health(p) }));
   const attn = hs.filter(x => x.h.k === 'late' || x.h.k === 'risk');
   const cnt = k => hs.filter(x => x.h.k === k).length;
@@ -327,7 +327,7 @@ function vDash() {
   let h = '<div class="head"><div class="t"><h1>لوحة متابعة المشاريع</h1><span class="muted">اليوم ' + fd(iso(today)) + '</span></div><div class="actions">' + segFilter() + (canNewProject() ? '<a class="btn pri" href="#new-project">+ مشروع جديد</a>' : '') + '</div></div>';
   if (!S.projects.length) return h + '<div class="card empty">لا توجد مشاريع بعد.' + (isAdmin() ? ' ابدأ بإضافة مشروع جديد ولصق جدول الكميات من Excel.' : '') + '</div>';
   h += '<div class="kpis">' +
-    (canMoney() ? '<div class="kpi"><span class="l">قيمة المشاريع الجارية</span><span class="v">' + money(val) + ' <small>ر.ع</small></span><span class="s">' + active.length + ' مشاريع جارية، شاملة الأعمال الإضافية</span></div>' +
+    (canMoney() ? '<div class="kpi"><span class="l">قيمة المشاريع الجارية (بدون الضريبة)</span><span class="v">' + money(val) + ' <small>ر.ع</small></span><span class="s">مع الضريبة <b class="num">' + money(valV) + '</b> ر.ع · ' + active.length + ' مشاريع جارية، شاملة الأعمال الإضافية</span></div>' +
     '<div class="kpi"><span class="l">المصروف حتى الآن</span><span class="v">' + money(sp) + ' <small>ر.ع</small></span><span class="s">' + (val ? Math.round(sp / val * 100) : 0) + '% من قيمة المشاريع الجارية</span></div>'
     : '<div class="kpi"><span class="l">المشاريع الجارية</span><span class="v">' + active.length + '</span><span class="s">من ' + all.length + ' مشروع</span></div>' +
     '<div class="kpi"><span class="l">متوسط الإنجاز</span><span class="v">' + (active.length ? Math.round(active.reduce((a, p) => a + progress(p), 0) / active.length) : 0) + '%</span><span class="s">للمشاريع الجارية</span></div>') +
@@ -378,7 +378,7 @@ function vProject(id) {
   const rs = canFinance() ? recStats(p) : null;
   const cm$ = canMoney();
   h += '<div class="kpis ' + (!cm$ ? 'k2' : rs ? 'k6' : 'k5') + '">' + (!cm$ ? '' :
-    '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">' + (p.contractV != null ? 'حسب العقد' + (p.boq.length && Math.abs(boqTotal(p) - c) > 0.5 ? ' · مجموع BOQ ' + money(boqTotal(p)) : '') : 'القيمة الأصلية حسب BOQ') + '</span></div>' +
+    '<div class="kpi"><span class="l">قيمة العقد (بدون الضريبة)</span><span class="v">' + money(c) + ' <small>ر.ع</small></span><span class="s">مع الضريبة ' + (+p.vat || 0) + '%: <b class="num">' + money(c * (1 + (+p.vat || 0) / 100)) + '</b> ر.ع · ' + (p.contractV != null ? 'حسب العقد' + (p.boq.length && Math.abs(boqTotal(p) - c) > 0.5 ? ' · مجموع BOQ ' + money(boqTotal(p)) : '') : 'حسب BOQ') + '</span></div>' +
     '<div class="kpi vo"><span class="l">Variation Orders (VO) المعتمدة</span><span class="v">' + money(va) + ' <small>ر.ع</small></span><span class="s">' + voSub(p) + '</span></div>' +
     '<div class="kpi"><span class="l">المصروف</span><span class="v">' + money(s) + ' <small>ر.ع</small></span><span class="s">' + Math.round(s / b * 100) + '% من القيمة، وملتزم به ' + money(cm) + '</span></div>') +
     (rs ? '<button type="button" class="kpi kbtn" data-act="tab" data-v="rec" title="تفاصيل المبالغ المستلمة"><span class="l">المستلم من العميل</span><span class="v">' + money(rs.received) + ' <small>ر.ع</small></span><span class="s">' + (rs.value > 0 ? Math.round(rs.received / rs.value * 100) + '% من القيمة' : 'آخر مبلغ ' + fd(rs.last)) + (rs.due > 0.0005 ? ' · باقي من الفواتير ' + money(rs.due) : '') + '</span></button>' : '') +
