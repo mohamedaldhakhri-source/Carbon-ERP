@@ -1088,7 +1088,9 @@ function gantt(p, rows) {
   const months = []; for (const m = new Date(a); m <= z; m.setMonth(m.getMonth() + 1)) { const nx = new Date(m.getFullYear(), m.getMonth() + 1, 1); months.push({ x: (m - a) / span * 100, w: (Math.min(nx, new Date(z.getTime() + 864e5)) - m) / span * 100, l: m.toLocaleDateString(window.LANG === 'en' ? 'en-GB' : 'ar', { month: 'short' }) + ' ' + String(m.getFullYear()).slice(2) }); }
   const grid = months.map(m => '<i style="inset-inline-start:' + m.x.toFixed(2) + '%"></i>').join('') + (nowPos >= 0 && nowPos <= 100 ? '<b class="gnow" style="inset-inline-start:' + nowPos.toFixed(2) + '%"></b>' : '');
   const col = ui.gcol || {};
-  let h = '<div class="gx"><div class="g2"><div class="g2h"><div class="g2l"><span>البند</span><span class="n">المدة</span><span>من - إلى</span></div><div class="g2c">' + months.map(m => '<span style="inset-inline-start:' + m.x.toFixed(2) + '%;width:' + m.w.toFixed(2) + '%">' + m.l + '</span>').join('') + '</div></div>';
+  const used = [...new Set(rows.filter(r => r.dept).map(r => r.dept))];
+  const legend = '<div class="glg small muted" style="margin:0 0 10px">' + used.map(d => '<span><i style="background:' + DCOL[d] + '"></i>' + DEPTS[d] + '</span>').join('') + '<span><i class="late"></i>متأخر</span><span><i class="nw"></i>اليوم</span><span>الجزء الغامق داخل الشريط = نسبة الإنجاز</span></div>';
+  let h = legend + '<div class="gx"><div class="g2"><div class="g2h"><div class="g2l"><span>البند</span><span class="n">المدة</span><span>من - إلى</span></div><div class="g2c">' + months.map(m => '<span style="inset-inline-start:' + m.x.toFixed(2) + '%;width:' + m.w.toFixed(2) + '%">' + m.l + '</span>').join('') + '</div></div>';
   let hide = false;
   rows.forEach(r => {
     if (r.ph) hide = !!col[r.sc];
@@ -1099,8 +1101,6 @@ function gantt(p, rows) {
     h += '<div class="g2r' + (r.ph ? ' ph' : '') + (late ? ' late' : '') + '"' + (r.ph ? ' data-act="gcol" data-v="' + esc(r.sc) + '" role="button" tabindex="0" aria-expanded="' + !col[r.sc] + '"' : '') + '><div class="g2l"><span class="nm" title="' + esc(r.t || r.n) + '">' + (r.ph ? '<i class="tw">' + (col[r.sc] ? '◂' : '▾') + '</i>' : '') + (r.c ? '<b class="num">' + esc(r.c) + '</b> ' : '') + esc(r.n) + (!r.ph && r.dept ? ' <span class="dot" style="background:' + DCOL[r.dept] + '" title="' + DEPTS[r.dept] + '"></span>' : '') + '</span><span class="n num">' + (durOf(r.s, r.e) !== '' ? durOf(r.s, r.e) + ' ي' : '—') + '</span><span class="small muted num">' + (r.s ? fd(r.s).slice(0, 5) + ' - ' + fd(r.e).slice(0, 5) : '') + '</span></div><div class="g2c">' + grid + bar + '</div></div>';
   });
   h += '</div></div>';
-  const used = [...new Set(rows.filter(r => r.dept).map(r => r.dept))];
-  h += '<div class="glg small muted">' + used.map(d => '<span><i style="background:' + DCOL[d] + '"></i>' + DEPTS[d] + '</span>').join('') + '<span><i class="late"></i>متأخر</span><span><i class="nw"></i>اليوم</span><span>الجزء الغامق داخل الشريط = نسبة الإنجاز</span></div>';
   if (nowPos > 100) h += '<p class="muted small">تاريخ اليوم بعد نهاية الخطة الزمنية (' + fd(p.end) + '). حدّث موعد التسليم من "بيانات وحالة المشروع" إذا تم الاتفاق على تمديد.</p>';
   return h;
 }
